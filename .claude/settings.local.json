@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx hardhat *)",
+      "Bash(node hm-cron.js)",
+      "Bash(SEEDS_FILE=\"deployments/seeds/somniaTestnet-1778649488075.json\" npx hardhat run scripts/reveal-bot.js --network somniaTestnet)",
+      "Bash(node index.js)",
+      "Bash(tasklist)",
+      "Bash(npx serve *)",
+      "Bash(curl -s -o /tmp/sl.html -w \"%{http_code}\\\\n\" \"http://localhost:8080/SomniaLuck.html\")",
+      "Bash(curl -sI \"http://localhost:8080/\")",
+      "Bash(curl -sI \"http://localhost:8080/SomniaLuck.html\")",
+      "Bash(curl -sI \"http://localhost:8080/account.html?address=0x68272BC85869F2794E0ae6cE482D61bF043d4668\")",
+      "Bash(curl -s \"http://localhost:8080/\")",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /F /PID 29924)",
+      "Bash(taskkill /F /PID 26500)",
+      "Bash(npx http-server *)",
+      "Bash(curl -sI \"http://localhost:8080/games/dice.html\")",
+      "Bash(AMOUNT_STT=5 npx hardhat run scripts/fund-bankroll.js --network somniaTestnet)",
+      "Bash(node -e ' *)",
+      "Bash(curl -s \"http://localhost:8080/lib/ui.js\")",
+      "Bash(curl -s \"http://localhost:8080/account.html\")"
+    ]
+  }
+}

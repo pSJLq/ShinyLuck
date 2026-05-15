@@ -1,0 +1,29 @@
+{
+  "name": "shinyluck",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ShinyLuck — agent-native casino on Somnia",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:gas": "REPORT_GAS=true hardhat test",
+    "coverage": "hardhat coverage",
+    "node": "hardhat node",
+    "clean": "hardhat clean",
+    "deploy:testnet": "hardhat run scripts/deploy.js --network somniaTestnet",
+    "deploy:mainnet": "hardhat run scripts/deploy.js --network somniaMainnet",
+    "verify:testnet": "hardhat verify --network somniaTestnet",
+    "verify:mainnet": "hardhat verify --network somniaMainnet"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.10",
+    "dotenv": "^16.4.5"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

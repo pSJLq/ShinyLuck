@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Account · ShinyLuck</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="partials.js" defer></script>
+<script type="module" src="lib/wallet.js"></script>
+<script type="module" src="lib/livedata.js"></script>
+<script type="module" src="lib/account.js"></script>
+<style>
+  .acc-page { padding: 56px 32px 96px; max-width: 1360px; margin: 0 auto; }
+  .acc-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; margin-bottom: 40px; flex-wrap: wrap; }
+  .acc-id { display: flex; gap: 20px; align-items: center; }
+  .acc-avatar { width: 72px; height: 72px; border-radius: 50%; background: conic-gradient(from 90deg, #8B5CF6, #22D3EE, #a78bfa, #8B5CF6); position: relative; }
+  .acc-avatar::after { content:""; position:absolute; inset:3px; border-radius:50%; background:#0a0a0c; }
+  .acc-avatar::before { content:"L"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--cyan); font-family:var(--mono); font-size:30px; z-index:1; }
+  .acc-id h1 { font-size: 36px; margin: 0 0 4px; font-weight: 500; letter-spacing: -1px; }
+  .acc-id .addr { color: var(--fg-mute); font-size: 12px; letter-spacing: 1.5px; }
+  .acc-id .addr b { color: var(--cyan); font-weight: 400; }
+  .acc-id .readonly-pill { display:inline-block; margin-left:10px; padding: 2px 8px; border: 1px solid var(--amber); color: var(--amber); font-family: var(--mono); font-size: 10px; letter-spacing: 1.5px; }
+  .acc-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .acc-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: start; }
+  .acc-card { background: var(--bg-1); border: 1px solid var(--line); padding: 24px; }
+  .acc-card h3 { margin: 0 0 16px; font-size: 11px; letter-spacing: 2px; color: var(--fg-mute); text-transform: uppercase; font-weight: 400; }
+  .acc-balance { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 0; border: 1px solid var(--line); }
+  .acc-balance .b { padding: 24px; border-right: 1px solid var(--line); }
+  .acc-balance .b:last-child { border-right: none; }
+  .acc-balance .l { font-size: 10px; letter-spacing: 1.5px; color: var(--fg-mute); text-transform: uppercase; }
+  .acc-balance .v { font-size: 32px; font-weight: 500; letter-spacing: -1px; margin-top: 10px; font-feature-settings: "tnum"; }
+  .acc-balance .v.cyan { color: var(--cyan); }
+  .acc-balance .v.green { color: var(--green); }
+  .acc-balance .d { margin-top: 8px; font-size: 11px; color: var(--fg-dim); }
+  .acc-chart { height: 200px; margin-top: 16px; width:100%; }
+  .acc-chart-axis { font-family: var(--mono); font-size: 9px; fill: var(--fg-mute); }
+  .acc-tabs { display: flex; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+  .acc-tab { padding: 10px 16px; font-size: 11px; letter-spacing: 1.5px; color: var(--fg-mute); text-transform: uppercase; border-bottom: 1px solid transparent; margin-bottom: -1px; cursor:pointer; }
+  .acc-tab.on { color: var(--cyan); border-bottom-color: var(--cyan); }
+  .acc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .acc-table th { text-align: left; font-weight: 400; font-size: 10px; letter-spacing: 1.5px; color: var(--fg-mute); text-transform: uppercase; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  .acc-table td { padding: 11px 12px; border-bottom: 1px solid var(--line); font-feature-settings: "tnum"; }
+  .acc-table td:last-child, .acc-table th:last-child { text-align: right; }
+  .acc-table tbody tr:hover { background: rgba(139,92,246,.04); }
+  .game-tag { font-size: 10px; padding: 2px 7px; border: 1px solid var(--line-2); letter-spacing: 1px; color: var(--purple-2); }
+  .acc-side { display: flex; flex-direction: column; gap: 20px; }
+  .acc-stat-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed var(--line-2); font-size: 13px; }
+  .acc-stat-row:last-child { border-bottom: none; }
+  .acc-stat-row .l { color: var(--fg-mute); letter-spacing: 1px; font-size: 11px; text-transform: uppercase; }
+  .acc-stat-row .v { color: var(--fg); font-feature-settings: "tnum"; }
+  .acc-stat-row .v.green { color: var(--green); }
+  .acc-stat-row .v.cyan { color: var(--cyan); }
+  .acc-fav { display: flex; gap: 8px; flex-wrap: wrap; }
+  .acc-fav .ft { padding: 6px 10px; border: 1px solid var(--line); font-size: 11px; letter-spacing: 1px; color: var(--fg-dim); }
+  .acc-fav .ft b { color: var(--cyan); font-weight: 400; margin-left: 6px; }
+  .form-row { display: flex; gap: 8px; }
+  .form-row .bet-input { flex: 1; }
+  body.read-only [data-sl-acc-claim],
+  body.read-only [data-sl-acc-copy].own-only,
+  body.read-only [data-sl-acc-send],
+  body.read-only [data-sl-acc-send-to],
+  body.read-only [data-sl-acc-send-amt],
+  body.read-only [data-sl-acc-send-msg] { display:none; }
+  @media (max-width: 900px) { .acc-grid { grid-template-columns: 1fr; } .acc-balance { grid-template-columns: 1fr; } .acc-balance .b { border-right: none; border-bottom: 1px solid var(--line); } }
+</style>
+</head>
+<body data-active-page="account">
+<div data-page-shell>
+<div data-mount="nav"></div>
+
+<div class="acc-page">
+  <div class="crumb">
+    <a href="SomniaLuck.html" data-link>ShinyLuck</a><span class="sep">/</span><span class="here" data-sl-acc-crumb>Account</span>
+  </div>
+
+  <div class="acc-head">
+    <div class="acc-id">
+      <div class="acc-avatar"></div>
+      <div>
+        <h1 data-sl-acc-addr-short>connect wallet</h1>
+        <div class="addr">address · <b data-sl-acc-addr-full>—</b><span data-sl-acc-readonly class="readonly-pill" style="display:none;">READ-ONLY</span></div>
+      </div>
+    </div>
+    <div class="acc-actions">
+      <button class="btn btn-ghost" data-hover data-sl-acc-copy>Copy address</button>
+      <a class="btn btn-ghost" data-hover data-sl-acc-explorer href="#" target="_blank" rel="noopener">View on explorer ↗</a>
+      <a class="btn btn-ghost" data-hover data-sl-acc-share href="#">Share profile</a>
+      <button class="btn btn-primary" data-hover data-wallet-btn>Connect Wallet</button>
+    </div>
+  </div>
+
+  <div class="acc-grid">
+    <div>
+      <div class="acc-card" style="padding: 0; margin-bottom: 20px;">
+        <div class="acc-balance">
+          <div class="b">
+            <div class="l">Wallet balance</div>
+            <div class="v cyan"><span data-sl-acc-balance>—</span> STT</div>
+            <div class="d">native balance on Somnia</div>
+          </div>
+          <div class="b">
+            <div class="l">Pending withdrawal</div>
+            <div class="v"><span data-sl-acc-pending>—</span> STT</div>
+            <div class="d">claimable winnings · <button data-sl-acc-claim style="background:none;border:1px solid var(--cyan);color:var(--cyan);padding:2px 8px;font-size:10px;letter-spacing:1px;cursor:pointer;">CLAIM</button></div>
+          </div>
+          <div class="b">
+            <div class="l">Net P&amp;L (window)</div>
+            <div class="v" data-sl-acc-pnl>—</div>
+            <div class="d" data-sl-acc-bets>0 bets</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="acc-card">
+        <h3>P&amp;L · last 30 days</h3>
+        <svg class="acc-chart" viewBox="0 0 800 200" preserveAspectRatio="none" data-sl-acc-chart>
+          <defs>
+            <linearGradient id="accFill" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stop-color="#22D3EE" stop-opacity=".4"/>
+              <stop offset="100%" stop-color="#22D3EE" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <g class="acc-chart-grid" stroke="#1f1f23" stroke-width="1">
+            <line x1="0" y1="50"  x2="800" y2="50"/>
+            <line x1="0" y1="100" x2="800" y2="100"/>
+            <line x1="0" y1="150" x2="800" y2="150"/>
+          </g>
+          <g data-sl-acc-chart-axis></g>
+          <path class="acc-chart-fill"  d="" fill="url(#accFill)"/>
+          <path class="acc-chart-line"  d="" fill="none" stroke="#22D3EE" stroke-width="2"/>
+          <text x="780" y="14" text-anchor="end" class="acc-chart-axis" data-sl-acc-chart-max>—</text>
+          <text x="780" y="196" text-anchor="end" class="acc-chart-axis" data-sl-acc-chart-min>—</text>
+        </svg>
+      </div>
+
+      <div class="acc-card" style="margin-top: 20px;">
+        <div class="acc-tabs">
+          <div class="acc-tab on"   data-sl-acc-tab="bets"        >Recent bets</div>
+          <div class="acc-tab"      data-sl-acc-tab="deposits"    >Deposits</div>
+          <div class="acc-tab"      data-sl-acc-tab="withdrawals" >Withdrawals</div>
+          <div class="acc-tab"      data-sl-acc-tab="receipts"    >Receipts</div>
+        </div>
+        <div data-sl-acc-tab-panel="bets">
+          <table class="acc-table">
+            <thead><tr><th>Bet ID</th><th>Game</th><th>Stake</th><th>Status</th><th>Mult</th><th>P&amp;L</th></tr></thead>
+            <tbody data-sl-acc-bets-body>
+              <tr><td class="dim" colspan="6">loading on-chain history…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div data-sl-acc-tab-panel="deposits" style="display:none;">
+          <table class="acc-table">
+            <thead><tr><th>Block</th><th>Tx</th><th>Amount</th></tr></thead>
+            <tbody data-sl-acc-deposits-body>
+              <tr><td class="dim" colspan="3">loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div data-sl-acc-tab-panel="withdrawals" style="display:none;">
+          <table class="acc-table">
+            <thead><tr><th>Block</th><th>Tx</th><th>Amount</th></tr></thead>
+            <tbody data-sl-acc-withdrawals-body>
+              <tr><td class="dim" colspan="3">loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div data-sl-acc-tab-panel="receipts" style="display:none;">
+          <table class="acc-table">
+            <thead><tr><th>Bet ID</th><th>Game</th><th>Stake</th><th>Outcome</th><th>Receipt</th></tr></thead>
+            <tbody data-sl-acc-receipts-body>
+              <tr><td class="dim" colspan="5">loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="acc-side">
+      <div class="acc-card">
+        <h3>Wallet · receive / send</h3>
+        <div style="font-size: 11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">YOUR ADDRESS</div>
+        <div style="font-size: 11px; word-break: break-all; color: var(--cyan); margin-bottom: 4px;" data-sl-acc-receive-addr>—</div>
+        <button class="adm-btn" style="border:1px solid var(--line); background:none; color:var(--cyan); padding: 4px 10px; font-size: 10px; cursor:pointer; margin-bottom: 12px;" data-sl-acc-copy-receive>copy address</button>
+        <a class="adm-btn" style="display:inline-block; border:1px solid var(--line); color:var(--fg); padding: 4px 10px; font-size: 10px; margin-left: 6px;" href="https://testnet.somnia.network/faucet" target="_blank" rel="noopener" data-sl-acc-faucet>get test STT ↗</a>
+        <div style="border-top: 1px dashed var(--line-2); margin: 14px 0;"></div>
+        <div style="font-size: 11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px;">SEND STT</div>
+        <input type="text"   placeholder="0xRecipient…"       class="sl-styled-input" style="margin-bottom: 6px;" data-sl-acc-send-to />
+        <input type="number" placeholder="amount STT" step="0.001" class="sl-styled-input" style="margin-bottom: 8px;" data-sl-acc-send-amt />
+        <button data-sl-acc-send style="
+            width: 100%; padding: 10px 14px; background: var(--cyan); color: #000;
+            border: 1px solid var(--cyan); font-family: var(--mono); font-size: 12px;
+            letter-spacing: 2px; text-transform: uppercase; font-weight: 600; cursor: pointer;
+            transition: filter 0.18s;
+          " onmouseover="this.style.filter='brightness(1.1)'" onmouseout="this.style.filter=''">SEND →</button>
+        <div data-sl-acc-send-msg style="font-size:11px; margin-top:10px; color:var(--fg-mute); letter-spacing: 0.5px;"></div>
+      </div>
+
+      <div class="acc-card">
+        <h3>Stats (window)</h3>
+        <div class="acc-stat-row"><span class="l">Bets settled</span><span class="v" data-sl-acc-stat-bets>—</span></div>
+        <div class="acc-stat-row"><span class="l">Wins</span><span class="v green" data-sl-acc-stat-wins>—</span></div>
+        <div class="acc-stat-row"><span class="l">Win rate</span><span class="v" data-sl-acc-stat-winrate>—</span></div>
+        <div class="acc-stat-row"><span class="l">Wagered</span><span class="v" data-sl-acc-stat-wagered>—</span></div>
+        <div class="acc-stat-row"><span class="l">Returned</span><span class="v" data-sl-acc-stat-returned>—</span></div>
+        <div class="acc-stat-row"><span class="l">Biggest win</span><span class="v cyan" data-sl-acc-stat-biggestwin>—</span></div>
+        <div class="acc-stat-row"><span class="l">Longest streak</span><span class="v" data-sl-acc-stat-streak>—</span></div>
+      </div>
+
+      <div class="acc-card">
+        <h3>Favourite games</h3>
+        <div class="acc-fav" data-sl-acc-fav>
+          <div class="ft" style="opacity:.4;">loading…</div>
+        </div>
+      </div>
+
+      <div class="acc-card">
+        <h3>Player-agent</h3>
+        <div class="acc-stat-row"><span class="l">Status</span><span class="v" data-sl-acc-agent-status>—</span></div>
+        <div class="acc-stat-row"><span class="l">Vault</span><span class="v cyan" data-sl-acc-agent-vault>—</span></div>
+        <div class="acc-stat-row"><span class="l">Daily / spent</span><span class="v" data-sl-acc-agent-daily>—</span></div>
+        <div style="margin-top: 12px;">
+          <a href="agent.html" data-link style="color:var(--cyan); font-size: 11px; letter-spacing: 1.5px;">manage on /agent →</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div data-mount="footer"></div>
+</div>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mines · ShinyLuck</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<script src="../partials.js" defer></script>
+<script type="module" src="../lib/wallet.js"></script>
+<script type="module" src="../lib/livedata.js"></script>
+<script type="module" src="../lib/games/mines.js"></script>
+</head>
+<body data-active-page="games">
+<div data-page-shell>
+<div data-mount="nav"></div>
+
+<div class="game-page">
+  <div class="crumb">
+    <a href="../SomniaLuck.html#games" data-link>Games</a><span class="sep">/</span><span class="here">Mines</span>
+  </div>
+
+  <div class="game-hero">
+    <div>
+      <h1>M<span class="accent">i</span>nes.</h1>
+      <p class="lede">Pick gems, dodge bombs. Cash out anytime — every safe tile compounds the multiplier. The risk is yours; the bombs are sealed.</p>
+    </div>
+    <div class="game-hero-meta">
+      <div class="m">House Edge<b class="cyan" data-sl="houseEdge" data-game="mines">1.20%</b></div>
+      <div class="m">Max Bet<b data-sl="maxBet" data-game="mines">10 STT</b></div>
+      <div class="m">Max Win<b>100×</b></div>
+      <div class="m">Bankroll<b class="cyan" data-sl="bankroll">— STT</b></div>
+    </div>
+  </div>
+
+  <div class="game-layout">
+    <div class="stage">
+      <div class="stage-head">
+        <span class="live-pill" data-sl-stage-pill><span class="dot"></span> READY</span>
+        <span class="round" data-sl-mines-status>—</span>
+      </div>
+      <div class="stage-body">
+        <div class="mines-big" id="mines-board">
+          <button class="tile" data-sl-cell data-idx="0"></button>
+          <button class="tile" data-sl-cell data-idx="1"></button>
+          <button class="tile" data-sl-cell data-idx="2"></button>
+          <button class="tile" data-sl-cell data-idx="3"></button>
+          <button class="tile" data-sl-cell data-idx="4"></button>
+          <button class="tile" data-sl-cell data-idx="5"></button>
+          <button class="tile" data-sl-cell data-idx="6"></button>
+          <button class="tile" data-sl-cell data-idx="7"></button>
+          <button class="tile" data-sl-cell data-idx="8"></button>
+          <button class="tile" data-sl-cell data-idx="9"></button>
+          <button class="tile" data-sl-cell data-idx="10"></button>
+          <button class="tile" data-sl-cell data-idx="11"></button>
+          <button class="tile" data-sl-cell data-idx="12"></button>
+          <button class="tile" data-sl-cell data-idx="13"></button>
+          <button class="tile" data-sl-cell data-idx="14"></button>
+          <button class="tile" data-sl-cell data-idx="15"></button>
+          <button class="tile" data-sl-cell data-idx="16"></button>
+          <button class="tile" data-sl-cell data-idx="17"></button>
+          <button class="tile" data-sl-cell data-idx="18"></button>
+          <button class="tile" data-sl-cell data-idx="19"></button>
+          <button class="tile" data-sl-cell data-idx="20"></button>
+          <button class="tile" data-sl-cell data-idx="21"></button>
+          <button class="tile" data-sl-cell data-idx="22"></button>
+          <button class="tile" data-sl-cell data-idx="23"></button>
+          <button class="tile" data-sl-cell data-idx="24"></button>
+        </div>
+        <div style="display:flex; gap: 32px; margin-top: 28px; font-family: var(--mono); font-size: 12px;">
+          <div><div style="color:var(--fg-mute); letter-spacing: 1.5px; font-size: 10px; text-transform: uppercase;">CURRENT MULT</div><div data-sl-mines-mult style="color: var(--cyan); font-size: 28px; margin-top: 6px;">1.00×</div></div>
+          <div><div style="color:var(--fg-mute); letter-spacing: 1.5px; font-size: 10px; text-transform: uppercase;">CELLS OPENED</div><div data-sl-mines-opened style="color: var(--purple-2); font-size: 28px; margin-top: 6px;">0</div></div>
+          <div><div style="color:var(--fg-mute); letter-spacing: 1.5px; font-size: 10px; text-transform: uppercase;">CASH OUT</div><div data-sl-mines-cashout-amount style="color: var(--green); font-size: 28px; margin-top: 6px;">—</div></div>
+        </div>
+      </div>
+      <div class="stage-foot">
+        <span>RECENT ROUNDS</span>
+        <div class="recent-mults" data-sl-mines-recent>
+          <span class="m" style="opacity:.4;">loading…</span>
+        </div>
+      </div>
+    </div>
+
+    <aside>
+      <div class="panel">
+        <h3>Place Bet</h3>
+        <div class="bet-row">
+          <label>Stake</label>
+          <div class="bet-input">
+            <input type="text" value="0.1" data-sl-stake />
+            <span class="suffix">STT</span>
+          </div>
+          <div class="preset-row">
+            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.05'">0.05</button>
+            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.1'">0.1</button>
+            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.5'">0.5</button>
+            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='1'">1</button>
+          </div>
+        </div>
+        <div class="bet-row">
+          <label>Mines · <span data-sl-minecount-display>5</span> of 25</label>
+          <input type="range" min="1" max="24" value="5" data-sl-minecount style="width:100%; margin: 8px 0;"
+            oninput="document.querySelector('[data-sl-minecount-display]').textContent=this.value" />
+          <div class="slider-marks"><span>1</span><span>5</span><span>10</span><span>20</span><span>24</span></div>
+        </div>
+        <button class="btn-bet" data-hover data-sl-place>Start round</button>
+        <button class="btn-bet cyan" style="margin-top:8px; display:none;" data-hover data-sl-cashout>Cash out</button>
+        <div class="summary">
+          <div><div class="l">Status</div><div class="v cyan" data-sl-result>idle</div></div>
+          <div><div class="l">EV <span style="opacity:.55;">(<span data-sl-ev-pct>−1.20%</span>)</span></div><div class="v" style="color:var(--red);" data-sl-ev>—</div></div>
+        </div>
+        <div data-sl-result-banner style="display:none; margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--cyan); font-family: var(--mono); font-size: 12px; letter-spacing: 1px;"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Provably fair</h3>
+        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">CLIENT SEED</div>
+        <div data-sl-fairclient style="font-size: 12px; color: var(--cyan); word-break: break-all; margin-bottom: 16px;">—</div>
+        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">BET ID / NONCE</div>
+        <div data-sl-fairnonce style="font-size: 12px; color: var(--fg); margin-bottom: 16px;">—</div>
+        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">SERVER SEED</div>
+        <div data-sl-fairserver style="font-size: 12px; color: var(--purple-2); word-break: break-all; margin-bottom: 16px;">—</div>
+        <a data-sl-explorer-link href="#" target="_blank" rel="noopener" style="display:none; font-size: 11px; letter-spacing: 1.5px; color: var(--cyan); text-transform: uppercase; margin-bottom: 8px;">verify on explorer ↗</a>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div data-mount="footer"></div>
+</div>
+</body>
+</html>

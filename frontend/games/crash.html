@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Crash · ShinyLuck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<script src="../partials.js" defer></script>
+<script type="module" src="../lib/wallet.js"></script>
+<script type="module" src="../lib/livedata.js"></script>
+<script type="module" src="../lib/games/crash.js"></script>
+</head>
+<body data-active-page="games">
+<div data-page-shell>
+<div data-mount="nav"></div>
+
+<div class="game-page">
+  <div class="crumb">
+    <a href="../SomniaLuck.html#games" data-link>Games</a>
+    <span class="sep">/</span>
+    <span class="here">Crash</span>
+    <span class="sep" style="margin-left:auto"></span>
+    <span style="color: var(--cyan)" data-sl-round-info>—</span>
+  </div>
+
+  <div class="game-hero">
+    <div>
+      <h1>Cr<span class="accent">a</span>sh.</h1>
+      <p class="lede">Watch the curve climb. Cash out before the agent calls the bust. The longer you wait, the more it pays — until it doesn't.</p>
+    </div>
+    <div class="game-hero-meta">
+      <div class="m">House Edge<b class="cyan" data-sl="houseEdge" data-game="crash">3.00%</b></div>
+      <div class="m">Max Bet<b data-sl="maxBet" data-game="crash">10 STT</b></div>
+      <div class="m">Max Win<b>100×</b></div>
+      <div class="m">Bankroll<b class="cyan" data-sl="bankroll">— STT</b></div>
+    </div>
+  </div>
+
+  <div class="game-layout">
+    <div class="stage">
+      <div class="stage-head">
+        <span class="live-pill" data-sl-stage-pill><span class="dot"></span> READY</span>
+        <span class="round" data-sl-round-info>—</span>
+      </div>
+      <div class="stage-body">
+        <div class="crash-stage">
+          <div class="crash-status"><span class="dot"></span> AGENT QUOROM SIGNED</div>
+          <svg viewBox="0 0 800 420" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="cgFill" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stop-color="#8B5CF6" stop-opacity=".55"/>
+                <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0"/>
+              </linearGradient>
+              <linearGradient id="cgLine" x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0%" stop-color="#22D3EE"/>
+                <stop offset="100%" stop-color="#8B5CF6"/>
+              </linearGradient>
+            </defs>
+            <g stroke="#18181b" stroke-width="1">
+              <line x1="0" y1="105" x2="800" y2="105"/>
+              <line x1="0" y1="210" x2="800" y2="210"/>
+              <line x1="0" y1="315" x2="800" y2="315"/>
+              <line x1="200" y1="0" x2="200" y2="420"/>
+              <line x1="400" y1="0" x2="400" y2="420"/>
+              <line x1="600" y1="0" x2="600" y2="420"/>
+            </g>
+            <text x="6" y="100" fill="#6b6b75" font-family="JetBrains Mono" font-size="10">10×</text>
+            <text x="6" y="205" fill="#6b6b75" font-family="JetBrains Mono" font-size="10">5×</text>
+            <text x="6" y="310" fill="#6b6b75" font-family="JetBrains Mono" font-size="10">2×</text>
+            <path d="M0,400 C150,395 250,360 380,300 C500,240 600,160 700,80 L700,420 L0,420 Z"
+              fill="url(#cgFill)" style="animation: fill-area 2.5s ease forwards"/>
+            <path d="M0,400 C150,395 250,360 380,300 C500,240 600,160 700,80"
+              fill="none" stroke="url(#cgLine)" stroke-width="2.4" stroke-linecap="round"
+              stroke-dasharray="1200" stroke-dashoffset="1200"
+              style="animation: draw-line 2.6s ease forwards"/>
+            <circle cx="700" cy="80" r="6" fill="#22D3EE">
+              <animate attributeName="r" values="6;10;6" dur="1.4s" repeatCount="indefinite"/>
+            </circle>
+          </svg>
+          <div class="crash-mult-large purple"><span data-sl-crash-mult id="crash-big">1.00</span>×</div>
+        </div>
+      </div>
+      <div class="stage-foot">
+        <span>RECENT ROUNDS</span>
+        <div class="recent-mults" data-sl-crash-recent>
+          <span class="m" style="opacity:.4;">loading…</span>
+        </div>
+      </div>
+    </div>
+
+    <aside>
+      <div class="panel">
+        <h3>Place Bet</h3>
+        <div class="bet-row">
+          <label>Stake</label>
+          <div class="bet-input">
+            <input type="text" value="0.1" data-sl-stake />
+            <span class="suffix">STT</span>
+          </div>
+          <div class="preset-row">
+            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.05'">0.05</button>
+            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.1'">0.1</button>
+            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.5'">0.5</button>
+            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='1'">1</button>
+          </div>
+        </div>
+        <div class="bet-row">
+          <label>Auto cashout @ <span data-sl-autocashout-display style="color:var(--cyan); float:right;">2.00×</span></label>
+          <input type="range" min="1.01" max="50" step="0.01" value="2.00" data-sl-autocashout style="width:100%; margin: 8px 0 4px;"
+            oninput="document.querySelector('[data-sl-autocashout-display]').textContent=parseFloat(this.value).toFixed(2)+'×'" />
+          <div class="slider-marks"><span>1.01×</span><span>10×</span><span>25×</span><span>50×</span></div>
+        </div>
+        <button class="btn-bet" data-hover data-sl-place>Place bet</button>
+        <button class="btn-bet cyan" style="margin-top:8px; display:none;" data-hover data-sl-cashout>Cash out NOW</button>
+        <div class="summary">
+          <div><div class="l">Profit on win</div><div class="v green" data-sl-profit>—</div></div>
+          <div><div class="l">EV <span style="opacity:.55;">(<span data-sl-ev-pct>−3.00%</span>)</span></div><div class="v" style="color:var(--red);" data-sl-ev>—</div></div>
+        </div>
+        <div style="margin-top: 10px; padding-top:10px; border-top: 1px dashed var(--line-2); font-family: var(--mono); font-size: 11px; color: var(--fg-mute); letter-spacing: 1px;">
+          BETS CLOSE IN <b style="color: var(--cyan); margin-left: 6px;" data-sl-crash-countdown>—</b>
+          <div style="margin-top: 6px;">YOUR BET <b style="color: var(--fg); margin-left: 6px;" data-sl-crash-mybet>—</b></div>
+        </div>
+        <div data-sl-result-banner style="display:none; margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--cyan); font-family: var(--mono); font-size: 12px; letter-spacing: 1px;"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Players in round</h3>
+        <div data-sl-crash-bettors style="display:flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto;">
+          <div class="m" style="opacity:.4;">loading…</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Provably fair</h3>
+        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">CLIENT SEED</div>
+        <div data-sl-fairclient style="font-size: 12px; color: var(--cyan); word-break: break-all; margin-bottom: 16px;">—</div>
+        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">BET ID / NONCE</div>
+        <div data-sl-fairnonce style="font-size: 12px; color: var(--fg); margin-bottom: 16px;">—</div>
+        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">SERVER SEED (after reveal)</div>
+        <div data-sl-fairserver style="font-size: 12px; color: var(--purple-2); word-break: break-all; margin-bottom: 16px;">—</div>
+        <a data-sl-explorer-link href="#" target="_blank" rel="noopener" style="display:none; font-size: 11px; letter-spacing: 1.5px; color: var(--cyan); text-transform: uppercase; margin-bottom: 8px;">verify on explorer ↗</a>
+        <a href="../fair.html" data-link style="display:block; margin-top: 8px; font-size: 11px; letter-spacing: 1.5px; color: var(--cyan); text-transform: uppercase;">How it works →</a>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div data-mount="footer"></div>
+</div>
+<!-- multiplier ticker is driven by lib/games/crash.js after place-bet -->
+
+</body>
+</html>

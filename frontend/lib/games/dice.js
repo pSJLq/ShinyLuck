@@ -1,0 +1,179 @@
+// Dice integration on top of _base.js.
+
+import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { SL, connect } from "../wallet.js";
+import {
+  $, $$, setText, fmtSTTfromString, readStakeStr, injectKeyframes,
+  setStagePill, setResultBanner, clearResultBanner, clearFairServer,
+  populateFairPanel, refreshFairFromPlayer, refreshRecentEvents,
+  pollForSettle, fmtSTT, friendlyError, refreshEV,
+} from "./_base.js";
+import { validateStake } from "../errors.js";
+
+const DICE = 0;
+let direction = "over";
+let target = 50;
+let lastBetId = null;
+
+function recalcSummary() {
+  const winChance = direction === "over" ? (100 - target) : (target - 1);
+  const winChancePct = winChance > 0 ? winChance.toFixed(2) : "0.00";
+  const payoutMultiplier = winChance > 0 ? 99 / winChance : 0;
+  const stakeStr = readStakeStr();
+  const stakeNum = parseFloat(stakeStr) || 0;
+  const profit = stakeNum > 0 && winChance > 0 ? stakeNum * payoutMultiplier - stakeNum : 0;
+
+  setText("[data-sl-target]", String(target));
+  setText("[data-sl-winchance]", winChancePct + "%");
+  setText("[data-sl-payout]", payoutMultiplier.toFixed(2) + "×");
+  setText("[data-sl-winchance-right]", winChancePct + " %");
+  $$("[data-sl-profit]").forEach((el) => {
+    el.textContent = (profit >= 0 ? "+ " : "− ") + fmtSTTfromString(String(Math.abs(profit))) + " STT";
+  });
+
+  const placeBtn = $("[data-sl-place]");
+  if (placeBtn && !placeBtn.dataset.locked) {
+    placeBtn.textContent = `Place bet — ${fmtSTTfromString(stakeStr)} STT`;
+  }
+  refreshEV(DICE).catch(() => {});
+}
+
+function decodeDiceResult(resultData) {
+  try {
+    const [roll] = ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], resultData);
+    return Number(roll);
+  } catch { return null; }
+}
+
+function diceAnimStart() {
+  const el = $("[data-sl-dice-big]");
+  if (!el) return;
+  el.style.animation = "dice-shake 0.6s ease-in-out infinite";
+  // During roll, blank the number out so the user knows it's resolving.
+  const numEl = el.querySelector(".dice-num");
+  if (numEl) numEl.textContent = "?";
+}
+function diceAnimStop(roll) {
+  const el = $("[data-sl-dice-big]");
+  if (!el) return;
+  el.style.animation = "";
+  // Render the actual roll as a big number in the centre of the dice. The
+  // old pip-pattern path (roll % 6) was visually misleading: a player who
+  // rolled 57 would see 3 pips, which doesn't match the banner.
+  const numEl = el.querySelector(".dice-num");
+  if (numEl) numEl.textContent = (roll != null ? String(roll) : "?");
+}
+
+async function refreshRecent() {
+  return refreshRecentEvents({
+    containerSelector: "[data-sl-dice-recent]",
+    gameId: DICE,
+    decode: (ev) => {
+      const roll = decodeDiceResult(ev.args.resultData);
+      return { label: roll != null ? roll.toString() : "?", won: ev.args.won };
+    },
+    emptyLabel: "no recent rolls",
+    latestBetId: lastBetId,
+  });
+}
+
+async function onPlaceBet() {
+  const placeBtn = $("[data-sl-place]");
+  if (!placeBtn) return;
+  placeBtn.dataset.locked = "1";
+  try {
+    setStagePill("live", "CONNECTING");
+    placeBtn.textContent = "Connecting…"; placeBtn.disabled = true;
+    await connect();
+
+    const stake = readStakeStr() || "0.1";
+    const stakeErr = validateStake(stake); if (stakeErr) throw new Error(stakeErr);
+    const t = Math.max(2, Math.min(98, target));
+    setStagePill("live", "PLACING BET");
+    placeBtn.textContent = "Placing bet…";
+    clearResultBanner(); clearFairServer();
+
+    const { betId, txHash, clientSeed } = await SL.placeDice(t, direction === "over", stake);
+    lastBetId = betId;
+    populateFairPanel({ clientSeed, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash });
+
+    setStagePill("live", "AWAITING REVEAL");
+    placeBtn.textContent = "Awaiting reveal…";
+    diceAnimStart();
+
+    const settled = await pollForSettle(betId);
+    diceAnimStop(settled && !settled.refunded ? decodeDiceResult(settled.args.resultData) || 0 : 0);
+
+    if (!settled) {
+      setStagePill(null, "REVEAL TIMED OUT");
+      placeBtn.textContent = "Reveal timed out — refresh to retry";
+      return;
+    }
+    if (settled.refunded) {
+      setStagePill(null, "REFUNDED");
+      setResultBanner({ won: false, txt: `<b>REFUNDED</b> · ${settled.args.reason}`, accent: "#facc15" });
+      return;
+    }
+
+    const roll = decodeDiceResult(settled.args.resultData);
+    setText("[data-sl-result]", `${settled.args.won ? "WON" : "LOST"} · roll ${roll}`);
+    populateFairPanel({
+      clientSeed: settled.args.clientSeed,
+      betId: settled.args.betId,
+      nonce: settled.args.nonce,
+      serverSeed: settled.args.serverSeed,
+      txHash: settled.transactionHash,
+    });
+    setStagePill(settled.args.won ? "won" : "lost", settled.args.won ? "WON" : "LOST");
+    const stakeWei = ethers.parseEther(stake);
+    if (settled.args.won) {
+      const profit = BigInt(settled.args.payout) - stakeWei;
+      setResultBanner({ won: true, txt: `<b>WON</b> · roll ${roll} · + ${fmtSTT(profit)} STT`, txHash: settled.transactionHash });
+    } else {
+      setResultBanner({ won: false, txt: `<b>LOST</b> · roll ${roll} · − ${fmtSTT(stakeWei)} STT`, txHash: settled.transactionHash });
+    }
+    refreshRecent();
+  } catch (e) {
+    setStagePill(null, "ERROR");
+    const msg = friendlyError(e);
+    placeBtn.textContent = "Error: " + msg;
+    setResultBanner({ won: false, txt: `<b>FAILED</b> · ${msg}`, accent: "#facc15" });
+    console.error("[dice] place failed:", e);
+  } finally {
+    setTimeout(() => { delete placeBtn.dataset.locked; placeBtn.disabled = false; recalcSummary(); }, 1500);
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  injectKeyframes();
+  $$("[data-sl-direction]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      direction = btn.dataset.value === "under" ? "under" : "over";
+      $$("[data-sl-direction]").forEach((b) => b.classList.toggle("active", b === btn));
+      recalcSummary();
+    });
+  });
+  const slider = $("[data-sl-targetinput]");
+  if (slider) {
+    target = parseInt(slider.value, 10) || 50;
+    slider.addEventListener("input", () => { target = parseInt(slider.value, 10) || 50; recalcSummary(); });
+  }
+  const stakeEl = $("[data-sl-stake]");
+  if (stakeEl) {
+    stakeEl.addEventListener("input", recalcSummary);
+    stakeEl.addEventListener("change", recalcSummary);
+  }
+  $$(".preset[onclick]").forEach((btn) => {
+    const oldHandler = btn.onclick;
+    btn.onclick = function (...args) { if (oldHandler) oldHandler.apply(this, args); recalcSummary(); };
+  });
+  $("[data-sl-place]")?.addEventListener("click", onPlaceBet);
+
+  recalcSummary();
+  setStagePill("ready", "READY");
+  refreshRecent().catch((e) => console.warn("[dice] recent:", e.message));
+  document.addEventListener("shinyluck:connected", () => {
+    refreshFairFromPlayer(DICE).catch((e) => console.warn("[dice] fair:", e.message));
+  });
+  setInterval(() => refreshRecent().catch(() => {}), 12_000);
+});

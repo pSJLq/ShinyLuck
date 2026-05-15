@@ -1,0 +1,341 @@
+// House settlement bot for Somnia testnet/mainnet.
+//
+// Three responsibilities:
+//   1. Per-bet games (Dice/Slots/Plinko): scan BetPlaced → reveal+settle
+//      once the future blockhash is available.
+//   2. Mines: scan BetPlaced for game=3 → revealMinesSeed (no settle —
+//      the player drives cell-by-cell, then cashouts/busts).
+//   3. Round-based games (Crash/Roulette):
+//        - keep one round open at all times (startCrashRound/
+//          startRouletteRound when the chain has no open round)
+//        - settle each round once its betWindowEnd has passed +
+//          REVEAL_DELAY+1 blocks elapsed since round commitBlock
+//        - refund rounds that crossed the blockhash window without settle
+//
+// Polls via raw eth_getLogs to dodge ethers v6's BAD_DATA on Somnia logs
+// (those lack the `removed` field, which ethers' validator requires).
+//
+// Run:
+//   $env:SEEDS_FILE="deployments/seeds/somniaTestnet-XXXX.json"
+//   npx hardhat run scripts/reveal-bot.js --network somniaTestnet
+
+const { ethers, network } = require("hardhat");
+const fs = require("fs");
+const path = require("path");
+
+const POLL_MS = parseInt(process.env.POLL_MS || "5000", 10);
+const REVEAL_DELAY = 3n;
+const BLOCKHASH_WINDOW = 256n;
+const COLD_START_LOOKBACK = parseInt(process.env.COLD_START_LOOKBACK || "200000", 10);
+const SCAN_CHUNK = parseInt(process.env.SCAN_CHUNK || "900", 10);   // Somnia RPC caps eth_getLogs at 1000-block ranges
+const ROUND_KEEPALIVE = process.env.ROUND_KEEPALIVE !== "0";  // start new rounds automatically
+const ROUND_TIMEOUT_S = 5 * 60;                               // matches contract constant
+
+function toHexBlock(n) { return "0x" + BigInt(n).toString(16); }
+
+async function rawGetLogs(provider, address, topic0, fromBlock, toBlock) {
+  return await provider.send("eth_getLogs", [{
+    address, topics: [topic0],
+    fromBlock: toHexBlock(fromBlock), toBlock: toHexBlock(toBlock),
+  }]);
+}
+
+// Seed accessor: combines the original SEEDS_FILE (indexed array from deploy
+// time) and the shared HM-cron pool file (sparse { idx: seed } map). The pool
+// file is reread before every lookup so refills land without a restart.
+function makeSeedStore({ initialSeedsFile, poolFile }) {
+  const initial = initialSeedsFile && fs.existsSync(initialSeedsFile)
+    ? JSON.parse(fs.readFileSync(initialSeedsFile, "utf8")).seeds || []
+    : [];
+  console.log(`[reveal-bot] loaded ${initial.length} initial seeds from ${initialSeedsFile}`);
+  if (poolFile) console.log(`[reveal-bot] watching pool file: ${poolFile}`);
+  let poolCache = {};
+  let poolMtime = 0;
+  function refreshPool() {
+    if (!poolFile || !fs.existsSync(poolFile)) return;
+    try {
+      const st = fs.statSync(poolFile);
+      if (st.mtimeMs === poolMtime) return;
+      poolMtime = st.mtimeMs;
+      poolCache = JSON.parse(fs.readFileSync(poolFile, "utf8"));
+      console.log(`[reveal-bot] pool reloaded: ${Object.keys(poolCache).length} seeds available`);
+    } catch (e) { console.warn(`[reveal-bot] pool reload: ${e.message}`); }
+  }
+  return {
+    get(idx) {
+      refreshPool();
+      if (poolCache[String(idx)]) return poolCache[String(idx)];
+      if (idx < initial.length) return initial[idx];
+      return null;
+    },
+    refresh: refreshPool,
+  };
+}
+
+async function main() {
+  const seedsFile = process.env.SEEDS_FILE;
+  const poolFile = path.join(__dirname, "..", "deployments", "seeds", `${network.name}-pool.json`);
+  const seedStore = makeSeedStore({ initialSeedsFile: seedsFile, poolFile });
+
+  const manifestPath = path.join(__dirname, "..", "deployments", `${network.name}.json`);
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const casinoAddr = manifest.addresses.casino;
+
+  const Casino = await ethers.getContractFactory("Casino");
+  const casino = Casino.attach(casinoAddr);
+  const [signer] = await ethers.getSigners();
+  const provider = ethers.provider;
+  console.log(`[reveal-bot] signer=${signer.address} casino=${casinoAddr} network=${network.name}`);
+
+  const topics = {
+    betPlaced:           casino.interface.getEvent("BetPlaced").topicHash,
+    crashRoundStarted:   casino.interface.getEvent("CrashRoundStarted").topicHash,
+    rouletteRoundStarted:casino.interface.getEvent("RouletteRoundStarted").topicHash,
+  };
+
+  const currentBlock0 = await provider.getBlockNumber();
+  let lastScannedBlock;
+  if (manifest.deploymentBlock) {
+    lastScannedBlock = Math.max(0, Number(manifest.deploymentBlock) - 10);
+    console.log(`[reveal-bot] cold start from manifest.deploymentBlock-10=${lastScannedBlock}`);
+  } else {
+    lastScannedBlock = Math.max(0, currentBlock0 - COLD_START_LOOKBACK);
+    console.log(`[reveal-bot] cold start from head-${COLD_START_LOOKBACK}=${lastScannedBlock}`);
+  }
+
+  // Per-bet pending: betId → { commitBlock, seedIdx, game, player }
+  const pending = new Map();
+  // Round-based pending: roundId → { commitBlock, seedIdx, betWindowEnd, kind: "crash"|"roulette" }
+  const pendingRounds = new Map();
+
+  const loop = async () => {
+    let cur;
+    try { cur = BigInt(await provider.getBlockNumber()); }
+    catch (e) { console.warn(`[reveal-bot] getBlockNumber: ${e.message}`); return; }
+
+    // 1. eth_getLogs for ALL relevant topics in the new window.
+    const fromBlock = lastScannedBlock + 1;
+    const toBlock = Number(cur);
+    if (toBlock >= fromBlock) {
+      let foundBets = 0, foundCrashRounds = 0, foundRouletteRounds = 0;
+      for (let start = fromBlock; start <= toBlock; start += SCAN_CHUNK) {
+        const end = Math.min(start + SCAN_CHUNK - 1, toBlock);
+        const sweepRange = async (topic0, handler) => {
+          let raw;
+          try { raw = await rawGetLogs(provider, casinoAddr, topic0, start, end); }
+          catch (e) { console.warn(`[reveal-bot] getLogs ${start}..${end}: ${e.shortMessage || e.message}`); return; }
+          for (const r of raw) {
+            try {
+              const parsed = casino.interface.parseLog({ topics: r.topics, data: r.data });
+              handler(parsed, parseInt(r.blockNumber, 16));
+            } catch (_) {}
+          }
+        };
+        await Promise.all([
+          sweepRange(topics.betPlaced, (p) => {
+            const a = p.args;
+            const id = a.betId.toString();
+            if (!pending.has(id)) {
+              pending.set(id, {
+                commitBlock: BigInt(a.commitBlock),
+                seedIdx: Number(a.seedIdx),
+                game: Number(a.game),
+                player: a.player,
+              });
+              foundBets++;
+            }
+          }),
+          sweepRange(topics.crashRoundStarted, (p) => {
+            const a = p.args;
+            const id = a.roundId.toString();
+            if (!pendingRounds.has("c:" + id)) {
+              pendingRounds.set("c:" + id, {
+                kind: "crash",
+                roundId: id,
+                commitBlock: BigInt(a.commitBlock),
+                seedIdx: Number(a.seedIdx),
+                betWindowEnd: Number(a.betWindowEnd),
+              });
+              foundCrashRounds++;
+            }
+          }),
+          sweepRange(topics.rouletteRoundStarted, (p) => {
+            const a = p.args;
+            const id = a.roundId.toString();
+            if (!pendingRounds.has("r:" + id)) {
+              pendingRounds.set("r:" + id, {
+                kind: "roulette",
+                roundId: id,
+                commitBlock: BigInt(a.commitBlock),
+                seedIdx: Number(a.seedIdx),
+                betWindowEnd: Number(a.betWindowEnd),
+              });
+              foundRouletteRounds++;
+            }
+          }),
+        ]);
+      }
+      lastScannedBlock = toBlock;
+      if (foundBets + foundCrashRounds + foundRouletteRounds > 0) {
+        console.log(`[reveal-bot] scan ${fromBlock}..${toBlock} bets=+${foundBets} crash=+${foundCrashRounds} roulette=+${foundRouletteRounds} pending=${pending.size} rounds=${pendingRounds.size}`);
+      }
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    // 2. Sweep per-bet pending.
+    for (const [betId, info] of pending) {
+      const age = cur - info.commitBlock;
+      if (age < 0n) continue;
+      if (age > REVEAL_DELAY + BLOCKHASH_WINDOW) {
+        try {
+          const tx = await casino.refundExpired(betId);
+          await tx.wait();
+          console.log(`[reveal-bot] refunded expired bet ${betId} tx=${tx.hash}`);
+        } catch (e) {
+          const msg = e.shortMessage || e.message;
+          if (/BetAlreadySettled|BetNotFound|not expired/.test(msg)) {/* drop */}
+          else console.warn(`[reveal-bot] refundExpired ${betId}: ${msg}`);
+        }
+        pending.delete(betId);
+      } else if (age > REVEAL_DELAY) {
+        const seed = seedStore.get(info.seedIdx);
+        if (!seed) { console.warn(`[reveal-bot] no seed at idx=${info.seedIdx} for bet ${betId}`); pending.delete(betId); continue; }
+        const action = info.game === 3 ? "REVEAL_MINES" : (info.game === 1 || info.game === 5 ? "SKIP_ROUND" : "SETTLE");
+        if (action === "SKIP_ROUND") { pending.delete(betId); continue; }
+        try {
+          const tx = info.game === 3
+            ? await casino.revealMinesSeed(betId, seed)
+            : await casino.revealAndSettle(betId, seed);
+          await tx.wait();
+          console.log(`[reveal-bot] ${action} bet ${betId} tx=${tx.hash}`);
+          pending.delete(betId);
+        } catch (e) {
+          const msg = e.shortMessage || e.message;
+          if (/BetAlreadySettled|BetNotFound|InvalidGame/.test(msg)) pending.delete(betId);
+          else if (/RevealTooEarly/.test(msg)) {/* retry next tick */}
+          else if (/RevealExpired/.test(msg)) {/* refund branch next tick */}
+          else console.warn(`[reveal-bot] ${action} ${betId}: ${msg}`);
+        }
+      }
+    }
+
+    // 3. Sweep round-based pending — try settle first, then refund only on
+    //    real timeout. The contract enforces order:
+    //      - settle is allowed when commitBlock+3 has passed AND not settled
+    //      - refund is allowed only after the round timeout (5 min + buffer)
+    //    Checking settled flag onchain before either action keeps us from
+    //    bouncing reverts forever on already-finished rounds.
+    for (const [key, info] of pendingRounds) {
+      const age = cur - info.commitBlock;
+      if (age < 0n) continue;
+      // First — check if the round is already settled on-chain (some other
+      // caller may have done it).
+      let roundState;
+      try {
+        roundState = info.kind === "crash"
+          ? await casino.getCrashRound(info.roundId)
+          : await casino.getRouletteRound(info.roundId);
+      } catch (_) { roundState = null; }
+      if (roundState && roundState.settled) { pendingRounds.delete(key); continue; }
+
+      // Try settle when window closed + REVEAL_DELAY blocks elapsed.
+      const windowClosed = nowSec >= info.betWindowEnd;
+      const readyToReveal = age > REVEAL_DELAY;
+      if (windowClosed && readyToReveal) {
+        const seed = seedStore.get(info.seedIdx);
+        if (!seed) {
+          // No seed yet — HM cron will refill; keep this round around.
+          continue;
+        }
+        const fn = info.kind === "crash" ? "settleCrashRound" : "settleRouletteRound";
+        try {
+          const tx = await casino[fn](info.roundId, seed);
+          await tx.wait();
+          console.log(`[reveal-bot] settled ${info.kind} round ${info.roundId} tx=${tx.hash}`);
+          pendingRounds.delete(key);
+          continue;
+        } catch (e) {
+          const msg = e.shortMessage || e.message;
+          if (/RoundAlreadySettled/.test(msg)) { pendingRounds.delete(key); continue; }
+          // Try refund path below only on RevealExpired (256-block window).
+          if (!/RevealExpired/.test(msg)) {
+            // RevealTooEarly / RoundClosed → wait next tick
+            continue;
+          }
+        }
+      }
+      // Refund only on hard timeout (blockhash window expired OR betWindowEnd
+      // long past + buffer). Contract enforces this — the check is just to
+      // avoid noisy reverts here.
+      const refundable = age > REVEAL_DELAY + BLOCKHASH_WINDOW
+                      || (nowSec - info.betWindowEnd > ROUND_TIMEOUT_S + 60);
+      if (refundable) {
+        const fn = info.kind === "crash" ? "refundCrashRound" : "refundRouletteRound";
+        try {
+          const tx = await casino[fn](info.roundId);
+          await tx.wait();
+          console.log(`[reveal-bot] refunded ${info.kind} round ${info.roundId} tx=${tx.hash}`);
+        } catch (e) {
+          const msg = e.shortMessage || e.message;
+          if (!/RoundAlreadySettled|RoundNotSettleable/.test(msg)) {
+            console.warn(`[reveal-bot] ${fn} ${info.roundId}: ${msg}`);
+          }
+        }
+        pendingRounds.delete(key);
+      }
+    }
+
+    // 4. Round keepalive — make sure there's always an open Crash + Roulette
+    //    round so players can hop in.
+    if (ROUND_KEEPALIVE) {
+      const startIfNoOpen = async (gameLabel, currentFn, hasFn) => {
+        try {
+          const id = await casino[currentFn]();
+          const round = await casino[hasFn](id);
+          // round is open if betWindowEnd > now AND not settled
+          if (!round.settled && Number(round.betWindowEnd) > nowSec) return; // open, no-op
+          if (Number(round.betWindowEnd) === 0) return; // race — wait
+        } catch (_) { /* never started — proceed */ }
+        try {
+          const startFn = gameLabel === "crash" ? "startCrashRound" : "startRouletteRound";
+          const tx = await casino[startFn]();
+          await tx.wait();
+          console.log(`[reveal-bot] opened new ${gameLabel} round tx=${tx.hash}`);
+        } catch (e) {
+          const msg = e.shortMessage || e.message;
+          if (/RoundClosed|NoSeedAvailable|GameIsPaused/.test(msg)) {/* ok */}
+          else console.warn(`[reveal-bot] start ${gameLabel}: ${msg}`);
+        }
+      };
+      // Only act if we have at least one round in history; bootstrap below.
+      try {
+        const crashTotal = Number(await casino.totalCrashRounds());
+        if (crashTotal === 0) {
+          const tx = await casino.startCrashRound();
+          await tx.wait();
+          console.log(`[reveal-bot] bootstrapped first crash round tx=${tx.hash}`);
+        } else {
+          await startIfNoOpen("crash", "currentCrashRoundId", "getCrashRound");
+        }
+      } catch (e) { console.warn(`[reveal-bot] crash keepalive: ${e.shortMessage || e.message}`); }
+      try {
+        const rouletteTotal = Number(await casino.totalRouletteRounds());
+        if (rouletteTotal === 0) {
+          const tx = await casino.startRouletteRound();
+          await tx.wait();
+          console.log(`[reveal-bot] bootstrapped first roulette round tx=${tx.hash}`);
+        } else {
+          await startIfNoOpen("roulette", "currentRouletteRoundId", "getRouletteRound");
+        }
+      } catch (e) { console.warn(`[reveal-bot] roulette keepalive: ${e.shortMessage || e.message}`); }
+    }
+  };
+
+  console.log(`[reveal-bot] running (poll=${POLL_MS}ms, keepalive=${ROUND_KEEPALIVE})`);
+  await loop();
+  setInterval(() => { loop().catch((e) => console.warn(`[reveal-bot] loop: ${e.message}`)); }, POLL_MS);
+  await new Promise(() => {});
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });

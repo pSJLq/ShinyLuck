@@ -1,0 +1,14 @@
+{
+  "cleanUrls": false,
+  "trailingSlash": false,
+  "rewrites": [
+    { "source": "/u/:addr", "destination": "/account.html" },
+    { "source": "/u/:addr/", "destination": "/account.html" }
+  ],
+  "headers": [
+    {
+      "source": "**/*",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+    }
+  ]
+}

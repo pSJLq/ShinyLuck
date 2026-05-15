@@ -1,0 +1,21 @@
+{
+  "name": "shinyluck-agent-service",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Off-chain runner for ShinyLuck player-agents + House Manager cron",
+  "main": "index.js",
+  "scripts": {
+    "start":     "node index.js",
+    "api":       "node index.js",
+    "dev":       "node --watch index.js",
+    "hm-cron":   "node hm-cron.js",
+    "hm-dev":    "node --watch hm-cron.js"
+  },
+  "dependencies": {
+    "ethers": "^6.13.2",
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5"
+  },
+  "engines": { "node": ">=20" }
+}

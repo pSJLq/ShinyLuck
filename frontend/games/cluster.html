@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SUGAR.LAB · ShinyLuck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="_cluster/ambient.css">
+<link rel="stylesheet" href="_cluster/cluster.css">
+<script src="../partials.js" defer></script>
+<script type="module" src="../lib/wallet.js"></script>
+<script type="module" src="../lib/livedata.js"></script>
+<script type="module" src="../lib/games/cluster.js"></script>
+</head>
+<body data-active-page="games">
+<div class="ambient">
+  <div class="ambient-stars"></div>
+  <div class="ambient-orb o1"></div>
+  <div class="ambient-orb o2"></div>
+  <div class="ambient-orb o3"></div>
+</div>
+
+<div data-page-shell>
+<div data-mount="nav"></div>
+
+<div class="shell" style="padding: 0;">
+
+  <div style="padding: 24px 32px 0; max-width: 1480px; margin: 0 auto;">
+    <div class="crumb">
+      <a href="../SomniaLuck.html#games" data-link>Games</a>
+      <span class="sep">/</span>
+      <a href="../SomniaLuck.html#games" data-link>Slots</a>
+      <span class="sep">/</span>
+      <span class="here">SUGAR.LAB — Cluster Cascade</span>
+    </div>
+
+    <div class="game-hero">
+      <div>
+        <h1>S<span class="grad">u</span>gar<span class="grad">.</span>Lab</h1>
+        <p class="lede">7×7 cluster cascade. Five or more touching symbols detonate; the grid collapses, gravity refills it — chain forever. Free spins drop sticky multiplier orbs.</p>
+      </div>
+      <div class="hero-meta">
+        <div class="m">RTP<b class="cyan">96.50%</b></div>
+        <div class="m">Volatility<b class="pink">VERY HIGH</b></div>
+        <div class="m">Max Win<b class="gold">2,500×</b></div>
+        <div class="m">Max Bet<b data-sl="maxBet" data-game="cluster">— STT</b></div>
+      </div>
+    </div>
+
+    <div class="cl-layout">
+
+      <div class="cab" id="machine">
+
+        <div class="marquee">
+          <div class="badge">★ FEATURED</div>
+          <div class="scroll">
+            <div class="track" id="marqueeTrack">
+              <span class="item">Live wins streaming from the Casino contract…</span>
+              <span class="item">Every cluster verified on Somnia testnet · seed reveals on settle</span>
+              <span class="item">Free spins earned every 150 paid spins · agentic loyalty</span>
+            </div>
+          </div>
+          <div class="jp">
+            <span class="lbl">YOUR LOYALTY</span>
+            <span class="v" id="loyaltyDisp">0/150</span>
+          </div>
+        </div>
+
+        <div class="grid-frame" id="gridFrame">
+          <div class="glow-rim"></div>
+
+          <div class="free-spins-badge" id="freeSpinsBadge">
+            <div class="ttl">FREE SPINS</div>
+            <div class="count" id="freeSpinsCount">0</div>
+            <div class="mult">STICKY ORBS</div>
+          </div>
+
+          <!-- on-chain loyalty progress (replaces "Buy Bonus") -->
+          <div class="buy-bonus" id="loyaltyBadge" style="cursor: default;">
+            <div class="ttl">NEXT FREE SPINS</div>
+            <div style="width: 100%; padding: 4px 0;">
+              <div style="background: rgba(0,0,0,0.4); height: 6px; border-radius: 3px; overflow: hidden;">
+                <div id="loyaltyBar" style="height: 100%; background: linear-gradient(90deg, var(--cyan), var(--gold)); width: 0%; transition: width 0.5s;"></div>
+              </div>
+            </div>
+            <div class="sub">PLAY <span id="loyaltyRemain">150</span> MORE → +5 FREE SPINS</div>
+          </div>
+
+          <div class="grid" id="grid"></div>
+
+          <div id="coinOverlay" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:8"></div>
+
+          <div class="win-hud" id="winHud">
+            <div class="chain">CHAIN <b id="winHudChain">0</b></div>
+            <div class="sep"></div>
+            <div class="amount" id="winHudAmt">+0.00</div>
+            <div class="x-mult" id="winHudMult" style="display:none">×1</div>
+          </div>
+
+          <div class="fs-intro" id="fsIntro">
+            <div class="card">
+              <div class="ttl">VAULT CRACKED</div>
+              <div class="num">5</div>
+              <div class="lbl">FREE SPINS UNLOCKED</div>
+              <div class="mult">STICKY ORBS WILL DROP</div>
+              <div class="hint">CLICK ANYWHERE TO CONTINUE</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="control-bar">
+          <div class="bet-block">
+            <div>
+              <div class="kbd-label" style="margin-bottom:6px;">STAKE</div>
+              <div class="bet-stepper">
+                <button id="stakeDn">−</button>
+                <div class="val"><span id="stakeVal">0.10</span><small>STT</small></div>
+                <button id="stakeUp">+</button>
+              </div>
+            </div>
+            <div class="bet-side" style="margin-left:14px;">
+              <span>TOTAL BET</span>
+              <span class="v cyan"><span id="totalBet">0.10</span> STT</span>
+            </div>
+            <div class="bet-side" style="margin-left:14px;">
+              <span>GRID</span>
+              <span class="v">7 × 7</span>
+            </div>
+          </div>
+
+          <div class="spin-cluster">
+            <button class="mini" id="autoBtn"><span class="lbl">AUTO</span></button>
+            <button class="spin-btn" id="spinBtn"><span>SPIN</span></button>
+            <button class="mini" id="turboBtn" title="Use free spin (F)">
+              <span style="font-size:11px;font-weight:700;">FS</span>
+            </button>
+          </div>
+
+          <div class="balance-block">
+            <div class="lbl">BALANCE</div>
+            <div class="balance"><span class="cur">STT</span><span id="balance">—</span></div>
+            <div class="last-win zero" id="lastWin">— no spin yet</div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="aside-stack">
+
+        <div class="panel">
+          <h3><span class="pip"></span>Live wins · feed</h3>
+          <div class="ticker">
+            <div class="ticker-list" id="tickerList"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3><span class="pip" style="background:var(--gold);box-shadow:0 0 8px var(--gold)"></span>Paytable</h3>
+          <div class="pt-list" id="paytableList"></div>
+        </div>
+
+        <div class="panel">
+          <h3><span class="pip" style="background:var(--violet);box-shadow:0 0 8px var(--violet)"></span>Provably fair</h3>
+          <div style="font-size: 11px;">
+            <div style="font-size:9px;letter-spacing:2px;color:var(--ink-3);text-transform:uppercase;margin-bottom:4px;">CLIENT SEED</div>
+            <div style="color:var(--cyan);word-break:break-all;margin-bottom:10px;" id="fairClient" data-sl-fairclient>—</div>
+            <div style="font-size:9px;letter-spacing:2px;color:var(--ink-3);text-transform:uppercase;margin-bottom:4px;">SERVER SEED · COMMIT HASH</div>
+            <div style="color:var(--purple);word-break:break-all;margin-bottom:10px;" id="fairServer" data-sl-fairserver>—</div>
+            <div style="font-size:9px;letter-spacing:2px;color:var(--ink-3);text-transform:uppercase;margin-bottom:4px;">NONCE / BET ID</div>
+            <div id="fairNonce" data-sl-fairnonce>—</div>
+            <a data-sl-explorer-link href="#" target="_blank" rel="noopener" style="display:none; font-size: 11px; letter-spacing: 1.5px; color: var(--cyan); text-transform: uppercase; margin-top: 8px;">verify on explorer ↗</a>
+          </div>
+        </div>
+
+      </aside>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- BIG WIN overlay -->
+<div class="bigwin-ov" id="bigwinOv">
+  <canvas id="bigwinCanvas"></canvas>
+  <div class="bigwin-card">
+    <div class="tier">BIG WIN</div>
+    <div class="amount">+0.00 STT</div>
+    <div class="sub">SUGAR.LAB · CLUSTER CASCADE</div>
+    <div class="dismiss">CLICK ANYWHERE TO DISMISS</div>
+  </div>
+</div>
+
+<div data-mount="footer"></div>
+</body>
+</html>

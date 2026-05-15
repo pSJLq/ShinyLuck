@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Admin · ShinyLuck</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="partials.js" defer></script>
+<script type="module" src="lib/wallet.js"></script>
+<script type="module" src="lib/livedata.js"></script>
+<script type="module" src="lib/admin.js"></script>
+<style>
+  .adm { padding: 56px 32px 96px; max-width: 1360px; margin: 0 auto; display:none; }
+  .adm.on { display:block; }
+  .adm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  .adm-card { background: var(--bg-1); border: 1px solid var(--line); padding: 24px; }
+  .adm-card h3 { margin: 0 0 16px; font-size: 11px; letter-spacing: 2px; color: var(--cyan); text-transform: uppercase; font-weight: 400; }
+  .adm-row { display:flex; justify-content: space-between; align-items:center; padding: 8px 0; border-bottom: 1px dashed var(--line-2); font-size: 12px; font-family: var(--mono); }
+  .adm-row:last-child { border-bottom: none; }
+  .adm-row .l { color: var(--fg-mute); text-transform: uppercase; letter-spacing: 1.5px; font-size: 11px; }
+  .adm-row .v { font-feature-settings: "tnum"; }
+  .adm-row .v.green { color: var(--green); }
+  .adm-row .v.cyan { color: var(--cyan); }
+  .adm-row .v.red   { color: var(--red); }
+  .adm-row .v.amber { color: var(--amber); }
+  .adm-btn { background:none; border:1px solid var(--line); color:var(--fg); padding: 6px 14px; font-family: var(--mono); font-size: 11px; letter-spacing: 1px; cursor:pointer; }
+  .adm-btn:hover:not(:disabled) { background: rgba(34,211,238,.06); border-color: var(--cyan); color: var(--cyan); }
+  .adm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .adm-btn.danger { border-color: var(--red); color: var(--red); }
+  .adm-input { background: rgba(0,0,0,0.2); border: 1px solid var(--line); color: var(--fg); padding: 6px 10px; font-family: var(--mono); font-size: 12px; width: 100px; }
+  .adm-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .adm-game-row { display: grid; grid-template-columns: 80px 80px 100px 1fr; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--line-2); font-size: 12px; font-family: var(--mono); }
+  .adm-game-row:last-child { border-bottom: none; }
+  .adm-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .adm-table th { font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--fg-mute); padding: 8px; text-align: left; border-bottom: 1px solid var(--line); }
+  .adm-table td { padding: 8px; border-bottom: 1px solid var(--line); font-family: var(--mono); }
+  .adm-table td a { color: var(--cyan); }
+  .denied { padding: 96px 32px; text-align: center; font-family: var(--mono); }
+  .denied h2 { font-size: 24px; color: var(--red); margin: 0 0 16px; }
+  .denied p { color: var(--fg-mute); }
+  .denied a { color: var(--cyan); }
+  @media (max-width: 1000px) { .adm-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-active-page="admin">
+<div data-page-shell>
+<div data-mount="nav"></div>
+
+<!-- Access-denied screen, shown until the connected wallet === casino.owner() -->
+<div data-sl-adm-denied class="denied">
+  <h2>ACCESS DENIED</h2>
+  <p>This page is only available to the casino owner. Connect with the owning wallet, or<br/>
+     <a href="SomniaLuck.html" data-link>return to the home page →</a></p>
+  <p style="margin-top:32px; font-size:11px; color: var(--fg-dim); letter-spacing: 2px;">
+    OWNER ADDRESS: <b data-sl-adm-owner style="color:var(--cyan);">—</b><br/>
+    CONNECTED: <b data-sl-adm-connected style="color:var(--amber);">—</b>
+  </p>
+  <p style="margin-top:24px;"><button class="adm-btn" data-wallet-btn>Connect wallet</button></p>
+</div>
+
+<div data-sl-adm-main class="adm">
+  <div class="crumb">
+    <a href="SomniaLuck.html" data-link>ShinyLuck</a><span class="sep">/</span><span class="here">Admin</span>
+  </div>
+
+  <h1 style="font-size: 36px; margin: 0 0 32px; letter-spacing: -1px;">Admin <span class="accent">panel</span>.</h1>
+
+  <div class="adm-grid">
+
+    <div class="adm-card">
+      <h3>Treasury</h3>
+      <div class="adm-row"><span class="l">Free bankroll</span><span class="v cyan"><span data-sl-adm-bankroll>—</span> STT</span></div>
+      <div class="adm-row"><span class="l">Locked reserve</span><span class="v"><span data-sl-adm-reserve>—</span> STT</span></div>
+      <div class="adm-row"><span class="l">Pending withdrawals</span><span class="v"><span data-sl-adm-pending>—</span> STT</span></div>
+      <div class="adm-row"><span class="l">Contract balance</span><span class="v"><span data-sl-adm-balance>—</span> STT</span></div>
+      <div class="adm-row"><span class="l">Scheduled owner withdraw</span><span class="v amber"><span data-sl-adm-owner-pending>—</span></span></div>
+    </div>
+
+    <div class="adm-card">
+      <h3>Withdraw profit · 24h timelock</h3>
+      <div class="adm-row">
+        <span class="l">Amount (STT)</span>
+        <span><input class="adm-input" type="text" value="0.1" data-sl-adm-withdraw-amt /></span>
+      </div>
+      <div class="adm-row" style="border-bottom:none;">
+        <button class="adm-btn" data-sl-adm-schedule>Schedule withdraw</button>
+        <button class="adm-btn" data-sl-adm-execute>Execute (after 24h)</button>
+        <button class="adm-btn danger" data-sl-adm-cancel>Cancel</button>
+      </div>
+    </div>
+
+    <div class="adm-card">
+      <h3>Deposit bankroll</h3>
+      <div class="adm-row">
+        <span class="l">Amount (STT)</span>
+        <span><input class="adm-input" type="text" value="0.5" data-sl-adm-deposit-amt /></span>
+      </div>
+      <div class="adm-row" style="border-bottom:none;">
+        <button class="adm-btn" data-sl-adm-deposit>Deposit</button>
+      </div>
+    </div>
+
+    <div class="adm-card">
+      <h3>Bonus mode</h3>
+      <div class="adm-row"><span class="l">Status</span><span class="v cyan" data-sl-adm-bonus-status>—</span></div>
+      <div class="adm-row"><span class="l">Until</span><span class="v" data-sl-adm-bonus-until>—</span></div>
+      <div class="adm-row">
+        <span class="l">Duration (min)</span>
+        <span><input class="adm-input" type="text" value="60" data-sl-adm-bonus-mins /></span>
+      </div>
+      <div class="adm-row" style="border-bottom:none;">
+        <span style="flex:1;"><input class="adm-input" style="width:100%;" type="text" placeholder="reasoning" data-sl-adm-bonus-reason /></span>
+        <button class="adm-btn" data-sl-adm-bonus-activate>Activate</button>
+      </div>
+    </div>
+
+    <div class="adm-card" style="grid-column: span 2;">
+      <h3>Games · status, max-bet, pause control</h3>
+      <div data-sl-adm-games>
+        <div class="m" style="opacity:.4;">loading…</div>
+      </div>
+    </div>
+
+    <div class="adm-card">
+      <h3>HM reasoning log · last 20</h3>
+      <div data-sl-adm-reasoning style="max-height: 320px; overflow-y: auto; font-family: var(--mono); font-size: 11px;">
+        <div class="m" style="opacity:.4;">loading…</div>
+      </div>
+    </div>
+
+    <div class="adm-card">
+      <h3>Player agents · sorted by P&amp;L</h3>
+      <div data-sl-adm-agents style="max-height: 320px; overflow-y: auto;">
+        <div class="m" style="opacity:.4;">loading…</div>
+      </div>
+    </div>
+
+    <div class="adm-card" style="grid-column: span 2;">
+      <h3>Stats · per-game wagered / paid / margin</h3>
+      <table class="adm-table">
+        <thead><tr><th>Game</th><th>Bets</th><th>Wagered</th><th>Paid out</th><th>House margin</th></tr></thead>
+        <tbody data-sl-adm-stats><tr><td colspan="5" class="dim">loading…</td></tr></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<div data-mount="footer"></div>
+</div>
+</body>
+</html>

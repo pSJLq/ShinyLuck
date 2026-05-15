@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Docs · ShinyLuck</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="partials.js" defer></script>
+<script type="module" src="lib/wallet.js"></script>
+<script type="module" src="lib/livedata.js"></script>
+<script type="module" src="lib/docs.js"></script>
+<style>
+  .ds-search { position: relative; }
+  .ds-search-results { position: absolute; top: 100%; left: 0; right: 0; background: var(--bg-1); border: 1px solid var(--line); margin-top: 4px; z-index: 50; max-height: 360px; overflow-y: auto; }
+  .ds-search-results a { display: block; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--fg); }
+  .ds-search-results a:last-child { border-bottom: none; }
+  .ds-search-results a:hover, .ds-search-results a.kbd-focus { background: rgba(34,211,238,.06); color: var(--cyan); }
+  .ds-search-results .h { color: var(--cyan); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; }
+  .ds-search-results .snip { color: var(--fg-mute); font-size: 11px; margin-top: 2px; }
+  .ds-search-results .empty { padding: 16px; color: var(--fg-mute); font-style: italic; font-size: 12px; }
+</style>
+</head>
+<body data-active-page="docs">
+<div data-page-shell>
+<div data-mount="nav"></div>
+
+<div class="docs-layout">
+  <aside class="docs-side">
+    <div class="ds-search" data-sl-docs-search>
+      <span class="ic">⌕</span>
+      <input type="text" placeholder="search docs · ⌘K" data-sl-docs-search-input />
+      <div class="ds-search-results" data-sl-docs-search-results style="display:none;"></div>
+    </div>
+    <nav class="ds-nav">
+      <div class="ds-group">
+        <div class="ds-title">GETTING STARTED</div>
+        <a href="#intro">What is ShinyLuck</a>
+        <a href="#start">Connect and play in 60s</a>
+        <a href="#wallets">Supported wallets</a>
+        <a href="#stt">Getting STT testnet tokens</a>
+      </div>
+      <div class="ds-group">
+        <div class="ds-title">GAMES</div>
+        <a href="#crash">Crash</a>
+        <a href="#slots">Slots</a>
+        <a href="#dice">Dice</a>
+        <a href="#plinko">Plinko</a>
+        <a href="#mines">Mines</a>
+        <a href="#roulette">Roulette</a>
+      </div>
+      <div class="ds-group">
+        <div class="ds-title">SOMNIA AGENTS</div>
+        <a href="#agents">Architecture overview</a>
+        <a href="#json">JSON API Agent</a>
+        <a href="#llm">LLM Inference Agent</a>
+        <a href="#parse">Parse Website Agent</a>
+        <a href="#house">House Manager Agent</a>
+      </div>
+      <div class="ds-group">
+        <div class="ds-title">DEVELOPERS</div>
+        <a href="#sdk">JS SDK</a>
+        <a href="#contracts">Contract addresses</a>
+        <a href="#events">Events &amp; webhooks</a>
+        <a href="#fair-details">Provably fair details</a>
+        <a href="#audit">Audit / verification</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main class="docs-main" data-sl-docs-main>
+    <div class="crumb">
+      <a href="#" data-link>Docs</a><span class="sep">/</span><span class="here">Getting started</span>
+    </div>
+    <header class="docs-head">
+      <div class="eyebrow">v 0.8 · ShinyLuck on Somnia <span data-sl-network-badge>TESTNET</span></div>
+      <h1 id="intro">What is ShinyLuck.</h1>
+      <p class="lede">ShinyLuck is a fully on-chain casino on Somnia where the house is a quorum of autonomous AI agents. Every roll, every reel stop, every wheel result is the keccak256 of three numbers anyone can audit — server seed, client seed, and the future blockhash. Money flow is pull-payment; the contract never sends in a callback.</p>
+    </header>
+
+    <div class="docs-callouts">
+      <div class="cal cyan">
+        <div class="t">Six games, one contract.</div>
+        <div class="b">Crash, Slots, Dice, Plinko, Mines, Roulette — all settle through Casino.sol. One bankroll, one max-bet cap (1% of free bankroll), one circuit breaker.</div>
+      </div>
+      <div class="cal purple">
+        <div class="t">Sub-second finality.</div>
+        <div class="b">Somnia's ~1.2s block time means your bet is on-chain before the dice finish rolling. No "pending" screens.</div>
+      </div>
+      <div class="cal amber">
+        <div class="t">Self-custodial.</div>
+        <div class="b">Funds live in your wallet. The contract escrows stake + max payout only between place and settle, then credits pull-payment for winnings.</div>
+      </div>
+    </div>
+
+    <h2 id="start">Connect and play in 60 seconds.</h2>
+    <ol class="docs-list">
+      <li><b>Click "Connect Wallet"</b> in the top-right. MetaMask, Rabby, OKX, Coinbase Wallet, and any EIP-1193 wallet works.</li>
+      <li><b>Switch to Somnia testnet (Shannon).</b> Chain ID <code>50312</code>. The connect modal auto-adds it if missing.</li>
+      <li><b>Get STT</b> from <a class="cyan" href="https://testnet.somnia.network/faucet" target="_blank" rel="noopener">testnet.somnia.network/faucet</a>.</li>
+      <li><b>Pick a game.</b> Set your stake, hit place bet. The receipt opens when the reveal-bot settles (≈ 4 blocks).</li>
+    </ol>
+
+    <h2 id="wallets">Supported wallets.</h2>
+    <p>Any EIP-1193 injected provider works. We've tested MetaMask, Rabby, OKX Wallet, and Coinbase Wallet on desktop; MetaMask Mobile and Rabby Mobile via WalletConnect on phones. The frontend uses ethers v6 + the SDK in <code>frontend/lib/shinyluck-sdk.js</code>.</p>
+
+    <h2 id="stt">Getting STT testnet tokens.</h2>
+    <p>STT is the gas + bet token on Shannon (Somnia testnet). Drip from <a class="cyan" href="https://testnet.somnia.network/faucet" target="_blank" rel="noopener">testnet.somnia.network/faucet</a>; 0.5 STT per request is plenty for hundreds of small bets. On mainnet the symbol becomes SOMI.</p>
+
+    <h2 id="crash">Crash.</h2>
+    <p>Bustabit-style multiplier curve. You pre-commit an auto-cashout in <code>[1.01×, 100×]</code> and stake. The contract uses <code>keccak256(serverSeed || clientSeed || blockhash || nonce)</code> to derive a crashPoint with a 1-in-33 instant-crash baked in (matches the audited Bustabit formula). 3% house edge.</p>
+    <ul class="docs-list">
+      <li><b>Win:</b> autoCashout ≤ crashPoint → payout = stake × autoCashout.</li>
+      <li><b>Lose:</b> autoCashout &gt; crashPoint → stake forfeited.</li>
+      <li>Per-bet max payout is reserved up-front in <code>lockedReserve</code>; the contract never over-commits the bankroll.</li>
+    </ul>
+
+    <h2 id="slots">Slots.</h2>
+    <p>3 reels × 7 symbols. Symbol 0 is the jackpot. Triple-jackpot pays 50×; triple-regular 8×; any pair 1.8×. Empirical RTP ≈ 0.947 → 5.3% house edge. Slot theme (cosmetic only) is rotated by the House Manager Agent every 24 hours.</p>
+
+    <h2 id="dice">Dice.</h2>
+    <p>Pick a threshold in <code>[2, 98]</code> and a direction (over / under). Roll = randomness mod 100 + 1. Payout multiplier = (10000 − edge) / (winChance × 100). 1% house edge.</p>
+
+    <h2 id="plinko">Plinko.</h2>
+    <p>16 rows × 17 slots; ball path = 16 bits of randomness (one per peg row). Three risk tiers: low (max 16×), medium (max 110×), high (max 1000×). Tables match standard Stake-style multipliers; 1.5% house edge baked into symbol weights.</p>
+
+    <h2 id="mines">Mines.</h2>
+    <p>5×5 grid. Pick the number of mines in <code>[1, 24]</code>; the House Manager pre-commits the seed before you place, but mine positions are only locked in when the seed is revealed (≥ 4 blocks after place). Multiplier scales as <code>∏ (25-i)/(25-mines-i) × (1 − edge)</code>; 100× cap. 1.2% house edge.</p>
+    <ul class="docs-list">
+      <li><b>Open cell:</b> if it's a mine, the round busts (stake forfeited). Otherwise the multiplier compounds.</li>
+      <li><b>Cashout</b> at any time after opening ≥ 1 cell.</li>
+      <li>Page refresh during a round is safe — frontend reconstructs state from <code>minesState(betId)</code>.</li>
+    </ul>
+
+    <h2 id="roulette">Roulette.</h2>
+    <p>European single-zero wheel. 10 bet kinds — straight (35:1), red/black/even/odd/1-18/19-36 (1:1), dozens (2:1). Result = randomness mod 37; multiplier 36 for straight, 3 for dozen, 2 for the others. 2.70% house edge.</p>
+
+    <h2 id="agents">Architecture · the agent quorum.</h2>
+    <p>Every settled bet emits a <code>BetSettled</code> event. The <a class="cyan" href="#" data-sl-agent-link="verifier">AgentQuorumVerifier</a> contract independently asks 4 Somnia LLM Inference workers to re-derive the same keccak256; their signatures are recorded as a <code>QuorumResult</code> event. <b>Money never depends on the quorum signal</b> — randomness is on-chain via blockhash. The quorum is a defence-in-depth liveness check on the agent layer.</p>
+
+    <div class="agent-grid-doc">
+      <div class="ad"><span class="dot cyan"></span> JSON API Agent<br/><span class="id" data-sl-agent-id="json">—</span></div>
+      <div class="ad"><span class="dot purple"></span> LLM Inference Agent<br/><span class="id" data-sl-agent-id="llm">—</span></div>
+      <div class="ad"><span class="dot amber"></span> Parse Website Agent<br/><span class="id" data-sl-agent-id="parse">—</span></div>
+      <div class="ad"><span class="dot red"></span> House Manager Agent<br/><span class="id" data-sl-agent-id="hm">—</span></div>
+    </div>
+
+    <h2 id="json">JSON API Agent.</h2>
+    <p>Fetches JSON from public endpoints and extracts specific fields. Reserved for v2 oracle workloads (price feeds, external entropy sources). Not in the money path in v1.</p>
+
+    <h2 id="llm">LLM Inference Agent.</h2>
+    <p>String-in / string-out inference using <code>qwen3-30b</code>. Used by AgentQuorumVerifier for the 3-of-4 redundancy check, and by the HouseManager cron for narrating its decisions (<code>recordReasoning</code> events). Slot themes are also generated here.</p>
+
+    <h2 id="parse">Parse Website Agent.</h2>
+    <p>HTML → structured data scraper. Reserved for v2 (external tournament feeds, social leaderboards). Not yet bound to any v1 contract.</p>
+
+    <h2 id="house">House Manager Agent.</h2>
+    <p>Autonomous cron that:</p>
+    <ul class="docs-list">
+      <li>Resizes per-game max-bet to 1% of free bankroll every 5 minutes.</li>
+      <li>Activates <code>BonusMode</code> (house edge × 0.5) when bankroll grows &gt; +10% in an hour.</li>
+      <li>Pauses games when bankroll falls &gt; −20% in an hour (circuit breaker baked into Casino.sol too).</li>
+      <li>Rotates the slot theme every 24 hours via <code>triggerThemeRotation</code>.</li>
+      <li>Logs every decision on-chain via <code>recordReasoning(string)</code> events.</li>
+    </ul>
+
+    <h2 id="sdk">JS SDK.</h2>
+    <p>The frontend SDK is published under <code>frontend/lib/shinyluck-sdk.js</code>. Embed any ShinyLuck game in a dApp:</p>
+    <pre class="code-block">
+<span class="dim">// import the SDK</span>
+<span class="kw">import</span> { ShinyLuck, CHAINS } <span class="kw">from</span> <span class="str">"./lib/shinyluck-sdk.js"</span>;
+
+<span class="kw">const</span> sl = <span class="kw">new</span> <span class="cls">ShinyLuck</span>({
+  casino:   <span class="str">"0x8B43…E219"</span>,
+  registry: <span class="str">"0x0947…E21a"</span>,
+  network:  CHAINS.somniaTestnet,
+});
+<span class="kw">await</span> sl.<span class="fn">connect</span>();
+<span class="kw">const</span> { betId, txHash } = <span class="kw">await</span> sl.<span class="fn">placeCrash</span>(<span class="num">2.0</span>, <span class="str">"0.1"</span>);
+<span class="kw">const</span> settled = <span class="kw">await</span> sl.<span class="fn">waitForSettle</span>(betId);
+<span class="kw">if</span> (settled.won) console.<span class="fn">log</span>(<span class="str">"+"</span>, settled.payout);
+</pre>
+
+    <h2 id="contracts">Contract addresses.</h2>
+    <table class="docs-table">
+      <thead><tr><th>Contract</th><th>Network</th><th>Address</th></tr></thead>
+      <tbody>
+        <tr><td>Casino.sol</td><td>Somnia testnet (Shannon)</td><td class="cyan" data-sl-contract="casino">—</td></tr>
+        <tr><td>HouseManager.sol</td><td>Somnia testnet (Shannon)</td><td class="cyan" data-sl-contract="hm">—</td></tr>
+        <tr><td>PlayerAgentRegistry.sol</td><td>Somnia testnet (Shannon)</td><td class="cyan" data-sl-contract="registry">—</td></tr>
+        <tr><td>AgentQuorumVerifier.sol</td><td>Somnia testnet (Shannon)</td><td class="cyan" data-sl-contract="verifier">—</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="events">Events &amp; webhooks.</h2>
+    <p>All public state changes are emitted as Solidity events on the Casino contract:</p>
+    <ul class="docs-list">
+      <li><code>BetPlaced(betId, player, game, amount, clientSeed, commitBlock, seedIdx, params)</code></li>
+      <li><code>BetSettled(betId, player, game, won, payout, randomness, serverSeed, clientSeed, blockHash, nonce, resultData)</code></li>
+      <li><code>BetRefunded(betId, player, amount, reason)</code> — emitted when the blockhash window expires.</li>
+      <li><code>WithdrawalCredited / WithdrawalClaimed</code> — pull-payment ledger.</li>
+      <li><code>BonusModeActivated / ReasoningLog</code> — HM Agent traces.</li>
+      <li><code>QuorumResult</code> — AgentQuorumVerifier signers' agreement level.</li>
+    </ul>
+
+    <h2 id="fair-details">Provably fair · how the math works.</h2>
+    <p>For every bet, randomness = <code>keccak256(serverSeed ‖ clientSeed ‖ blockhash(commitBlock + 3) ‖ nonce)</code>. The server seed's hash is committed before any bet binds to its slot; the blockhash is unknowable at commit time and only finalises 3 blocks later. The browser-side verifier on the <a class="cyan" href="fair.html" data-link>Provably Fair</a> page re-derives this exactly and compares against the on-chain value.</p>
+
+    <h2 id="audit">Audit / verification.</h2>
+    <p>The Casino contract on the explorer has its source verified. The CommitReveal library matches the formulation above (single file, ≈ 70 lines). Bug bounty: anything that lets a player or the operator deviate from the published RTPs is in scope; report to <span class="cyan">security@shinyluck.gg</span>.</p>
+
+    <div class="next-prev">
+      <a class="np prev" href="#intro">← What is ShinyLuck</a>
+      <a class="np next" href="#start">Connect and play →</a>
+    </div>
+  </main>
+
+  <aside class="docs-toc">
+    <div class="toc-title">ON THIS PAGE</div>
+    <a class="on" href="#intro">What is ShinyLuck</a>
+    <a href="#start">Connect and play</a>
+    <a href="#agents">The agent quorum</a>
+    <a href="#sdk">JS SDK</a>
+    <a href="#contracts">Contract addresses</a>
+    <a href="#fair-details">Provably fair</a>
+    <div class="toc-foot">
+      <div class="t">Was this helpful?</div>
+      <div class="rate"><button>👍</button><button>👎</button></div>
+      <a href="https://github.com/" target="_blank" rel="noopener">Edit on GitHub →</a>
+    </div>
+  </aside>
+</div>
+
+<div data-mount="footer"></div>
+</div>
+</body>
+</html>
