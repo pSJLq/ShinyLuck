@@ -61,6 +61,30 @@ export class SugarAnimator {
 
   setTurbo(v) { this.turbo = !!v; }
 
+  // ---------- optimistic spin: flip on the rim glow + a fast symbol-blur
+  // before the chain settles. Called by api.js `spin()` BEFORE awaiting the
+  // on-chain result so the user sees activity within 50ms of click.
+  // Stop happens automatically the moment play(result) is called below.
+  startSpinning() {
+    if (!this.frameEl) return;
+    this.frameEl.classList.add('spinning');
+    // Random-shuffle symbol glyphs on the grid every 80ms to simulate motion.
+    // This is purely visual — actual cells will be replaced by play(result).
+    if (this._shuffleTimer) clearInterval(this._shuffleTimer);
+    const slots = $$('.slot', this.gridEl);
+    const glyphs = ['✦','♥','◆','⬡','●','▲','◼','✕','◯','✺'];
+    this._shuffleTimer = setInterval(() => {
+      for (const s of slots) {
+        const child = s.querySelector('.sym');
+        if (child) child.textContent = glyphs[Math.floor(Math.random() * glyphs.length)];
+      }
+    }, 80);
+  }
+  stopSpinning() {
+    if (this._shuffleTimer) { clearInterval(this._shuffleTimer); this._shuffleTimer = null; }
+    // .spinning class kept — play(result) controls it from here on.
+  }
+
   // ---------- initial idle fill (called once) ----------
   renderIdleGrid(grid) {
     for (let r = 0; r < GRID_SIZE; r++) for (let c = 0; c < GRID_SIZE; c++) {
@@ -74,6 +98,9 @@ export class SugarAnimator {
 
   // ---------- main: play a full ResultData ----------
   async play(result) {
+    // If the caller started an optimistic shuffle via startSpinning(),
+    // stop it now — play() takes over with the real animation.
+    this.stopSpinning();
     this.frameEl.classList.add('spinning');
     this.hudEl.classList.remove('show');
 

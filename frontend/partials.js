@@ -229,9 +229,25 @@
 
   // ---------- INSERT INTO PAGE ----------
   function fixRelative(html) {
-    const inGames = location.pathname.includes('/games/');
-    if (inGames) return html;
-    return html.replace(/href="\.\.\//g, 'href="').replace(/src="\.\.\//g, 'src="');
+    // Template paths use `../X.html` — designed for `/games/X.html` (1 deep).
+    // For `/games/sugar/index.html` (2 deep) we need an extra `../` prefix.
+    // For root pages we strip the leading `../` (it's irrelevant from `/`).
+    const path = location.pathname.replace(/[^/]*$/, '');           // dir part
+    const inGames = path.includes('/games/');
+    const segs = path.split('/').filter(Boolean);
+    const gamesIdx = segs.indexOf('games');
+    const depthInGames = gamesIdx >= 0 ? Math.max(0, segs.length - gamesIdx - 1) : 0;
+    if (!inGames) {
+      return html.replace(/href="\.\.\//g, 'href="').replace(/src="\.\.\//g, 'src="');
+    }
+    if (depthInGames > 1) {
+      // Add (depthInGames - 1) extra `../` to every `href="../` and `src="../`.
+      const extra = '../'.repeat(depthInGames - 1);
+      return html
+        .replace(/href="\.\.\//g, `href="${extra}../`)
+        .replace(/src="\.\.\//g, `src="${extra}../`);
+    }
+    return html;
   }
 
   async function mount() {

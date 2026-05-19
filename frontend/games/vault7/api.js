@@ -69,6 +69,9 @@ export class Vault7Slot {
     this.busy = true;
     SFX.click();
     $('[data-spin]', this.container).classList.add('spinning');
+    // Optimistic — reels start moving instantly. play(result) takes over once
+    // the chain settles (see vault7/animation.js startSpinning / stopSpinning).
+    this.animator.startSpinning();
 
     if (this.mode === 'demo' && !isFree) this.balance -= cost;
     this.opts.onSpinStarted?.(this.stakeWei);
@@ -148,21 +151,15 @@ export class Vault7Slot {
     <div class="ambient-orb o3"></div>
   </div>
 
-  <div class="nav-bar">
-    <a class="brand" href="../../SomniaLuck.html" style="text-decoration:none;color:inherit;">SHINY·LUCK</a>
-    <div class="navlinks">
-      <a href="../../SomniaLuck.html#games">All Games</a>
-      <a href="../sugar/index.html">SUGAR.LAB</a>
-      <a href="./index.html" class="active">VAULT.7</a>
-      <a href="../../fair.html">Provably Fair</a>
+  <!-- nav-bar removed — partials.js injects shared chrome (see sugar/api.js). -->
+  <div class="slot-tools-row" style="display:flex; gap:10px; justify-content:flex-end; padding: 0 5% 10px;">
+    <div class="bal" style="font-family: 'JetBrains Mono', monospace; font-size:12px; color: var(--fg-mute, #b6b0c8); padding: 6px 12px; border:1px solid rgba(255,255,255,0.08); border-radius:6px;">
+      <span class="dot" style="display:inline-block;width:6px;height:6px;background:#4ee3ff;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>
+      <b data-balance-mini style="color:#fafafa;">0.00</b> STT
     </div>
-    <div class="right">
-      <div class="bal"><span class="dot"></span><b data-balance-mini>0.00</b> STT</div>
-      <button class="sound-tog" data-sound>
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
-      </button>
-      <button class="deposit" data-wallet-btn>Connect Wallet</button>
-    </div>
+    <button class="sound-tog" data-sound style="background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--fg-mute,#b6b0c8);padding:6px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;">
+      <svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
+    </button>
   </div>
 
   <div class="game-hero">

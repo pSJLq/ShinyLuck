@@ -23,7 +23,11 @@ const { ethers, network } = require("hardhat");
 const fs = require("fs");
 const path = require("path");
 
-const POLL_MS = parseInt(process.env.POLL_MS || "5000", 10);
+// POLL_MS lowered from 5000 → 1500 so reveal-bot picks up a fresh BetPlaced
+// within 1.5s instead of 5s. Combined with REVEAL_DELAY=3 blocks (~1.2s on
+// Somnia's ~0.4s block time), end-to-end bet→settle latency drops from
+// ~7s to ~3s. Override via env if dev RPC starts rate-limiting.
+const POLL_MS = parseInt(process.env.POLL_MS || "1500", 10);
 const REVEAL_DELAY = 3n;
 const BLOCKHASH_WINDOW = 256n;
 const COLD_START_LOOKBACK = parseInt(process.env.COLD_START_LOOKBACK || "200000", 10);

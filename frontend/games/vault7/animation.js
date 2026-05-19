@@ -91,8 +91,33 @@ export class Vault7Animator {
 
   setTurbo(v) { this.turbo = !!v; }
 
+  // Optimistic UX (see sugar/animation.js startSpinning). Adds .spinning to
+  // the reels frame + animates a fast scroll loop so the user sees the reels
+  // moving within 50ms of click. play(result) below stops the loop.
+  startSpinning() {
+    if (!this.frameEl) return;
+    this.frameEl.classList.add('spinning');
+    if (this._spinLoopTimer) return;
+    const reels = $$('.reel', this.reelsEl);
+    let phase = 0;
+    this._spinLoopTimer = setInterval(() => {
+      phase = (phase + 1) % 1000;
+      for (const r of reels) {
+        // Apply a quick vertical jitter so the reels visibly move.
+        r.style.transform = `translateY(${(phase * 17) % 80 - 40}px)`;
+        r.style.filter = 'blur(2px)';
+      }
+    }, 30);
+  }
+  stopSpinning() {
+    if (this._spinLoopTimer) { clearInterval(this._spinLoopTimer); this._spinLoopTimer = null; }
+    const reels = $$('.reel', this.reelsEl);
+    for (const r of reels) { r.style.transform = ''; r.style.filter = ''; }
+  }
+
   /** Play one Vault7ResultData: base spin + optional FS chain */
   async play(result) {
+    this.stopSpinning();
     this.frameEl.classList.add('spinning');
     this.winCounter.classList.remove('show');
     this.paylineSvg.innerHTML = '';

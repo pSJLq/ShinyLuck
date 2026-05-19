@@ -117,6 +117,13 @@ export class SugarSlot {
     SFX.click();
     $('[data-spin]', this.container).classList.add('spinning');
 
+    // OPTIMISTIC UX: kick off a visible "rolling" animation (rim glow +
+    // symbol shuffle) within ~50ms of the click. The chain tx fires in
+    // parallel; play(result) replaces this with the real animation when the
+    // settle lands. Without this, the grid stayed static for 2-3s — which
+    // felt frozen.
+    this.animator.startSpinning();
+
     // In autospin, force the animator into turbo timing so symbols never
     // get stuck mid-cascade. User can still toggle turbo manually for base spins.
     const forceFast = this.autoRemaining > 0;
@@ -258,21 +265,17 @@ export class SugarSlot {
     <div class="ambient-orb o3"></div>
   </div>
 
-  <div class="nav-bar">
-    <a class="brand" href="../../SomniaLuck.html" style="text-decoration:none;color:inherit;">SHINY·LUCK</a>
-    <div class="navlinks">
-      <a href="../../SomniaLuck.html#games">All Games</a>
-      <a href="./index.html" class="active">SUGAR.LAB</a>
-      <a href="../vault7/index.html">VAULT.7</a>
-      <a href="../../fair.html">Provably Fair</a>
+  <!-- nav-bar removed — partials.js (loaded from index.html) injects the
+       shared site nav into <div data-mount="nav"> above this slot root.
+       The slot is now just the game canvas; chrome lives outside. -->
+  <div class="slot-tools-row" style="display:flex; gap:10px; justify-content:flex-end; padding: 0 5% 10px;">
+    <div class="bal" style="font-family: 'JetBrains Mono', monospace; font-size:12px; color: var(--fg-mute, #b6b0c8); padding: 6px 12px; border:1px solid rgba(255,255,255,0.08); border-radius:6px;">
+      <span class="dot" style="display:inline-block;width:6px;height:6px;background:#4ee3ff;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>
+      <b data-balance-mini style="color:#fafafa;">0.00</b> STT
     </div>
-    <div class="right">
-      <div class="bal"><span class="dot"></span><b data-balance-mini>0.00</b> STT</div>
-      <button class="sound-tog" data-sound>
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06A9 9 0 0 0 14 3.23z"/></svg>
-      </button>
-      <button class="deposit" data-wallet-btn>Connect Wallet</button>
-    </div>
+    <button class="sound-tog" data-sound style="background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--fg-mute,#b6b0c8);padding:6px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;">
+      <svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06A9 9 0 0 0 14 3.23z"/></svg>
+    </button>
   </div>
 
   <div class="game-hero">
