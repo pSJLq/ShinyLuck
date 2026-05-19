@@ -73,7 +73,10 @@ const animatedRounds = new Set();
 let lastRenderedRoundId = -1;
 
 function fmtCountdown(s) {
-  if (s < 0) s = 0;
+  // Defensive: a NaN (e.g. on first paint before round metadata loads) would
+  // produce a "NaN:NaN" string in the round-clock element. Treat anything
+  // non-finite as 0:00.
+  if (!Number.isFinite(s) || s < 0) s = 0;
   const m = Math.floor(s / 60), r = Math.floor(s % 60);
   return `${m}:${String(r).padStart(2, "0")}`;
 }

@@ -74,7 +74,8 @@ function recalcSummary() {
 }
 
 function fmtCountdown(s) {
-  if (s < 0) s = 0;
+  // NaN-safe: round-clock used to render "NaN:NaN" while metadata loaded.
+  if (!Number.isFinite(s) || s < 0) s = 0;
   const m = Math.floor(s / 60);
   const r = Math.floor(s % 60);
   return `${m}:${String(r).padStart(2, "0")}`;
@@ -92,8 +93,14 @@ function renderPhasePill(phase) {
 
 function predictedMultiplier(roundStartSec, nowSec) {
   // multiplier(t) = exp(0.06 * t) (clamped at 100×); matches the visual model.
+  // Defensive: a missing roundStartSec (e.g. round between phases on cold
+  // load) used to yield NaN downstream and pollute the SVG with "NaN"
+  // attribute values. Caller now also guards, but keep this honest at the
+  // source: never return non-finite or ≤0.
+  if (!Number.isFinite(roundStartSec) || !Number.isFinite(nowSec)) return 1;
   const t = Math.max(0, nowSec - roundStartSec);
   const m = Math.exp(0.06 * t);
+  if (!Number.isFinite(m) || m < 1) return 1;
   return Math.min(100, m);
 }
 
@@ -111,6 +118,12 @@ function toDisplayMult(actualMult) {
 /// the right strip for the multiplier label). y=400 is the 0× floor and the
 /// curve climbs logarithmically toward y=20 (the 50× ceiling).
 function _updateCrashSvg(elapsedSec, actualMult) {
+  // Guard against NaN / negative / zero inputs. predictedMultiplier can yield
+  // 0 or NaN if a round is between phases or roundStartSec is bogus — without
+  // this guard, Math.log(0)=-Infinity → y=NaN → SVG d-string contains "NaN"
+  // and the browser logs an attribute-parse warning every animation frame.
+  if (!Number.isFinite(elapsedSec) || elapsedSec < 0) return;
+  if (!Number.isFinite(actualMult) || actualMult <= 0) return;
   const svg = document.querySelector(".crash-stage svg");
   if (!svg) return;
   const linePath = svg.querySelector("path[stroke^='url']");
@@ -162,8 +175,11 @@ function startTicker(roundStartSec) {
     const now = Date.now() / 1000;
     const elapsed = Math.max(0, now - roundStartSec);
     const actual = predictedMultiplier(roundStartSec, now);
+    // Belt+suspenders: predictedMultiplier may produce NaN if roundStartSec is
+    // bogus (round between phases). Don't paint "NaN×" or feed NaN into SVG.
+    if (!Number.isFinite(actual) || actual <= 0) return;
     const display = toDisplayMult(actual);
-    if (el) el.textContent = display.toFixed(2);
+    if (el && Number.isFinite(display)) el.textContent = display.toFixed(2);
     _updateCrashSvg(elapsed, actual);
   }, 60);
 }
@@ -175,7 +191,8 @@ function paintMultiplierFinal(cpX, won) {
   if (!el) return;
   // Display the growth multiplier (cashpoint − 1) consistent with the live
   // ticker. cpX is the actual cashout floor (e.g. 1.34); we show 0.34.
-  el.textContent = toDisplayMult(cpX).toFixed(2);
+  const v = toDisplayMult(Number(cpX));
+  el.textContent = Number.isFinite(v) ? v.toFixed(2) : "0.00";
   el.style.color = won ? "var(--green)" : "var(--red)";
 }
 
