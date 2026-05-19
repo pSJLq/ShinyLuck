@@ -186,8 +186,8 @@
         <div class="foot-col">
           <h4>Games</h4>
           <a href="../games/crash.html" data-link>Crash</a>
-          <a href="../games/vault7.html" data-link>Vault.7 (slots)</a>
-          <a href="../games/cluster.html" data-link>Sugar.Lab (cluster)</a>
+          <a href="../games/vault7/index.html" data-link>Vault.7 (slots)</a>
+          <a href="../games/sugar/index.html" data-link>Sugar.Lab (cluster)</a>
           <a href="../games/dice.html" data-link>Dice</a>
           <a href="../games/plinko.html" data-link>Plinko</a>
           <a href="../games/mines.html" data-link>Mines</a>

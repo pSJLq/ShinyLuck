@@ -38,9 +38,15 @@
 
 <div id="slot-root"></div>
 
+<!-- Shared site footer (contracts, links, disclaimers). The slot has its own
+     nav so we don't inject [data-mount="nav"] here — partials.js sees only the
+     footer mount and injects just that. -->
+<div data-mount="footer"></div>
+
 <!-- Privy vendor bundle — must load BEFORE wallet.js so window.ShinyLuckAuth
      is initialised (even as a not-ready stub) before any module touches it. -->
 <script src="/vendor/privy.bundle.js"></script>
+<script src="/partials.js" defer></script>
 
 <div class="sugar-gate" id="gate" style="display:none">
   <div class="card">

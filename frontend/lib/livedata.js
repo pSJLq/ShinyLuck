@@ -151,15 +151,17 @@ export async function refreshLiveStats() {
   if (!deployed()) return;
   try {
     const c = casino();
-    const [bankroll, totalBets, bonusActive, blockNumber] = await Promise.all([
+    const [bankroll, bonusActive, blockNumber] = await Promise.all([
       c.freeBankroll(),
-      c.totalBets(),
       c.bonusModeActive(),
       provider().getBlockNumber(),
     ]);
 
+    // NOTE: `totalBets` (settled count) is owned by the feed-events path now —
+    // see renderFeed(). We removed the c.totalBets() poll so the two paths
+    // don't fight (and so the "BETS SETTLED" label is honestly derived from
+    // BetSettled events, not from c.totalBets() which includes unsettled bets).
     document.querySelectorAll('[data-sl="bankroll"]').forEach((el) => setText(el, fmtSTT(bankroll) + " STT"));
-    document.querySelectorAll('[data-sl="totalBets"]').forEach((el) => setText(el, fmtNum(totalBets)));
     document.querySelectorAll('[data-sl="bonusMode"]').forEach((el) =>
       setText(el, bonusActive ? "ACTIVE" : "—")
     );
@@ -168,7 +170,6 @@ export async function refreshLiveStats() {
     document.querySelectorAll('[data-count]').forEach((el) => {
       const role = el.dataset.slRole;
       if (role === "bankroll") el.textContent = fmtSTT(bankroll) + " STT";
-      else if (role === "totalBets") el.textContent = fmtNum(totalBets);
     });
 
     for (const [name, id] of Object.entries(GAME_BY_NAME)) {
@@ -204,6 +205,21 @@ export async function refreshLiveStats() {
 const CACHE_KEY = "feed.v2";
 
 function renderFeed() {
+  // Push the *settled-events count* and unique-players count to all matching
+  // labels REGARDLESS of whether the feed body element exists on this page
+  // (sugar/vault7/dice game pages don't render the feed table but still show
+  // these counters in their header / footer).
+  const settledCount = _feedRows.length;
+  document.querySelectorAll('[data-sl="totalBets"]').forEach((el) => setText(el, fmtNum(settledCount)));
+  document.querySelectorAll('[data-count][data-sl-role="totalBets"]').forEach((el) => {
+    el.textContent = fmtNum(settledCount);
+  });
+  const players = new Set(_feedRows.map((r) => r.player.toLowerCase()));
+  document.querySelectorAll('[data-sl="playersOnline"]').forEach((el) => setText(el, fmtNum(players.size)));
+  document.querySelectorAll('[data-count][data-sl-role="playersOnline"]').forEach((el) => {
+    el.textContent = fmtNum(players.size);
+  });
+
   const body = document.querySelector("#feed-body");
   if (!body) return;
   if (_feedRows.length === 0) {
@@ -212,13 +228,6 @@ function renderFeed() {
   }
   body.innerHTML = "";
   for (const ev of _feedRows.slice(0, FEED_ROW_CAP)) appendFeedRow(body, ev, false);
-
-  // unique players counter
-  const players = new Set(_feedRows.map((r) => r.player.toLowerCase()));
-  document.querySelectorAll('[data-sl="playersOnline"]').forEach((el) => setText(el, fmtNum(players.size)));
-  document.querySelectorAll('[data-count][data-sl-role="playersOnline"]').forEach((el) => {
-    el.textContent = fmtNum(players.size);
-  });
 }
 
 function appendFeedRow(body, ev, animate) {

@@ -148,18 +148,19 @@ export class Vault7Slot {
   </div>
 
   <div class="nav-bar">
-    <div class="brand">SHINY·LUCK</div>
+    <a class="brand" href="../../SomniaLuck.html" style="text-decoration:none;color:inherit;">SHINY·LUCK</a>
     <div class="navlinks">
+      <a href="../../SomniaLuck.html#games">All Games</a>
       <a href="../sugar/index.html">SUGAR.LAB</a>
-      <a href="#" class="active">VAULT.7</a>
-      <a href="../STATS.md">Math &amp; Stats</a>
+      <a href="./index.html" class="active">VAULT.7</a>
+      <a href="../../fair.html">Provably Fair</a>
     </div>
     <div class="right">
-      <div class="bal"><span class="dot"></span><b data-balance-mini>1,000.00</b> STT</div>
+      <div class="bal"><span class="dot"></span><b data-balance-mini>0.00</b> STT</div>
       <button class="sound-tog" data-sound>
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
       </button>
-      <button class="deposit">Deposit</button>
+      <button class="deposit" data-wallet-btn>Connect Wallet</button>
     </div>
   </div>
 
@@ -424,14 +425,11 @@ export class Vault7Slot {
     if (fresh) setTimeout(()=> div.classList.remove('fresh'), 800);
   }
   _fakeTicker() {
-    const names = ['k1ng_3lite','m00n_x','nyx7','vaultrunner','silv3r','akira_z','crypt0duck','wyrm','0xprism','glimmr','helio.eth','rust_3','noctis','quasar','draco_x','venn','obsidian'];
-    const tick = () => {
-      const mega = Math.random() < 0.18;
-      const amount = mega ? 50 + Math.random() * 1200 : 1 + Math.random() * 40;
-      this._pushTicker({ who: names[Math.floor(Math.random() * names.length)], amountWei: BigInt(Math.floor(amount * 1e18)), mega });
-      this._tickerTimer = setTimeout(tick, 1500 + Math.random() * 3800);
-    };
-    this._tickerTimer = setTimeout(tick, 800);
+    // P0 fix: kill the fake ticker — real spins only. (See sugar/api.js.)
+    const list = $('[data-ticker]', this.container);
+    if (list) {
+      list.innerHTML = `<div class="ticker-row" style="opacity:.5;"><div class="who" style="color:var(--fg-mute,#6b6b75);">No spins yet<small>VAULT.7</small></div><div class="amt" style="color:var(--fg-mute,#6b6b75);">be the first<small></small></div></div>`;
+    }
   }
   _jackpotDrift() {
     let jp = 142318.42;

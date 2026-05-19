@@ -38,9 +38,13 @@
 
 <div id="slot-root"></div>
 
+<!-- Shared site footer (contracts, links, disclaimers). -->
+<div data-mount="footer"></div>
+
 <!-- Privy vendor bundle — must load BEFORE wallet.js so window.ShinyLuckAuth
      is initialised (even as a not-ready stub) before any module touches it. -->
 <script src="/vendor/privy.bundle.js"></script>
+<script src="/partials.js" defer></script>
 
 <div class="v7-gate" id="gate" style="display:none">
   <div class="card">
