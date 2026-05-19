@@ -164,6 +164,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const dot = card?.querySelector('.crash-preview circle');
 
   function buildCurve(progress, target) {
+    // Defensive clamp. The raf chain can occasionally hand us a `now` value
+    // slightly less than `roundStart` (timestamp synthesis at frame boundary),
+    // which makes `progress` negative → `Math.pow(progress, 1.6) = NaN` →
+    // every SVG coord downstream NaNs. Snap to [0,1] and require a positive
+    // target so the math is always defined.
+    if (!Number.isFinite(progress)) progress = 0;
+    progress = Math.max(0, Math.min(1, progress));
+    if (!Number.isFinite(target) || target <= 0) target = 1;
     // progress 0..1 over the round; map to x in [0..380] and y from bottom
     const x = 8 + progress * 380;
     const climb = Math.pow(progress, 1.6) * (0.55 + Math.min(target/10, 0.4));
@@ -194,11 +202,14 @@ document.addEventListener('DOMContentLoaded', () => {
     tick(roundStart);
   }
   function tick(now) {
-    const elapsed = now - roundStart;
+    // Same race as in games/crash.js: raf can fire with `now` slightly older
+    // than `roundStart` when we just kicked off a new round. Clamp.
+    if (!Number.isFinite(now) || !Number.isFinite(roundStart)) { raf = requestAnimationFrame(tick); return; }
+    const elapsed = Math.max(0, now - roundStart);
     const p = Math.min(elapsed / dur, 1);
     const eased = 1 - Math.pow(1 - p, 2.2);
     const v = 1 + (target - 1) * eased;
-    m.textContent = v.toFixed(2);
+    m.textContent = Number.isFinite(v) ? v.toFixed(2) : '1.00';
     m.style.color = v > 5 ? 'var(--cyan)' : '';
     if (linePath) {
       const c = buildCurve(p, target);

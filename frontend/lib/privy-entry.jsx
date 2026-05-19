@@ -7,10 +7,12 @@
  * them without knowing React is involved.
  *
  * CRITICAL — Somnia Global Wallet integration:
- *   - loginMethods MUST be the object form `{ primary: ['email', 'privy:<provider>'] }`
- *     so Privy's modal shows ONLY email + "Login with Somnia". A flat array
- *     ['email', ...] makes Privy fall back to the generic modal that includes
- *     MetaMask, which is not what we want.
+ *   - loginMethods is a FLAT array, including the cross-app provider via the
+ *     `privy:<provider-app-id>` entry. The Privy 3.x SDK reads it as an array
+ *     (it calls `loginMethods.includes(...)` internally and iterates for any
+ *     `'privy:'` prefix entries to enable cross-app). Using the older
+ *     "object form" `{ primary: [...] }` crashes the SDK with
+ *     "t.loginMethods.includes is not a function" — verified live in 3.26.0.
  *   - The address we transact with is the CROSS-APP wallet — resolved from
  *     `user.linkedAccounts` filtered by `type === 'cross_app'` and the Somnia
  *     Provider App ID. NEVER read `useWallets()` or `user.wallet.address` —
@@ -158,13 +160,14 @@ function App() {
     <PrivyProvider
       appId={cfg.privyAppId || ''}
       config={{
-        // Object-form loginMethods — restricts Privy's modal to EXACTLY these
-        // two primary options. The `privy:<app-id>` entry tells Privy to show
-        // a "Continue with Somnia" button that triggers cross-app login.
-        // (Per docs.somnia.network/.../authenticating-with-privy.)
-        loginMethods: {
-          primary: ['email', `privy:${SOMNIA_PROVIDER_APP_ID}`],
-        },
+        // Flat-array loginMethods — Privy 3.x SDK contract. The `privy:<id>`
+        // entry tells the SDK to show a "Continue with Somnia" button that
+        // triggers cross-app login against the Somnia Provider App. The SDK
+        // iterates this array for any 'privy:' prefix entries to wire up
+        // cross-app providers (see Privy source: it calls
+        // `loginMethods.includes(...)` and `for (let m of loginMethods) if
+        // (m.startsWith('privy:')) ...`).
+        loginMethods: ['email', `privy:${SOMNIA_PROVIDER_APP_ID}`],
         defaultChain: chain,
         supportedChains: [chain],
         embeddedWallets: {
