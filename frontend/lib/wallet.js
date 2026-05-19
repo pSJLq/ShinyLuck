@@ -1,27 +1,38 @@
-// Wallet wiring — supports two backends:
-//   1) Privy (primary): cross-app login to the Somnia Provider App via email
+// Wallet wiring — Privy is the DEFAULT and only path shown to normal users.
+// MetaMask is hidden behind the URL flag `?devWallet=metamask` (dev only) so
+// production demo users see exactly one option: email login → Somnia Global
+// Wallet. This is what makes the hackathon UX "no extension required" — and
+// it's the path docs.somnia.network recommends for partner apps.
+//
+//   1) Privy (default): cross-app login to the Somnia Provider App via email
 //      magic link, then headless on-chain txs (no per-tx popup). The Privy
 //      React shell lives in `frontend/vendor/privy.bundle.js` and publishes
 //      auth state + sendTransaction onto `window.ShinyLuckAuth`. This file
 //      wraps that with an ethers Signer (PrivySigner) so the existing
 //      ShinyLuck SDK works unchanged.
-//   2) MetaMask injected EIP-1193 (fallback): the original flow, kept for
-//      developers and power-users who already have a wallet.
+//   2) MetaMask (dev only, opt-in via `?devWallet=metamask`): preserved for
+//      contract debugging. NOT auto-attached. NOT visible in modal unless the
+//      query flag is present. Never used as a silent fallback.
 //
 // On every page load we:
 //   - wait for `shinyluck:auth-state` from the Privy bundle (ready=true)
 //   - if Privy reports authenticated → silently attach a PrivySigner
-//   - else if user previously chose MetaMask (localStorage flag) → auto-MM
+//   - else if devWallet=metamask AND user previously chose MetaMask → auto-MM
 //   - else → wait for an explicit "Connect Wallet" click
-//
-// Connect modal: two buttons —
-//   • Continue with email → Privy cross-app magic link
-//   • Connect MetaMask    → original injected flow
 
 import { ethers } from "https://esm.sh/ethers@6.13.2";
 import { ShinyLuck, CHAINS } from "./shinyluck-sdk.js";
 import { CONFIG } from "./config.js";
 import { PrivySigner } from "./privy-signer.js";
+
+// MetaMask path is opt-in via URL. Use a function so it's re-evaluated on
+// each `connect()` call — easier to flip during dev without a reload.
+function devWalletEnabled() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    return p.get("devWallet") === "metamask";
+  } catch (_) { return false; }
+}
 
 const network = CHAINS[CONFIG.network] || CHAINS.somniaTestnet;
 
@@ -190,7 +201,10 @@ async function tryAutoConnect() {
     } catch (e) { console.warn("[wallet] privy auto-restore failed:", e.message); }
   }
 
-  // 2. Otherwise, was the user previously on MetaMask?
+  // 2. MetaMask auto-restore — only if the dev opted in via `?devWallet=metamask`
+  //    AND a prior session stored the preference. Otherwise we never touch
+  //    window.ethereum (no silent fallback that would surprise normal users).
+  if (!devWalletEnabled()) return;
   let pref = null;
   try { pref = localStorage.getItem(STORAGE_KEY); } catch (_) {}
   if (pref !== "metamask" || !window.ethereum) return;
@@ -269,6 +283,7 @@ function injectModalCSSOnce() {
 
 function showConnectModal() {
   injectModalCSSOnce();
+  const showMM = devWalletEnabled();
   return new Promise((resolve, reject) => {
     const mask = document.createElement("div");
     mask.className = "sl-conn-mask";
@@ -277,11 +292,10 @@ function showConnectModal() {
         <button class="sl-conn-close" data-close>close ✕</button>
         <h3>Connect to ShinyLuck</h3>
         <p>Sign in by email to get a Somnia Global Wallet — the same wallet
-           works across every Somnia-partner app, no extension required.
-           Power users can plug in MetaMask instead.</p>
+           works across every Somnia-partner app, no extension required.</p>
         <div data-stage="root">
           <button class="sl-conn-btn primary" data-action="email">📧 Continue with Email (Privy)</button>
-          <button class="sl-conn-btn" data-action="metamask">🦊 Connect MetaMask</button>
+          ${showMM ? '<button class="sl-conn-btn" data-action="metamask">🦊 Connect MetaMask (dev)</button>' : ''}
           <div class="sl-conn-foot">Powered by Privy · Somnia Global Wallet · network: ${network.chainName}</div>
         </div>
         <div data-stage="loading" style="display:none;">

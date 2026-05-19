@@ -6,40 +6,100 @@
  * methods onto `window.ShinyLuckAuth` so the rest of our vanilla JS can use
  * them without knowing React is involved.
  *
+ * CRITICAL — Somnia Global Wallet integration:
+ *   - loginMethods MUST be the object form `{ primary: ['email', 'privy:<provider>'] }`
+ *     so Privy's modal shows ONLY email + "Login with Somnia". A flat array
+ *     ['email', ...] makes Privy fall back to the generic modal that includes
+ *     MetaMask, which is not what we want.
+ *   - The address we transact with is the CROSS-APP wallet — resolved from
+ *     `user.linkedAccounts` filtered by `type === 'cross_app'` and the Somnia
+ *     Provider App ID. NEVER read `useWallets()` or `user.wallet.address` —
+ *     those return any locally-injected provider too (e.g. MetaMask) which
+ *     defeats the whole "everyone gets a Global Wallet" UX.
+ *   - sendTransaction / signMessage come from useCrossAppAccounts and need
+ *     `{ address }` as the second arg (CrossAppWalletOptions).
+ *
  * Built via `node scripts/build-privy-vendor.js`. Bundle is loaded by every
- * page that needs auth (SomniaLuck.html, the game pages, etc.) BEFORE the
- * vanilla `lib/wallet.js` module that consumes it.
+ * page that needs auth BEFORE the vanilla `lib/wallet.js` module.
  * ========================================================================= */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { PrivyProvider, usePrivy, useWallets, useCrossAppAccounts } from '@privy-io/react-auth';
+import { PrivyProvider, usePrivy, useCrossAppAccounts } from '@privy-io/react-auth';
 import { somniaTestnet, somnia as somniaMainnet } from 'viem/chains';
 
-// Public Somnia Provider App ID per docs.somnia.network — stable, not a secret.
+// Public Somnia Provider App ID per docs.somnia.network — stable identifier,
+// not a secret. Hardcoded so it can never drift from the dashboard setting.
 const SOMNIA_PROVIDER_APP_ID = 'cm8d9yzp2013kkr612h8ymoq8';
+
+// ----------------------------------------------------------------------------
+// Tiny event emitter so vanilla code can subscribe to auth changes via
+// window.ShinyLuckAuth.onChange(callback). Each emit calls every listener with
+// the current public api object.
+// ----------------------------------------------------------------------------
+const listeners = new Set();
+function emit(api) {
+  for (const fn of listeners) { try { fn(api); } catch (e) { console.error('[privy] listener threw:', e); } }
+}
+function onChange(cb) {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+
+// ----------------------------------------------------------------------------
+// Pre-mount stub: window.ShinyLuckAuth is set to this BEFORE React renders so
+// vanilla code that loads earlier doesn't NPE on `.ready`, `.login`, etc.
+// ----------------------------------------------------------------------------
+function makeStub(ready) {
+  const rejectNotReady = () => Promise.reject(new Error('Privy not ready yet'));
+  return {
+    ready, authenticated: false, user: null, address: null,
+    backend: ready ? 'privy' : 'privy-stub',
+    login: rejectNotReady,
+    logout: () => Promise.resolve(),
+    sendTransaction: rejectNotReady,
+    signMessage: rejectNotReady,
+    onChange,
+  };
+}
 
 // ----------------------------------------------------------------------------
 // AuthBridge — runs inside PrivyProvider; publishes auth state to window.
 // ----------------------------------------------------------------------------
 function AuthBridge() {
   const { ready, authenticated, user, logout: doLogout } = usePrivy();
-  const { wallets } = useWallets();
   const cross = useCrossAppAccounts();
 
+  // Resolve the CROSS-APP address (NOT useWallets). The cross-app linked
+  // account is what the Somnia Provider App returned when the user logged in
+  // via loginWithCrossAppAccount — that's the address we want to transact
+  // with, and it follows the user across every Somnia-partner dApp.
+  const address = useMemo(() => {
+    if (!authenticated || !user || !Array.isArray(user.linkedAccounts)) return null;
+    const crossApp = user.linkedAccounts.find(
+      (a) => a && a.type === 'cross_app' && a.providerApp && a.providerApp.id === SOMNIA_PROVIDER_APP_ID,
+    );
+    if (!crossApp) return null;
+    const embedded = (crossApp.embeddedWallets || [])[0];
+    return embedded?.address || null;
+  }, [authenticated, user]);
+
+  // Stable refs for the callbacks so the api object identity is consistent
+  // across re-renders (otherwise listeners would fire on every render).
+  const crossRef = useRef(cross);
+  const logoutRef = useRef(doLogout);
+  useEffect(() => { crossRef.current = cross; logoutRef.current = doLogout; });
+
   useEffect(() => {
-    // Even before `ready`, expose a non-ready stub so vanilla code doesn't NPE.
     if (!ready) {
-      window.ShinyLuckAuth = makeStub({ ready: false });
+      const stub = makeStub(false);
+      window.ShinyLuckAuth = stub;
+      emit(stub);
       document.dispatchEvent(new CustomEvent('shinyluck:auth-state', {
         detail: { ready: false, authenticated: false, address: null },
       }));
       return;
     }
-
-    // The first Somnia Global Wallet entry is what we transact with.
-    const wallet = wallets?.[0] || null;
-    const address = wallet?.address || null;
 
     const api = {
       ready: true,
@@ -47,21 +107,27 @@ function AuthBridge() {
       user,
       address,
       backend: 'privy',
+      onChange,
 
       login: async () => {
-        return await cross.loginWithCrossAppAccount({ appId: SOMNIA_PROVIDER_APP_ID });
+        // Opens Privy's cross-app login flow → Somnia Provider App → email
+        // magic link. On success, user.linkedAccounts grows by one cross_app
+        // entry and the useMemo above re-resolves `address`.
+        return await crossRef.current.loginWithCrossAppAccount({ appId: SOMNIA_PROVIDER_APP_ID });
       },
-      logout: () => doLogout(),
+      logout: () => logoutRef.current(),
       sendTransaction: async (tx) => {
-        if (!address) throw new Error('not logged in');
-        return await cross.sendTransaction(tx, { address });
+        if (!address) throw new Error('Privy: not logged in (no cross-app address)');
+        return await crossRef.current.sendTransaction(tx, { address });
       },
-      signMessage: async (msg) => {
-        if (!address) throw new Error('not logged in');
-        return await cross.signMessage(msg, { address });
+      signMessage: async (message) => {
+        if (!address) throw new Error('Privy: not logged in (no cross-app address)');
+        // CrossAppMessageOptions expects { message } as the first arg.
+        return await crossRef.current.signMessage({ message }, { address });
       },
     };
     window.ShinyLuckAuth = api;
+    emit(api);
 
     document.dispatchEvent(new CustomEvent('shinyluck:auth-state', {
       detail: { ready: true, authenticated, address },
@@ -71,24 +137,9 @@ function AuthBridge() {
         detail: { address, backend: 'privy' },
       }));
     }
-  }, [ready, authenticated, user, wallets, cross, doLogout]);
+  }, [ready, authenticated, user, address]);
 
   return null;
-}
-
-function makeStub({ ready }) {
-  const rejectNotReady = () => Promise.reject(new Error('Privy not ready yet'));
-  return {
-    ready,
-    authenticated: false,
-    user: null,
-    address: null,
-    backend: 'privy-stub',
-    login: rejectNotReady,
-    logout: () => Promise.resolve(),
-    sendTransaction: rejectNotReady,
-    signMessage: rejectNotReady,
-  };
 }
 
 // ----------------------------------------------------------------------------
@@ -100,7 +151,6 @@ function App() {
   const chain = isMainnet ? somniaMainnet : somniaTestnet;
 
   if (!cfg.privyAppId) {
-    // Helpful console error so missing dashboard config surfaces early.
     console.error('[privy] SHINYLUCK_CONFIG.privyAppId is missing — set it in frontend/lib/config.js');
   }
 
@@ -108,15 +158,19 @@ function App() {
     <PrivyProvider
       appId={cfg.privyAppId || ''}
       config={{
-        // Only email login (per session spec — minimal surface).
-        loginMethods: ['email'],
+        // Object-form loginMethods — restricts Privy's modal to EXACTLY these
+        // two primary options. The `privy:<app-id>` entry tells Privy to show
+        // a "Continue with Somnia" button that triggers cross-app login.
+        // (Per docs.somnia.network/.../authenticating-with-privy.)
+        loginMethods: {
+          primary: ['email', `privy:${SOMNIA_PROVIDER_APP_ID}`],
+        },
         defaultChain: chain,
         supportedChains: [chain],
         embeddedWallets: {
           createOnLogin: 'users-without-wallets',
-          // Headless mode — no Privy modal pops up per transaction. Combined
-          // with the dashboard's "Disable confirmation modals" toggle, our
-          // game txs go through with zero prompts.
+          // Headless mode — no per-tx modal. Belt+suspenders with the
+          // dashboard's "Disable confirmation modals" toggle.
           showWalletUIs: false,
         },
         appearance: {
@@ -137,11 +191,11 @@ function App() {
 function mount() {
   if (document.getElementById('__privy-root')) return; // already mounted
   // pre-mount stub so vanilla code calling window.ShinyLuckAuth.login won't crash
-  if (!window.ShinyLuckAuth) window.ShinyLuckAuth = makeStub({ ready: false });
+  if (!window.ShinyLuckAuth) window.ShinyLuckAuth = makeStub(false);
 
   const el = document.createElement('div');
   el.id = '__privy-root';
-  // visually invisible — Privy's hosted UI iframes anchor themselves elsewhere
+  // visually invisible — Privy's hosted UI anchors itself elsewhere via portals
   el.style.cssText = 'position:fixed;top:-99999px;left:-99999px;width:0;height:0;pointer-events:none;';
   document.body.appendChild(el);
 

@@ -21,6 +21,11 @@ export const CONFIG = {
   },
 };
 
+// Named exports for code that doesn't want to drill into CONFIG.
+export const PRIVY_APP_ID = CONFIG.privyAppId;
+export const SOMNIA_PROVIDER_APP_ID = CONFIG.somniaProviderAppId;
+export const CASINO_ADDRESS = CONFIG.casino;
+
 // Expose to the non-module partials.js loader so it can render real
 // addresses / agent IDs / network in the boot animation lines and footer.
 // Also expose as SHINYLUCK_CONFIG so the Privy vendor bundle finds privyAppId.
