@@ -2,42 +2,45 @@
  * privy-entry.jsx — bundled into frontend/vendor/privy.bundle.js
  *
  * Mounts a headless React root that hosts the PrivyProvider context, then
- * publishes auth state and the cross-app send-transaction / sign-message
- * methods onto `window.ShinyLuckAuth` so the rest of our vanilla JS can use
- * them without knowing React is involved.
+ * publishes auth state and send-transaction / sign-message methods onto
+ * `window.ShinyLuckAuth` so the rest of our vanilla JS can use them without
+ * knowing React is involved.
  *
- * CRITICAL — Somnia Global Wallet integration:
- *   - loginMethods is a FLAT array, including the cross-app provider via the
- *     `privy:<provider-app-id>` entry. The Privy 3.x SDK reads it as an array
- *     (it calls `loginMethods.includes(...)` internally and iterates for any
- *     `'privy:'` prefix entries to enable cross-app). Using the older
- *     "object form" `{ primary: [...] }` crashes the SDK with
- *     "t.loginMethods.includes is not a function" — verified live in 3.26.0.
- *   - The address we transact with is the CROSS-APP wallet — resolved from
- *     `user.linkedAccounts` filtered by `type === 'cross_app'` and the Somnia
- *     Provider App ID. NEVER read `useWallets()` or `user.wallet.address` —
- *     those return any locally-injected provider too (e.g. MetaMask) which
- *     defeats the whole "everyone gets a Global Wallet" UX.
- *   - sendTransaction / signMessage come from useCrossAppAccounts and need
- *     `{ address }` as the second arg (CrossAppWalletOptions).
+ * ============================================================================
+ * ZERO-POPUP DESIGN — Privy embedded wallet (not cross-app)
  *
- * Built via `node scripts/build-privy-vendor.js`. Bundle is loaded by every
- * page that needs auth BEFORE the vanilla `lib/wallet.js` module.
+ * Rationale: the architect's earlier spec used Privy cross-app login against
+ * the Somnia Provider App (cm8d9yzp...). That works for login but every
+ * sendTransaction triggers the provider's hosted "Approve" modal (lives at
+ * privy.somnia.network/oauth/transact). That modal is the provider's
+ * security flow — we can't suppress it from our side. The user explicitly
+ * asked for "transactions auto-confirm".
+ *
+ * Embedded wallets keep the magic-link login UX but Privy creates the wallet
+ * inside our app (createOnLogin: 'users-without-wallets'). Combined with
+ * `embeddedWallets.showWalletUIs: false` AND the Privy dashboard toggle
+ * "Disable confirmation modals", every sendTransaction fires with no UI.
+ *
+ * Trade-off: the embedded wallet address is app-scoped, not a Somnia Global
+ * Wallet. The user does NOT see the same address across other Somnia-partner
+ * apps. For this hackathon submission, smooth UX > shared-wallet branding.
+ *
+ * If you ever want to reintroduce cross-app for Global Wallet branding while
+ * keeping zero popups, the path is:
+ *   1) Add `'privy:cm8d9yzp...'` back to loginMethods (cross-app option).
+ *   2) Resolve address from `user.linkedAccounts.find(cross_app...)`.
+ *   3) Use `useCrossAppAccounts().sendTransaction(tx, { address })`.
+ *   4) Get Somnia to allowlist our app on their provider side so the per-tx
+ *      modal is skipped (only Somnia can do this — not user-configurable).
  * ========================================================================= */
 
 import React, { useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { PrivyProvider, usePrivy, useCrossAppAccounts } from '@privy-io/react-auth';
+import { PrivyProvider, usePrivy, useWallets, useSendTransaction, useSignMessage } from '@privy-io/react-auth';
 import { somniaTestnet, somnia as somniaMainnet } from 'viem/chains';
 
-// Public Somnia Provider App ID per docs.somnia.network — stable identifier,
-// not a secret. Hardcoded so it can never drift from the dashboard setting.
-const SOMNIA_PROVIDER_APP_ID = 'cm8d9yzp2013kkr612h8ymoq8';
-
 // ----------------------------------------------------------------------------
-// Tiny event emitter so vanilla code can subscribe to auth changes via
-// window.ShinyLuckAuth.onChange(callback). Each emit calls every listener with
-// the current public api object.
+// Tiny event emitter so vanilla code can subscribe to auth changes.
 // ----------------------------------------------------------------------------
 const listeners = new Set();
 function emit(api) {
@@ -69,28 +72,32 @@ function makeStub(ready) {
 // AuthBridge — runs inside PrivyProvider; publishes auth state to window.
 // ----------------------------------------------------------------------------
 function AuthBridge() {
-  const { ready, authenticated, user, logout: doLogout } = usePrivy();
-  const cross = useCrossAppAccounts();
+  const { ready, authenticated, user, login: doLogin, logout: doLogout } = usePrivy();
+  const { wallets } = useWallets();
+  const { sendTransaction: privySendTx } = useSendTransaction();
+  const { signMessage: privySignMsg } = useSignMessage();
 
-  // Resolve the CROSS-APP address (NOT useWallets). The cross-app linked
-  // account is what the Somnia Provider App returned when the user logged in
-  // via loginWithCrossAppAccount — that's the address we want to transact
-  // with, and it follows the user across every Somnia-partner dApp.
+  // Resolve the EMBEDDED wallet (the one Privy created for us via
+  // createOnLogin: 'users-without-wallets'). walletClientType==='privy' is
+  // the marker for embedded; injected wallets like MetaMask would be
+  // walletClientType==='injected' / 'metamask'.
   const address = useMemo(() => {
-    if (!authenticated || !user || !Array.isArray(user.linkedAccounts)) return null;
-    const crossApp = user.linkedAccounts.find(
-      (a) => a && a.type === 'cross_app' && a.providerApp && a.providerApp.id === SOMNIA_PROVIDER_APP_ID,
-    );
-    if (!crossApp) return null;
-    const embedded = (crossApp.embeddedWallets || [])[0];
-    return embedded?.address || null;
-  }, [authenticated, user]);
+    if (!authenticated || !Array.isArray(wallets) || wallets.length === 0) return null;
+    const embedded = wallets.find(w => w?.walletClientType === 'privy');
+    return embedded?.address || wallets[0]?.address || null;
+  }, [authenticated, wallets]);
 
-  // Stable refs for the callbacks so the api object identity is consistent
-  // across re-renders (otherwise listeners would fire on every render).
-  const crossRef = useRef(cross);
+  // Stable refs so the api object identity is consistent across re-renders.
+  const sendTxRef = useRef(privySendTx);
+  const signMsgRef = useRef(privySignMsg);
   const logoutRef = useRef(doLogout);
-  useEffect(() => { crossRef.current = cross; logoutRef.current = doLogout; });
+  const loginRef = useRef(doLogin);
+  useEffect(() => {
+    sendTxRef.current = privySendTx;
+    signMsgRef.current = privySignMsg;
+    logoutRef.current = doLogout;
+    loginRef.current = doLogin;
+  });
 
   useEffect(() => {
     if (!ready) {
@@ -111,21 +118,27 @@ function AuthBridge() {
       backend: 'privy',
       onChange,
 
-      login: async () => {
-        // Opens Privy's cross-app login flow → Somnia Provider App → email
-        // magic link. On success, user.linkedAccounts grows by one cross_app
-        // entry and the useMemo above re-resolves `address`.
-        return await crossRef.current.loginWithCrossAppAccount({ appId: SOMNIA_PROVIDER_APP_ID });
-      },
+      login: () => loginRef.current(),
       logout: () => logoutRef.current(),
+
+      // sendTransaction: per-call UI suppressed (uiOptions.showWalletUIs:false).
+      // Combined with the dashboard's "Disable confirmation modals" toggle,
+      // this is the "txs auto-confirm" path the user wants.
       sendTransaction: async (tx) => {
-        if (!address) throw new Error('Privy: not logged in (no cross-app address)');
-        return await crossRef.current.sendTransaction(tx, { address });
+        if (!address) throw new Error('Privy: not logged in (no embedded wallet)');
+        const result = await sendTxRef.current(
+          { to: tx.to, value: tx.value, data: tx.data, chainId: tx.chainId },
+          { address, uiOptions: { showWalletUIs: false } },
+        );
+        return result;
       },
       signMessage: async (message) => {
-        if (!address) throw new Error('Privy: not logged in (no cross-app address)');
-        // CrossAppMessageOptions expects { message } as the first arg.
-        return await crossRef.current.signMessage({ message }, { address });
+        if (!address) throw new Error('Privy: not logged in (no embedded wallet)');
+        const result = await signMsgRef.current(
+          { message },
+          { address, uiOptions: { showWalletUIs: false } },
+        );
+        return result?.signature || result;
       },
     };
     window.ShinyLuckAuth = api;
@@ -160,14 +173,9 @@ function App() {
     <PrivyProvider
       appId={cfg.privyAppId || ''}
       config={{
-        // Flat-array loginMethods — Privy 3.x SDK contract. The `privy:<id>`
-        // entry tells the SDK to show a "Continue with Somnia" button that
-        // triggers cross-app login against the Somnia Provider App. The SDK
-        // iterates this array for any 'privy:' prefix entries to wire up
-        // cross-app providers (see Privy source: it calls
-        // `loginMethods.includes(...)` and `for (let m of loginMethods) if
-        // (m.startsWith('privy:')) ...`).
-        loginMethods: ['email', `privy:${SOMNIA_PROVIDER_APP_ID}`],
+        // Email-only login. Drop the cross-app `privy:<somnia>` entry — that
+        // path triggers a per-tx provider modal we can't suppress (see header).
+        loginMethods: ['email'],
         defaultChain: chain,
         supportedChains: [chain],
         embeddedWallets: {
@@ -179,7 +187,7 @@ function App() {
         appearance: {
           theme: 'dark',
           accentColor: '#7c3aed',
-          logo: '/assets/logo.svg',
+          // logo: '/assets/logo.svg',  // removed — file doesn't exist, was 404
         },
       }}
     >
@@ -189,16 +197,14 @@ function App() {
 }
 
 // ----------------------------------------------------------------------------
-// Auto-mount: invoked when the bundle loads
+// Auto-mount
 // ----------------------------------------------------------------------------
 function mount() {
-  if (document.getElementById('__privy-root')) return; // already mounted
-  // pre-mount stub so vanilla code calling window.ShinyLuckAuth.login won't crash
+  if (document.getElementById('__privy-root')) return;
   if (!window.ShinyLuckAuth) window.ShinyLuckAuth = makeStub(false);
 
   const el = document.createElement('div');
   el.id = '__privy-root';
-  // visually invisible — Privy's hosted UI anchors itself elsewhere via portals
   el.style.cssText = 'position:fixed;top:-99999px;left:-99999px;width:0;height:0;pointer-events:none;';
   document.body.appendChild(el);
 

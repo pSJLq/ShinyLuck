@@ -74,6 +74,14 @@ document.addEventListener("shinyluck:chrome-ready", () => {
   if (connected && lastConnectedAddr) markButtonsConnected(lastConnectedAddr);
 });
 
+// Safety net: any open connect modal should close as soon as we are
+// connected, even if the modal's own click-handler didn't resolve in time
+// (e.g. user dismissed before async login completed; or `shinyluck:connected`
+// fires from a different path than the modal's await).
+document.addEventListener("shinyluck:connected", () => {
+  document.querySelectorAll(".sl-conn-mask").forEach((m) => m.remove());
+});
+
 // ---------------------------------------------------------------------------
 // Privy path
 // ---------------------------------------------------------------------------
