@@ -38,13 +38,53 @@
 
 <div id="slot-root"></div>
 
-<!-- Shared site footer (contracts, links, disclaimers). -->
-<div data-mount="footer"></div>
+<!-- Site footer — inlined (see sugar/index.html for rationale). -->
+<footer class="sl-slot-footer">
+  <div class="sl-slot-footer-row">
+    <div class="sl-slot-footer-brand">
+      <span class="brackets">{</span><span class="name"><b>l</b></span><span class="brackets">}</span>
+      <b>ShinyLuck</b><span class="sl-slot-footer-tag"> · agent-settled casino on Somnia</span>
+    </div>
+    <div class="sl-slot-footer-links">
+      <a href="../../SomniaLuck.html">Lobby</a>
+      <a href="../../fair.html">Provably Fair</a>
+      <a href="../../leaderboard.html">Leaderboard</a>
+      <a href="../../docs.html">Docs</a>
+    </div>
+    <div class="sl-slot-footer-addrs" id="sl-slot-footer-addrs">contracts: loading…</div>
+  </div>
+  <div class="sl-slot-footer-row sl-slot-footer-bottom">
+    <span>© 2026 ShinyLuck · 18+ play responsibly</span>
+    <span><b>Somnia Testnet</b> · the Agentic L1</span>
+  </div>
+</footer>
+<style>
+  .sl-slot-footer { padding: 32px 5% 24px; border-top: 1px solid rgba(255,255,255,0.06); font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--fg-mute, #6b6b75); background: rgba(8,10,18,0.7); }
+  .sl-slot-footer-row { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+  .sl-slot-footer-row + .sl-slot-footer-row { margin-top: 14px; padding-top: 14px; border-top: 1px dashed rgba(255,255,255,0.06); }
+  .sl-slot-footer-brand b { color: #fafafa; }
+  .sl-slot-footer-brand .brackets { color: var(--cyan, #4ee3ff); }
+  .sl-slot-footer-brand .name { color: #fafafa; padding: 0 1px; }
+  .sl-slot-footer-tag { color: var(--fg-mute, #6b6b75); margin-left: 6px; }
+  .sl-slot-footer-links { display: flex; gap: 22px; }
+  .sl-slot-footer-links a { color: var(--fg-mute, #b6b0c8); text-decoration: none; transition: color .15s; }
+  .sl-slot-footer-links a:hover { color: var(--cyan, #4ee3ff); }
+  .sl-slot-footer-addrs { font-size: 10.5px; opacity: .8; }
+  .sl-slot-footer-addrs a { color: var(--cyan, #4ee3ff); text-decoration: none; }
+  .sl-slot-footer-bottom { font-size: 10.5px; color: rgba(180,180,200,.45); }
+</style>
 
-<!-- Privy vendor bundle — must load BEFORE wallet.js so window.ShinyLuckAuth
-     is initialised (even as a not-ready stub) before any module touches it. -->
+<!-- Privy vendor bundle. -->
 <script src="/vendor/privy.bundle.js"></script>
-<script src="/partials.js" defer></script>
+<script type="module">
+  import { CONFIG } from '/lib/config.js';
+  const el = document.getElementById('sl-slot-footer-addrs');
+  if (el) {
+    const short = (a) => a ? `${a.slice(0,6)}…${a.slice(-4)}` : '—';
+    const link = (label, addr) => `<a href="https://shannon-explorer.somnia.network/address/${addr}" target="_blank">${label}: ${short(addr)}</a>`;
+    el.innerHTML = `${link('Casino', CONFIG.casino)} · ${link('HM', CONFIG.houseManager)} · ${link('Registry', CONFIG.registry)}`;
+  }
+</script>
 
 <div class="v7-gate" id="gate" style="display:none">
   <div class="card">
@@ -110,6 +150,15 @@
       },
 
       onBuyBonusRequest: async (stakeWei) => {
+        // See sugar/index.html — buy bonus needs ~150,000× stake in bankroll.
+        const free = await SL.casino.freeBankroll();
+        const required = BigInt(stakeWei) * 75n * 2000n;
+        if (required > free) {
+          const human = (Number(required) / 1e18).toFixed(0);
+          const have = (Number(free) / 1e18).toFixed(2);
+          toast(`Buy bonus needs ~${human} STT in bankroll, casino has ${have} STT. Spin normally instead.`, { kind: 'warn', ttl: 6000 });
+          throw new Error('buy-bonus: insufficient casino bankroll');
+        }
         const stake = await clampOrToast(stakeWei, 'slots');
         const placeRes = await SL.buyBonusVault7(Number(stake) / 1e18);
         const settled = await SL.waitForSettle(placeRes.betId);

@@ -24,6 +24,21 @@ export const GAME = {
   dice: 0, crash: 1, slots: 2, mines: 3, plinko: 4, roulette: 5, cluster: 6,
 };
 
+// Per-game payout cap multiplier (basis 100), mirroring Casino.sol constants.
+// Used to bound max stake so `_openBet`'s `reserveAdd > free + amount` check
+// (=> BankrollInsufficient revert, error 0x8f523bc4) is never triggered.
+// For each game: maxPayout = stake * capX100 / 100. The contract requires
+// `maxPayout - amount <= free + amount` ⇒ `amount <= free / (capX100/100 - 2)`.
+// Games without a static cap (DICE depends on win-chance, CRASH/PLINKO on
+// internal multipliers, ROULETTE on bet kind) are not clamped here — their
+// own pre-submit logic computes payout directly.
+const PAYOUT_CAP_X100 = {
+  [GAME.slots]:   200000,  // VAULT.7  — 2000×
+  [GAME.cluster]: 250000,  // SUGAR.LAB — 2500×
+  [GAME.mines]:    10000,  // 100×
+  // dice, crash, plinko, roulette: no constant cap → omit
+};
+
 const TTL_MS = 10_000;
 const cache = new Map(); // key=game id → { maxBet: bigint, ts: number }
 
@@ -53,8 +68,22 @@ export async function readMaxBet(game = "dice") {
       casino.maxBetBps(),
       casino.gameMaxBet(id),
     ]);
-    const bpsCap = (BigInt(bankroll) * BigInt(bps)) / 10_000n;
-    mb = gMax > 0n && gMax < bpsCap ? BigInt(gMax) : bpsCap;
+    // Three independent caps, take the tightest:
+    //   bpsCap     : free × maxBetBps / 10000  (config-controlled risk %)
+    //   gMax       : per-game hardcap (gameMaxBet, set at deploy time)
+    //   payoutCap  : free / (capX100/100 - 2)  ← guards BankrollInsufficient
+    //                                            on the contract's reserveAdd check
+    const free = BigInt(bankroll);
+    const bpsCap = (free * BigInt(bps)) / 10_000n;
+    const candidates = [bpsCap];
+    if (gMax > 0n) candidates.push(BigInt(gMax));
+    const capX100 = PAYOUT_CAP_X100[id];
+    if (capX100) {
+      // stake × (capX100/100 - 2) ≤ free  ⇒  stake ≤ free × 100 / (capX100 - 200)
+      const denom = BigInt(capX100) - 200n;
+      if (denom > 0n) candidates.push((free * 100n) / denom);
+    }
+    mb = candidates.reduce((m, c) => (c < m ? c : m));
   } catch (e) {
     // Fallback: assume the default formula bankroll/100. Better than throwing
     // because some UIs render before wallet has finished bootstrapping.

@@ -11,16 +11,17 @@ const WEI_PER_STT = 1_000_000_000_000_000_000n;
 const fmtStt = (wei, d=2) => (Number(BigInt(wei)) / 1e18).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+// VAULT.7 reserves stake × 2000 from bankroll. See sugar/api.js comment.
 const STAKE_STEPS_WEI = [
-  10n  * WEI_PER_STT / 100n,
-  25n  * WEI_PER_STT / 100n,
-  50n  * WEI_PER_STT / 100n,
-  100n * WEI_PER_STT / 100n,
-  250n * WEI_PER_STT / 100n,
-  500n * WEI_PER_STT / 100n,
-  1000n * WEI_PER_STT / 100n,
-  2500n * WEI_PER_STT / 100n,
-  5000n * WEI_PER_STT / 100n,
+  1n    * WEI_PER_STT / 1000n,   // 0.001
+  5n    * WEI_PER_STT / 1000n,   // 0.005
+  10n   * WEI_PER_STT / 1000n,   // 0.010
+  25n   * WEI_PER_STT / 1000n,   // 0.025
+  50n   * WEI_PER_STT / 1000n,   // 0.050
+  100n  * WEI_PER_STT / 1000n,   // 0.100
+  250n  * WEI_PER_STT / 1000n,   // 0.250
+  500n  * WEI_PER_STT / 1000n,   // 0.500
+  1000n * WEI_PER_STT / 1000n,   // 1.000
 ];
 
 export class Vault7Slot {
@@ -31,7 +32,7 @@ export class Vault7Slot {
     this.mode = options.mode || 'demo';
 
     this.balance = options.initialBalance ?? 1000n * WEI_PER_STT;
-    this.stakeIdx = 3;
+    this.stakeIdx = 2; // 0.010 STT default — fits under typical testnet bankroll's vault cap
     this.minStake = options.minStake ?? STAKE_STEPS_WEI[0];
     this.maxStake = options.maxStake ?? STAKE_STEPS_WEI[STAKE_STEPS_WEI.length - 1];
     this.freeSpinsRemaining = 0;

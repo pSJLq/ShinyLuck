@@ -23,16 +23,22 @@ const fmtStt = (wei, d=2) => (Number(BigInt(wei)) / 1e18).toLocaleString('en-US'
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // --------------- preset stakes (in wei) ----------------
+// Cluster reserves stake × 2500 from bankroll. With a typical testnet
+// bankroll (50-100 STT) the effective max stake is ~0.02-0.04 STT. The
+// presets start at 0.001 STT so the user always has a workable step under
+// the live cap (the UI clamps to live maxBet, see clampOrToast in
+// frontend/games/sugar/index.html). On a much larger bankroll, the upper
+// steps become reachable.
 const STAKE_STEPS_WEI = [
-  10n  * WEI_PER_STT / 100n,    // 0.10
-  25n  * WEI_PER_STT / 100n,    // 0.25
-  50n  * WEI_PER_STT / 100n,    // 0.50
-  100n * WEI_PER_STT / 100n,    // 1.00
-  250n * WEI_PER_STT / 100n,    // 2.50
-  500n * WEI_PER_STT / 100n,    // 5.00
-  1000n * WEI_PER_STT / 100n,   // 10.00
-  2500n * WEI_PER_STT / 100n,   // 25.00
-  5000n * WEI_PER_STT / 100n,   // 50.00
+  1n    * WEI_PER_STT / 1000n,   // 0.001
+  5n    * WEI_PER_STT / 1000n,   // 0.005
+  10n   * WEI_PER_STT / 1000n,   // 0.010
+  25n   * WEI_PER_STT / 1000n,   // 0.025
+  50n   * WEI_PER_STT / 1000n,   // 0.050
+  100n  * WEI_PER_STT / 1000n,   // 0.100
+  250n  * WEI_PER_STT / 1000n,   // 0.250
+  500n  * WEI_PER_STT / 1000n,   // 0.500
+  1000n * WEI_PER_STT / 1000n,   // 1.000
 ];
 
 export class SugarSlot {
@@ -44,7 +50,7 @@ export class SugarSlot {
 
     // ----- state -----
     this.balance = options.initialBalance ?? 1000n * WEI_PER_STT;
-    this.stakeIdx = 3; // 1.00 STT default
+    this.stakeIdx = 2; // 0.010 STT default — fits under typical testnet bankroll's cluster cap
     this.minStake = options.minStake ?? STAKE_STEPS_WEI[0];
     this.maxStake = options.maxStake ?? STAKE_STEPS_WEI[STAKE_STEPS_WEI.length - 1];
     this.charge = options.initialChargeMeter?.current ?? 0;
