@@ -36,7 +36,7 @@
 
 import React, { useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { PrivyProvider, usePrivy, useWallets, useSendTransaction, useSignMessage } from '@privy-io/react-auth';
+import { PrivyProvider, usePrivy, useWallets, useSendTransaction, useSignMessage, useCreateWallet } from '@privy-io/react-auth';
 import { somniaTestnet, somnia as somniaMainnet } from 'viem/chains';
 
 // ----------------------------------------------------------------------------
@@ -76,16 +76,38 @@ function AuthBridge() {
   const { wallets } = useWallets();
   const { sendTransaction: privySendTx } = useSendTransaction();
   const { signMessage: privySignMsg } = useSignMessage();
+  const { createWallet } = useCreateWallet();
 
-  // Resolve the EMBEDDED wallet (the one Privy created for us via
-  // createOnLogin: 'users-without-wallets'). walletClientType==='privy' is
-  // the marker for embedded; injected wallets like MetaMask would be
-  // walletClientType==='injected' / 'metamask'.
+  // Resolve the EMBEDDED wallet (walletClientType==='privy'). NOT any injected
+  // (MetaMask) or cross-app wallet. If user authenticated but has no embedded
+  // (e.g. previous cross-app session is cached), the next effect below
+  // auto-creates one. We deliberately do NOT fall back to a cross-app address
+  // here — that would route us back to the per-tx Approve modal we just got rid of.
   const address = useMemo(() => {
     if (!authenticated || !Array.isArray(wallets) || wallets.length === 0) return null;
     const embedded = wallets.find(w => w?.walletClientType === 'privy');
-    return embedded?.address || wallets[0]?.address || null;
+    return embedded?.address || null;
   }, [authenticated, wallets]);
+
+  // Self-heal: if authenticated but no embedded wallet exists (typical after
+  // migrating from a cross-app session), provision one. Privy will fire
+  // useWallets() with the new wallet on the next render → `address` populates.
+  const creatingWalletRef = useRef(false);
+  useEffect(() => {
+    if (!ready || !authenticated) return;
+    if (address) return;
+    const hasEmbedded = Array.isArray(wallets) && wallets.some(w => w?.walletClientType === 'privy');
+    if (hasEmbedded) return;
+    if (creatingWalletRef.current) return;
+    creatingWalletRef.current = true;
+    createWallet()
+      .then(() => { /* useWallets() will tick — useMemo recomputes `address` */ })
+      .catch((e) => {
+        // 'already has wallet' = race; ignore. Other errors surface in console.
+        if (!/already.*wallet/i.test(e?.message || '')) console.error('[privy] createWallet failed:', e);
+      })
+      .finally(() => { creatingWalletRef.current = false; });
+  }, [ready, authenticated, address, wallets, createWallet]);
 
   // Stable refs so the api object identity is consistent across re-renders.
   const sendTxRef = useRef(privySendTx);

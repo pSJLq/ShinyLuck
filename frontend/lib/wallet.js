@@ -144,9 +144,15 @@ async function connectPrivy() {
   if (!window.ShinyLuckAuth.authenticated) {
     // Triggers Privy's hosted email magic-link UI.
     await window.ShinyLuckAuth.login();
-    // Wait for authenticated state to land.
+  }
+  // Wait for authenticated AND a resolved embedded address. The address may
+  // populate AFTER authenticated=true (Privy creates the embedded wallet
+  // asynchronously, especially when migrating from a cached cross-app session).
+  // AuthBridge in privy-entry.jsx self-heals via useCreateWallet() — we just
+  // wait for the auth-state event with both fields set.
+  if (!window.ShinyLuckAuth.authenticated || !window.ShinyLuckAuth.address) {
     await new Promise((resolve, reject) => {
-      const t = setTimeout(() => { document.removeEventListener("shinyluck:auth-state", on); reject(new Error("Privy auth timeout")); }, 120_000);
+      const t = setTimeout(() => { document.removeEventListener("shinyluck:auth-state", on); reject(new Error("Privy auth timeout (no embedded address after 120s)")); }, 120_000);
       function on(ev) {
         if (ev.detail?.authenticated && ev.detail.address) {
           clearTimeout(t);
@@ -155,6 +161,12 @@ async function connectPrivy() {
         }
       }
       document.addEventListener("shinyluck:auth-state", on);
+      // Fast-path: if state already correct (event fired before we attached), resolve now.
+      if (window.ShinyLuckAuth?.authenticated && window.ShinyLuckAuth?.address) {
+        clearTimeout(t);
+        document.removeEventListener("shinyluck:auth-state", on);
+        resolve();
+      }
     });
   }
   attachPrivySigner();
