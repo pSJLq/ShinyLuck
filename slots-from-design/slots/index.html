@@ -7,23 +7,32 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../styles.css">
-<link rel="stylesheet" href="_vault7/somnia.css">
-<link rel="stylesheet" href="_vault7/slots.css">
-<script src="../partials.js" defer></script>
-<script type="module" src="../lib/wallet.js"></script>
-<script type="module" src="../lib/livedata.js"></script>
-<script type="module" src="../lib/games/vault7.js"></script>
+<link rel="stylesheet" href="somnia.css">
+<link rel="stylesheet" href="slots.css">
 </head>
 <body data-active-page="games">
 <div data-page-shell>
-<div data-mount="nav"></div>
 
-<div style="padding: 24px 32px 0; max-width: 1480px; margin: 0 auto;">
+  <!-- nav (matches Somnia chrome) -->
+  <div class="nav-bar">
+    <div class="brand">SHINY<span class="accent">·</span>LUCK</div>
+    <div class="navlinks">
+      <a href="#">Casino</a>
+      <a href="#" class="active">Games</a>
+      <a href="#">Sportsbook</a>
+      <a href="#">Provably Fair</a>
+      <a href="#">Vault</a>
+    </div>
+    <div class="right">
+      <div class="bal">1,000.00 STT</div>
+      <div class="deposit">Deposit</div>
+    </div>
+  </div>
+
   <div class="crumb">
-    <a href="../SomniaLuck.html#games" data-link>Games</a>
+    <a href="#" data-link>Games</a>
     <span class="sep">/</span>
-    <a href="../SomniaLuck.html#games" data-link>Slots</a>
+    <a href="#" data-link>Slots</a>
     <span class="sep">/</span>
     <span class="here">VAULT.7 — The Crypto Vault</span>
   </div>
@@ -36,9 +45,8 @@
     <div class="game-hero-meta">
       <div class="m">RTP<b class="cyan">96.04%</b></div>
       <div class="m">Volatility<b class="purple">HIGH</b></div>
-      <div class="m">Max Win<b class="gold">2,000×</b></div>
-      <div class="m">Max Bet<b data-sl="maxBet" data-game="slots">— STT</b></div>
-      <div class="m">House Edge<b data-sl="houseEdge" data-game="slots">—</b></div>
+      <div class="m">Max Win<b class="gold">10,000×</b></div>
+      <div class="m">Provider<b>SHINY ORIGINALS</b></div>
     </div>
   </div>
 
@@ -58,23 +66,19 @@
 
       <div class="reels-frame" id="reelsFrame">
 
-        <!-- Free spins badge -->
+        <!-- free spins badge (top-left) -->
         <div class="free-spins-badge" id="freeSpinsBadge">
           <div class="ttl">FREE SPINS</div>
           <div class="count" id="freeSpinsCount">0</div>
-          <div class="mult">×2 MULTIPLIER</div>
+          <div class="mult">REMAINING · <b>×2</b></div>
         </div>
 
-        <!-- Loyalty progress — surprise drop, no numbers visible to player -->
-        <div class="buy-bonus" id="loyaltyBadge" style="cursor: default;">
-          <div class="ttl">LOYALTY</div>
-          <div style="width: 100%; padding: 6px 0;">
-            <div style="background: rgba(0,0,0,0.4); height: 8px; border-radius: 4px; overflow: hidden; position: relative;">
-              <div id="loyaltyBar" style="height: 100%; background: linear-gradient(90deg, var(--cyan), var(--gold)); width: 0%; transition: width 0.6s ease;"></div>
-            </div>
-          </div>
-          <div class="sub">KEEP PLAYING TO UNLOCK FREE SPINS</div>
-        </div>
+        <!-- BUY BONUS (top-right, FOMO) -->
+        <button class="buy-bonus" id="buyBonus">
+          <div class="ttl">BUY BONUS</div>
+          <div class="price"><span id="buyBonusPrice">75.00</span><small>STT</small></div>
+          <div class="sub">→ 10 FREE SPINS · ×2</div>
+        </button>
 
         <div class="reels" id="reels"></div>
         <svg class="payline-svg" id="paylineSvg"></svg>
@@ -85,13 +89,13 @@
           <span id="winCounterAmt">0.00</span>
         </div>
 
-        <!-- free-spins intro overlay -->
+        <!-- free-spins intro overlay (in-frame) -->
         <div class="fs-intro" id="fsIntro">
           <div class="card">
             <div class="ttl">VAULT CRACKED</div>
-            <div class="num">5</div>
-            <div class="lbl">FREE SPINS UNLOCKED</div>
-            <div class="mult">PLAY THEM AT <b>×2</b></div>
+            <div class="num">10</div>
+            <div class="lbl">FREE SPINS</div>
+            <div class="mult">WITH <b>×2</b> MULTIPLIER</div>
             <div class="hint">CLICK ANYWHERE TO CONTINUE</div>
           </div>
         </div>
@@ -104,23 +108,24 @@
         <div class="pt"><span class="sym-BOLT" style="font-size:14px;font-weight:800;">⚡</span><b>×100</b></div>
         <div class="pt"><span class="sym-COIN" style="font-size:14px;font-weight:800;">⬣</span><b>×60</b></div>
         <div class="pt"><span class="sym-WILD" style="font-size:14px;font-weight:800;">∞</span><b style="color:var(--cyan)">WILD ×800</b></div>
-        <div class="pt"><span class="sym-SCAT" style="font-size:14px;font-weight:800;">✦</span><b style="color:var(--gold)">SCATTER · ON-CHAIN FS</b></div>
+        <div class="pt"><span class="sym-SCAT" style="font-size:14px;font-weight:800;">✦</span><b style="color:var(--gold)">SCATTER → FREE SPINS</b></div>
       </div>
 
       <!-- control bar -->
       <div class="control-bar">
+        <!-- left: bet -->
         <div class="bet-block">
           <div>
             <div class="kbd-label" style="margin-bottom:6px;">STAKE</div>
             <div class="bet-stepper">
               <button id="stakeDn">−</button>
-              <div class="val"><span id="stakeVal">0.10</span><small><span id="stakeFiat">STT</span></small></div>
+              <div class="val"><span id="stakeVal">1.00</span><small><span id="stakeFiat">≈ $1.00</span></small></div>
               <button id="stakeUp">+</button>
             </div>
           </div>
           <div class="bet-side" style="margin-left:18px;">
             <span>TOTAL BET</span>
-            <span class="v cyan"><span id="totalBet">0.10</span> STT</span>
+            <span class="v cyan"><span id="totalBet">1.00</span> STT</span>
           </div>
           <div class="bet-side" style="margin-left:18px;">
             <span>LINES</span>
@@ -128,18 +133,20 @@
           </div>
         </div>
 
+        <!-- center: spin -->
         <div class="spin-cluster">
-          <button class="mini" id="autoBtn" title="Auto-spin · 10"><span class="lbl">AUTO</span></button>
+          <button class="mini" id="autoBtn" title="Autospin · 25"><span class="lbl">AUTO</span></button>
           <button class="btn-spin" id="spinBtn"><span>SPIN</span></button>
-          <button class="mini" id="turboBtn" title="Toggle free-spin mode — only works when you have free spins earned">
-            <span style="font-size:11px;font-weight:700;">FS</span>
+          <button class="mini" id="turboBtn" title="Turbo (T)">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg>
           </button>
         </div>
 
+        <!-- right: balance -->
         <div class="balance-block">
           <div class="lbl">BALANCE</div>
-          <div class="balance"><span class="cur">STT</span><span id="balance">—</span></div>
-          <div class="last-win zero" id="lastWin">— no spin yet</div>
+          <div class="balance"><span class="cur">STT</span><span id="balance">1,000.00</span></div>
+          <div class="last-win zero" id="lastWin">— no win yet</div>
         </div>
       </div>
     </div>
@@ -147,7 +154,7 @@
     <!-- ============ SIDEBAR ============ -->
     <aside class="aside-stack">
 
-      <!-- live winners ticker (real BetSettled events from chain) -->
+      <!-- live winners ticker (FOMO) -->
       <div class="panel">
         <h3>Live wins · feed</h3>
         <div class="ticker">
@@ -161,26 +168,24 @@
         <div class="pt-list" id="paytableList"></div>
       </div>
 
-      <!-- provably fair -->
+      <!-- provably fair (preserved from Somnia DNA) -->
       <div class="panel">
         <h3>Provably fair</h3>
         <div class="fair-row">
           <div class="l">CLIENT SEED</div>
-          <div class="v cyan" id="fairClient" data-sl-fairclient>—</div>
-          <div class="l">SERVER SEED · COMMIT HASH</div>
-          <div class="v purple" id="fairServer" data-sl-fairserver>—</div>
+          <div class="v cyan" id="fairClient">—</div>
+          <div class="l">SERVER SEED · HASH</div>
+          <div class="v purple" id="fairServer">—</div>
           <div class="l">NONCE / BET ID</div>
-          <div class="v" id="fairNonce" data-sl-fairnonce>—</div>
+          <div class="v" id="fairNonce">000000</div>
         </div>
-        <a data-sl-explorer-link href="#" target="_blank" rel="noopener" style="display:none; font-size: 11px; letter-spacing: 1.5px; color: var(--cyan); text-transform: uppercase; margin-top: 8px;">verify on explorer ↗</a>
         <div style="font-size:10px; letter-spacing:1.5px; color:var(--fg-mute); padding-top:8px; border-top: 1px solid var(--line); margin-top: 4px;">
-          Every spin = keccak256(server_seed ‖ client_seed ‖ blockhash ‖ nonce). Reel positions derived from low 40 bits. Verify on explorer after reveal.
+          Every spin combines (server_seed + client_seed + nonce) → reel positions. Verify on the explorer after reveal.
         </div>
       </div>
 
     </aside>
   </div>
-</div>
 </div>
 
 <!-- BIG WIN overlay (fullscreen) -->
@@ -193,6 +198,7 @@
   </div>
 </div>
 
-<div data-mount="footer"></div>
+<script src="engine.js"></script>
+<script src="game.js"></script>
 </body>
 </html>

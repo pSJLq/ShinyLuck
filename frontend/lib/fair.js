@@ -7,11 +7,12 @@
 
 import { ethers } from "https://esm.sh/ethers@6.13.2";
 import { CONFIG } from "./config.js";
-import { provider, fetchLogs, fetchDeploymentBlock } from "./rpc.js";
+import { provider, wsProvider, fetchLogs, fetchDeploymentBlock } from "./rpc.js";
 
-const GAMES = ["DICE","CRASH","SLOTS","MINES","PLINKO","ROULETTE"];
+const GAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.LAB"];
 const ZERO = "0x0000000000000000000000000000000000000000";
-const LOOKBACK = 200_000;
+// 20k blocks ≈ 7 hours on Somnia. Was 200k → cold-start scan 30s+.
+const LOOKBACK = 20_000;
 const EXPLORER = "https://shannon-explorer.somnia.network";
 
 const QUORUM_LEVELS = {
@@ -158,18 +159,24 @@ async function refresh() {
   if (!CONFIG.casino || CONFIG.casino === ZERO) return;
   const dep = await fetchDeploymentBlock();
   const head = await provider().getBlockNumber();
-  const fromBlock = Math.max(dep || head - LOOKBACK, head - LOOKBACK);
+  // Clamp to contract age — never scan blocks before deploy.
+  const fromBlock = dep > 0 ? Math.max(dep, head - LOOKBACK) : (head - LOOKBACK);
 
   const casino = new ethers.Contract(CONFIG.casino, casinoAbi, provider());
   const queryBet = readQueryBetId();
 
   let target = null;
+  // Parallel: fetch settled (always) + quorums (if verifier present) in one shot
+  // — was sequential below; halves cold-start time.
+  const settledPromise = fetchLogs(casino, "BetSettled", fromBlock, head);
+  const quorumsPromise = (CONFIG.agentVerifier && CONFIG.agentVerifier !== ZERO)
+    ? fetchLogs(new ethers.Contract(CONFIG.agentVerifier, verifAbi, provider()), "QuorumResult", fromBlock, head).catch(() => [])
+    : Promise.resolve([]);
+  const [settled, quorums] = await Promise.all([settledPromise, quorumsPromise]);
+
   if (queryBet) {
-    // Specific bet: fetch all settled and pick by id.
-    const settled = await fetchLogs(casino, "BetSettled", fromBlock, head);
     target = settled.find((ev) => ev.args.betId.toString() === queryBet) || null;
   } else {
-    const settled = await fetchLogs(casino, "BetSettled", fromBlock, head);
     if (settled.length > 0) {
       settled.sort((a, b) => b.blockNumber - a.blockNumber || b.logIndex - a.logIndex);
       target = settled[0];
@@ -178,10 +185,8 @@ async function refresh() {
   setReceipt(target);
   if (target) setFlowPreviews(target);
 
-  // QuorumResult
+  // QuorumResult — already fetched above in parallel
   if (CONFIG.agentVerifier && CONFIG.agentVerifier !== ZERO) {
-    const verifier = new ethers.Contract(CONFIG.agentVerifier, verifAbi, provider());
-    const quorums = await fetchLogs(verifier, "QuorumResult", fromBlock, head);
     if (quorums.length > 0) {
       quorums.sort((a, b) => b.blockNumber - a.blockNumber);
       const q = quorums[0];
@@ -207,8 +212,42 @@ async function refresh() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  refresh().catch((e) => console.warn("[fair] initial refresh:", e.message));
-  setInterval(() => refresh().catch(() => {}), 12_000);
+  // Loading gate — hide page-shell until the first refresh resolves so the
+  // user never sees "loading latest receipt…" before real data lands.
+  document.body.dataset.loading = "1";
+  refresh()
+    .catch((e) => console.warn("[fair] initial refresh:", e.message))
+    .finally(() => {
+      delete document.body.dataset.loading;
+      document.dispatchEvent(new CustomEvent("shinyluck:ready"));
+    });
+  // Slow safety poll (every 30s) as a fallback. The WS subscription below
+  // delivers new receipts within ~1s of each settle — no need to spam.
+  setInterval(() => refresh().catch(() => {}), 30_000);
+
+  // Real-time receipt updates: subscribe to BetSettled events via WS so the
+  // page shows the freshest settled bet within ~1s of it landing on chain.
+  // Skipped when the URL pins a specific bet (?betId=…) — that mode shows
+  // exactly one historical receipt.
+  if (!readQueryBetId()) {
+    const ws = wsProvider();
+    if (ws) {
+      try {
+        const casinoAbi = [
+          "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)"
+        ];
+        const c = new ethers.Contract(CONFIG.casino, casinoAbi, ws);
+        const settledTopic = c.interface.getEvent("BetSettled").topicHash;
+        ws.on({ address: CONFIG.casino, topics: [settledTopic] }, () => {
+          // Cheap: just re-run refresh() which will pick up the latest
+          // settled (it sorts by blockNumber desc and grabs [0]).
+          refresh().catch(() => {});
+        });
+      } catch (e) {
+        console.warn("[fair] WS subscribe failed, polling-only:", e.message);
+      }
+    }
+  }
 
   $("[data-sl-fair-copy]")?.addEventListener("click", async () => {
     const json = buildReceiptJSON(lastReceipt);

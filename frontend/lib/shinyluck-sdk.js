@@ -48,6 +48,13 @@ const CASINO_ABI = [
   "function placeDiceBet(uint8 target, bool over, bytes32 clientSeed) payable returns (uint256)",
   "function placeSlotsBet(bytes32 clientSeed,bool useFreeSpin) payable returns (uint256)",
   "function placeClusterBet(bytes32 clientSeed,bool useFreeSpin) payable returns (uint256)",
+  "function buyBonusCluster(bytes32 clientSeed) payable returns (uint256)",
+  "function buyBonusVault7(bytes32 clientSeed) payable returns (uint256)",
+  "function claimChargeReward() external",
+  "function getChargeMeter(address) view returns (uint256 current, uint256 threshold, uint256 pendingReward, uint8 cycle)",
+  "event BuyBonusPlaced(uint256 indexed betId, address indexed player, uint8 game, uint256 totalStake, uint256 unitStake)",
+  "event ChargeMeterBumped(address indexed player, uint256 newCharge, uint256 threshold)",
+  "event ChargeMeterTriggered(address indexed player, uint8 rewardId, uint256 amount, uint8 cycle)",
   "function freeSpinsAvailable(address) view returns (uint256)",
   "function getPlayerSlotState(address) view returns (uint64,uint64,uint64,uint256)",
   "event FreeSpinsEarned(address indexed player,uint64 totalSpins,uint64 freeSpinsEarned)",
@@ -211,8 +218,7 @@ export class ShinyLuck {
 
   async placeDice(target, over, valueStr) {
     const cs = this.randomClientSeed();
-    const tx = await this.casino.placeDiceBet(target, over, cs, { value: ethers.parseEther(String(valueStr)) });
-    return await this._extractBetId(tx, cs);
+    return await this._placeWithRace(this.casino.placeDiceBet, [target, over, cs], cs, ethers.parseEther(String(valueStr)));
   }
 
   /// @notice Round-based Crash. autoCashoutX is in plain multiplier units
@@ -240,28 +246,44 @@ export class ShinyLuck {
   async placeSlots(valueStr, useFreeSpin = false) {
     const cs = this.randomClientSeed();
     const value = useFreeSpin ? 0n : ethers.parseEther(String(valueStr));
-    const tx = await this.casino.placeSlotsBet(cs, useFreeSpin, { value });
-    return await this._extractBetId(tx, cs);
+    return await this._placeWithRace(this.casino.placeSlotsBet, [cs, useFreeSpin], cs, value);
   }
 
   /// SUGAR.LAB spin (7×7 cluster pays).
   async placeCluster(valueStr, useFreeSpin = false) {
     const cs = this.randomClientSeed();
     const value = useFreeSpin ? 0n : ethers.parseEther(String(valueStr));
-    const tx = await this.casino.placeClusterBet(cs, useFreeSpin, { value });
-    return await this._extractBetId(tx, cs);
+    return await this._placeWithRace(this.casino.placeClusterBet, [cs, useFreeSpin], cs, value);
+  }
+
+  /// SUGAR.LAB Buy Bonus — pay 100× unitStake for a high-variance bonus spin.
+  async buyBonusCluster(unitStakeStr) {
+    const cs = this.randomClientSeed();
+    const value = ethers.parseEther(String(unitStakeStr)) * 100n;
+    return await this._placeWithRace(this.casino.buyBonusCluster, [cs], cs, value);
+  }
+
+  /// VAULT.7 Buy Bonus — pay 75× unitStake.
+  async buyBonusVault7(unitStakeStr) {
+    const cs = this.randomClientSeed();
+    const value = ethers.parseEther(String(unitStakeStr)) * 75n;
+    return await this._placeWithRace(this.casino.buyBonusVault7, [cs], cs, value);
+  }
+
+  /// Claim any pending Charge Meter reward into pendingWithdrawals.
+  async claimChargeReward() {
+    const tx = await this.casino.claimChargeReward();
+    return await tx.wait();
   }
 
   async placeMines(mineCount, valueStr) {
     const cs = this.randomClientSeed();
-    const tx = await this.casino.placeMinesBet(mineCount, cs, { value: ethers.parseEther(String(valueStr)) });
-    return await this._extractBetId(tx, cs);
+    return await this._placeWithRace(this.casino.placeMinesBet, [mineCount, cs], cs, ethers.parseEther(String(valueStr)));
   }
 
   async placePlinko(risk, valueStr) {
     const cs = this.randomClientSeed();
-    const tx = await this.casino.placeplinkoBet(risk, cs, { value: ethers.parseEther(String(valueStr)) });
-    return await this._extractBetId(tx, cs);
+    return await this._placeWithRace(this.casino.placeplinkoBet, [risk, cs], cs, ethers.parseEther(String(valueStr)));
   }
 
   /// @notice Round-based Roulette. `bets` is an array of {kind, number, amountSTT}.
@@ -291,6 +313,83 @@ export class ShinyLuck {
       } catch (_) {}
     }
     return { betId: null, txHash: tx.hash, clientSeed };
+  }
+
+  /// Race the contract call against a WS BetPlaced subscription. With
+  /// Sequence WaaS, `await contractMethod()` blocks for ~20-25s on the
+  /// relayer round-trip even after the tx is mined on chain. The WS event
+  /// fires within ~1s of chain inclusion. Whichever arrives first wins —
+  /// for Sequence users this drops placement-to-betId from 25s → ~3-5s.
+  /// MetaMask flow is also slightly faster (skips ethers' receipt poll).
+  ///
+  /// If the WS path wins, the tx promise still resolves in the background
+  /// (we don't unsubscribe early enough to lose it) — caller doesn't care
+  /// because the chain has authoritative state via BetPlaced + BetSettled.
+  async _placeWithRace(contractMethod, args, clientSeed, value) {
+    const txPromise = contractMethod.apply(this.casino, [...args, value != null ? { value } : {}]);
+    return await this._raceForBetId(txPromise, clientSeed);
+  }
+
+  async _raceForBetId(txPromise, clientSeed) {
+    const wsMod = await import("./rpc.js");
+    const ws = wsMod.wsProvider ? wsMod.wsProvider() : null;
+    // `this.address` is set by wallet.js after a successful connect — it's
+    // the EOA / smart-wallet address that emits BetPlaced as the indexed
+    // player topic. Pad to 32 bytes for topic comparison.
+    const playerAddr = this.address || (this.signer && (this.signer.address ||
+      (typeof this.signer.getAddress === "function" ? await this.signer.getAddress().catch(() => null) : null)));
+
+    return new Promise((resolve, reject) => {
+      let done = false;
+      let txHashOuter = null;
+      const finish = (val, err) => {
+        if (done) return;
+        done = true;
+        if (handler) {
+          try { ws && ws.off({ address: this.casino.target, topics: [topic] }, handler); } catch (_) {}
+        }
+        if (err) reject(err); else resolve(val);
+      };
+
+      let handler = null, topic = null;
+      if (ws && playerAddr) {
+        try {
+          topic = this.casino.interface.getEvent("BetPlaced").topicHash;
+          const paddedAddr = "0x" + playerAddr.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+          handler = (log) => {
+            try {
+              if ((log.topics[2] || "").toLowerCase() !== paddedAddr) return;
+              const parsed = this.casino.interface.parseLog(log);
+              finish({ betId: parsed.args.betId, txHash: txHashOuter || log.transactionHash, clientSeed });
+            } catch (_) {}
+          };
+          ws.on({ address: this.casino.target, topics: [topic] }, handler);
+        } catch (_) {}
+      }
+
+      // Tx promise: always resolves (slow path with Sequence). If it lands
+      // before WS, parse the receipt; otherwise we ignore the result.
+      txPromise.then(async (tx) => {
+        txHashOuter = tx.hash;
+        try {
+          const r = await tx.wait();
+          if (done) return;                      // WS already won
+          for (const log of r.logs) {
+            try {
+              const parsed = this.casino.interface.parseLog(log);
+              if (parsed && parsed.name === "BetPlaced") {
+                finish({ betId: parsed.args.betId, txHash: tx.hash, clientSeed });
+                return;
+              }
+            } catch (_) {}
+          }
+          finish({ betId: null, txHash: tx.hash, clientSeed });
+        } catch (e) { finish(null, e); }
+      }).catch((e) => finish(null, e));
+
+      // Hard timeout — 90s to give Sequence a generous window.
+      setTimeout(() => finish(null, new Error("placement timed out (90s)")), 90_000);
+    });
   }
 
   // Reveal -------------------------------------------------------------

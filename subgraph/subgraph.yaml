@@ -1,0 +1,70 @@
+specVersion: 0.0.5
+description: ShinyLuck — agent-native casino on Somnia
+repository: https://github.com/shinyluck/casino
+schema:
+  file: ./schema.graphql
+
+dataSources:
+  - kind: ethereum
+    name: Casino
+    network: somnia-testnet
+    source:
+      address: "0x67f7DCa500c08eEb1b2cc095b3472a71e6C2c7E5"
+      abi: Casino
+      startBlock: 383377363
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/casino.ts
+      entities:
+        - Player
+        - Bet
+        - CrashRound
+        - RouletteRound
+        - DailyStats
+      abis:
+        - name: Casino
+          file: ../artifacts/contracts/Casino.sol/Casino.json
+      eventHandlers:
+        - event: BetPlaced(indexed uint256,indexed address,indexed uint8,uint256,bytes32,uint256,uint256,bytes)
+          handler: handleBetPlaced
+        - event: BetSettled(indexed uint256,indexed address,indexed uint8,bool,uint256,bytes32,bytes32,bytes32,bytes32,uint256,bytes)
+          handler: handleBetSettled
+        - event: BetRefunded(indexed uint256,indexed address,uint256,string)
+          handler: handleBetRefunded
+        - event: CrashRoundStarted(indexed uint256,uint256,uint256,uint256)
+          handler: handleCrashRoundStarted
+        - event: CrashRoundSettled(indexed uint256,uint256,bytes32,bytes32,bytes32)
+          handler: handleCrashRoundSettled
+        - event: RouletteRoundStarted(indexed uint256,uint256,uint256,uint256)
+          handler: handleRouletteRoundStarted
+        - event: RouletteRoundSettled(indexed uint256,uint8,bytes32,bytes32)
+          handler: handleRouletteRoundSettled
+        - event: ReasoningLog(string,uint256)
+          handler: handleReasoningLog
+        - event: BonusModeActivated(uint256,string)
+          handler: handleBonusModeActivated
+        - event: RtpAdjusted(indexed uint8,uint16,uint16,string)
+          handler: handleRtpAdjusted
+
+  - kind: ethereum
+    name: HouseManager
+    network: somnia-testnet
+    source:
+      address: "0x5E41387801DAa06aD6035972deC6a87040a6871b"
+      abi: HouseManager
+      startBlock: 383377363
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/house-manager.ts
+      entities:
+        - ReasoningLog
+      abis:
+        - name: HouseManager
+          file: ../artifacts/contracts/HouseManager.sol/HouseManager.json
+      eventHandlers:
+        - event: ReasoningRequested(string,int256,uint256,uint256)
+          handler: handleReasoningRequested

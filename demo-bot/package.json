@@ -4,10 +4,14 @@
   "private": true,
   "description": "Live-feed bot — places small random bets to keep ShinyLuck's UI lively during demo.",
   "main": "index.js",
-  "scripts": { "start": "node index.js" },
-  "dependencies": {
-    "ethers": "^6.13.2",
-    "dotenv": "^16.4.5"
+  "scripts": {
+    "start": "node index.js"
   },
-  "engines": { "node": ">=20" }
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "ethers": "^6.16.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
 }

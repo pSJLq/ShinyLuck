@@ -8,13 +8,42 @@ import { ethers } from "https://esm.sh/ethers@6.13.2";
 import { CONFIG } from "./config.js";
 import { provider, fetchLogs, fetchDeploymentBlock } from "./rpc.js";
 
-const GAME_NAMES = ["DICE","CRASH","SLOTS","MINES","PLINKO","ROULETTE"];
+const GAME_NAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.LAB"];
 const ZERO = "0x0000000000000000000000000000000000000000";
-const LOOKBACK = 200_000; // ~3 days on Somnia
+// 20k blocks ≈ 7 hours on Somnia — same as feed. fetchDeploymentBlock
+// further clamps to contract-age so cold-start scan stays under ~2s.
+const LOOKBACK = 20_000;
 
 let sortBy = "wagered";
 let aggregate = [];
 let myAddr = null;
+
+// Pagination — 20 rows per page across all three sort modes.
+const LB_PAGE_SIZE = 20;
+let _lbPage = 0;
+
+function mountLbPager(totalRows, pageIdx, onChange) {
+  const root = document.querySelector("[data-sl-lb-table]");
+  if (!root) return;
+  let pager = root.parentElement.querySelector(".sl-pager[data-sl-lb-pager]");
+  if (!pager) {
+    pager = document.createElement("div");
+    pager.className = "sl-pager";
+    pager.setAttribute("data-sl-lb-pager", "1");
+    root.parentElement.insertBefore(pager, root.nextSibling);
+  }
+  const totalPages = Math.max(1, Math.ceil(totalRows / LB_PAGE_SIZE));
+  const safeIdx = Math.min(pageIdx, totalPages - 1);
+  if (totalRows <= LB_PAGE_SIZE) { pager.style.display = "none"; return; }
+  pager.style.display = "flex";
+  pager.innerHTML = `
+    <button data-pg-prev ${safeIdx <= 0 ? "disabled" : ""}>← PREV</button>
+    <span>PAGE ${safeIdx + 1} / ${totalPages} · ${totalRows} players</span>
+    <button data-pg-next ${safeIdx >= totalPages - 1 ? "disabled" : ""}>NEXT →</button>
+  `;
+  pager.querySelector("[data-pg-prev]").onclick = () => onChange(Math.max(0, safeIdx - 1));
+  pager.querySelector("[data-pg-next]").onclick = () => onChange(Math.min(totalPages - 1, safeIdx + 1));
+}
 
 function fmtSTT(wei) {
   if (typeof wei !== "bigint") wei = BigInt(wei);
@@ -35,9 +64,13 @@ async function loadEvents() {
   const c = new ethers.Contract(CONFIG.casino, abi, provider());
   const dep = await fetchDeploymentBlock();
   const head = await provider().getBlockNumber();
-  const from = Math.max(dep || head - LOOKBACK, head - LOOKBACK);
-  const placed = await fetchLogs(c, "BetPlaced", from, head);
-  const settled = await fetchLogs(c, "BetSettled", from, head);
+  // Clamp to contract age — never scan blocks that predate the deploy.
+  const from = dep > 0 ? Math.max(dep, head - LOOKBACK) : (head - LOOKBACK);
+  // Parallel scan placed + settled (was sequential — halves cold-start time).
+  const [placed, settled] = await Promise.all([
+    fetchLogs(c, "BetPlaced", from, head),
+    fetchLogs(c, "BetSettled", from, head),
+  ]);
   return { placed, settled };
 }
 
@@ -94,7 +127,14 @@ function render(list) {
   root.innerHTML = "";
   if (head) root.appendChild(head);
 
-  const sorted = sortList(list).slice(0, 50);
+  // Paginate the sorted board. 20 rows per page = compact, no scrolling.
+  // Pager state is module-level so flipping sort buttons doesn't reset
+  // the user's position unless they navigate away.
+  const sortedFull = sortList(list);
+  const totalPages = Math.max(1, Math.ceil(sortedFull.length / LB_PAGE_SIZE));
+  if (_lbPage >= totalPages) _lbPage = 0;
+  const startIdx = _lbPage * LB_PAGE_SIZE;
+  const sorted = sortedFull.slice(startIdx, startIdx + LB_PAGE_SIZE);
   if (sorted.length === 0) {
     const empty = document.createElement("div");
     empty.className = "lb-row";
@@ -111,13 +151,16 @@ function render(list) {
     if (isMe) row.classList.add("you");
     const pnlSign = e.pnl >= 0n ? "green" : "red";
     const pnlText = (e.pnl >= 0n ? "+ " : "− ") + fmtSTT(e.pnl < 0n ? -e.pnl : e.pnl);
+    // Find game index from favourite name for the per-game color tag.
+    const favIdx = GAME_NAMES.indexOf(e.favourite);
+    const favCls = favIdx >= 0 ? `g-${favIdx}` : "";
     row.innerHTML =
-      `<div class="rk${isMe ? " cyan" : ""}">#${i + 1}</div>` +
-      `<div class="pl">${isMe ? "you · " : ""}${fmtAddr(e.addr)}</div>` +
-      `<div class="fv"><span class="game-tag">${e.favourite}</span></div>` +
-      `<div class="wg">${fmtSTT(e.wagered)} STT</div>` +
+      `<div class="rk${isMe ? " cyan" : ""}">#${i + 1 + startIdx}</div>` +
+      `<div class="pl tbl-dim">${isMe ? "you · " : ""}${fmtAddr(e.addr)}</div>` +
+      `<div class="fv"><span class="game-tag ${favCls}">${e.favourite}</span></div>` +
+      `<div class="wg tbl-dim">${fmtSTT(e.wagered)} STT</div>` +
       `<div class="pl-v"><span class="${pnlSign}">${pnlText}</span></div>` +
-      `<div class="st">${e.bets}</div>`;
+      `<div class="st tbl-dim">${e.bets}</div>`;
     root.appendChild(row);
   }
   const selfRow = document.querySelector("[data-sl-lb-self]");
@@ -138,7 +181,12 @@ function render(list) {
   }
   document.querySelectorAll("[data-sl-lb-count]").forEach((el) => el.textContent = list.length.toString());
   document.querySelectorAll("[data-sl-lb-footer]").forEach((el) => el.textContent =
-    `Showing 1–${sorted.length} of ${list.length} · window ${LOOKBACK} blocks · sort: ${sortBy}`);
+    `Showing ${startIdx + 1}–${startIdx + sorted.length} of ${sortedFull.length} · window ${LOOKBACK} blocks · sort: ${sortBy}`);
+
+  mountLbPager(sortedFull.length, _lbPage, (idx) => {
+    _lbPage = idx;
+    render(aggregate);
+  });
 }
 
 async function refresh() {
@@ -153,6 +201,7 @@ document.addEventListener("DOMContentLoaded", () => {
     btn.addEventListener("click", () => {
       sortBy = btn.dataset.slLbSort;
       document.querySelectorAll("[data-sl-lb-sort]").forEach((b) => b.classList.toggle("on", b === btn));
+      _lbPage = 0;                          // jump back to page 1 on sort change
       render(aggregate);
     });
   });
@@ -163,6 +212,13 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window.ethereum && window.ethereum.selectedAddress) {
     myAddr = window.ethereum.selectedAddress;
   }
-  refresh().catch((e) => console.warn("[lb] refresh:", e.message));
+  // Loading gate: hide page-shell + splash holds until first refresh lands.
+  document.body.dataset.loading = "1";
+  refresh()
+    .catch((e) => console.warn("[lb] refresh:", e.message))
+    .finally(() => {
+      delete document.body.dataset.loading;
+      document.dispatchEvent(new CustomEvent("shinyluck:ready"));
+    });
   setInterval(() => refresh().catch(() => {}), 20_000);
 });

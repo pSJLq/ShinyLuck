@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity ^0.8.24;
 
 /// @title ClusterLib
 /// @notice On-chain resolver for SUGAR.LAB — the 7×7 cluster-pays slot with
@@ -31,43 +31,53 @@ library ClusterLib {
     //   0 = L2, 1 = L1, 2 = M3, 3 = M2, 4 = M1
     //   5 = H3, 6 = H2, 7 = H1, 8 = WILD, 9 = SCAT
 
-    /// @notice Symbol distribution (matches cluster-engine.js C_WEIGHTS).
-    ///         Total weight = 93.
-    ///         L2=18, L1=18, M3=11, M2=11, M1=11, H3=8, H2=7, H1=6, WILD=2, SCAT=1
+    /// @notice Symbol distribution — exact match to megaprompt / cluster-engine.js
+    ///         C_WEIGHTS: { WILD:1, H1:5, H2:6, H3:7, M1:11, M2:11, M3:11,
+    ///                      L1:22, L2:22, SCAT:1 }. Total weight = 97.
     function _pickSymbol(uint256 r) internal pure returns (uint8) {
-        uint256 v = r % 93;
-        if (v < 18) return 0;      // L2  [0..18)
-        if (v < 36) return 1;      // L1  [18..36)
-        if (v < 47) return 2;      // M3  [36..47)
-        if (v < 58) return 3;      // M2  [47..58)
-        if (v < 69) return 4;      // M1  [58..69)
-        if (v < 77) return 5;      // H3  [69..77)
-        if (v < 84) return 6;      // H2  [77..84)
-        if (v < 90) return 7;      // H1  [84..90)
-        if (v < 92) return 8;      // WILD [90..92)
-        return 9;                  // SCAT [92..93)
+        uint256 v = r % 97;
+        if (v < 22) return 0;      // L2  [0..22)        weight 22
+        if (v < 44) return 1;      // L1  [22..44)       weight 22
+        if (v < 55) return 2;      // M3  [44..55)       weight 11
+        if (v < 66) return 3;      // M2  [55..66)       weight 11
+        if (v < 77) return 4;      // M1  [66..77)       weight 11
+        if (v < 84) return 5;      // H3  [77..84)       weight 7
+        if (v < 90) return 6;      // H2  [84..90)       weight 6
+        if (v < 95) return 7;      // H1  [90..95)       weight 5
+        if (v < 96) return 8;      // WILD [95..96)      weight 1
+        return 9;                  // SCAT [96..97)      weight 1
     }
 
     /// @dev Cluster payout (basis 100). For a cluster of size `n` of symbol
-    ///      `sym`, returns the payout multiplier × stake × 100. Matches
-    ///      cluster-engine.js `symbolPay`.
+    ///      `sym`, returns the payout multiplier × stake × 100. EXACT match
+    ///      to megaprompt + cluster-engine.js `symbolPay`:
+    ///        WILD: 5→0.40 / 15→18.00
+    ///        H1:   5→0.50 / 15→14.00
+    ///        H2:   5→0.40 / 15→10.00
+    ///        H3:   5→0.30 / 15→8.00
+    ///        M1:   5→0.25 / 15→5.00
+    ///        M2:   5→0.20 / 15→4.50
+    ///        M3:   5→0.18 / 15→4.00
+    ///        L1:   5→0.12 / 15→2.00
+    ///        L2:   5→0.10 / 15→1.50
+    ///      Linear interpolation 5..15. 20+ adds +0.25 per symbol over 19.
     function _clusterPayX100(uint8 sym, uint256 n) internal pure returns (uint256) {
         if (n < 5) return 0;
         uint256 pay5;
         uint256 pay15;
-        if (sym == 0)      { pay5 = 15;  pay15 = 200;  }   // L2
-        else if (sym == 1) { pay5 = 20;  pay15 = 300;  }   // L1
-        else if (sym == 2) { pay5 = 30;  pay15 = 600;  }   // M3
-        else if (sym == 3) { pay5 = 35;  pay15 = 700;  }   // M2
-        else if (sym == 4) { pay5 = 40;  pay15 = 800;  }   // M1
-        else if (sym == 5) { pay5 = 50;  pay15 = 1200; }   // H3
-        else if (sym == 6) { pay5 = 60;  pay15 = 1500; }   // H2
-        else if (sym == 7) { pay5 = 80;  pay15 = 2000; }   // H1
-        else if (sym == 8) { pay5 = 50;  pay15 = 2500; }   // WILD
+        if (sym == 0)      { pay5 = 10;  pay15 = 150;  }   // L2  0.10 / 1.50
+        else if (sym == 1) { pay5 = 12;  pay15 = 200;  }   // L1  0.12 / 2.00
+        else if (sym == 2) { pay5 = 18;  pay15 = 400;  }   // M3  0.18 / 4.00
+        else if (sym == 3) { pay5 = 20;  pay15 = 450;  }   // M2  0.20 / 4.50
+        else if (sym == 4) { pay5 = 25;  pay15 = 500;  }   // M1  0.25 / 5.00
+        else if (sym == 5) { pay5 = 30;  pay15 = 800;  }   // H3  0.30 / 8.00
+        else if (sym == 6) { pay5 = 40;  pay15 = 1000; }   // H2  0.40 / 10.00
+        else if (sym == 7) { pay5 = 50;  pay15 = 1400; }   // H1  0.50 / 14.00
+        else if (sym == 8) { pay5 = 40;  pay15 = 1800; }   // WILD 0.40 / 18.00
         else return 0;                                      // SCAT never pays as a cluster
         uint256 t = n > 15 ? 100 : ((n - 5) * 100) / 10;    // t in 0..100
         uint256 p = pay5 + ((pay15 - pay5) * t) / 100;
-        if (n >= 20) p += (n - 19) * 50;                    // big-cluster bonus
+        if (n >= 20) p += (n - 19) * 25;                    // +0.25 per symbol over 19
         return p;
     }
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity ^0.8.24;
 
 /// @title CommitReveal
 /// @notice Library for provably-fair RNG using commit-reveal + future blockhash.

@@ -182,6 +182,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (linePath) {
       linePath.style.animation = 'none';
       areaPath.style.animation = 'none';
+      // The initial CSS draw-line animation leaves stroke-dashoffset=600
+      // (fully hidden) — when JS takes over and updates `d`, the path keeps
+      // updating but stays invisible because of the dash gap. Reset both
+      // dash attrs so the live curve is drawn as a solid line.
+      linePath.removeAttribute('stroke-dasharray');
+      linePath.removeAttribute('stroke-dashoffset');
+      linePath.style.strokeDasharray = 'none';
+      linePath.style.strokeDashoffset = '0';
     }
     tick(roundStart);
   }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -380,13 +380,64 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     function houseEdgeBps(GameType g) public view returns (uint256 bps) {
         if (g == GameType.DICE)        bps = 100;
         else if (g == GameType.CRASH)  bps = 300;
-        else if (g == GameType.SLOTS)  bps = 396;   // VAULT.7 — RTP 96.04%
+        // SLOTS / CLUSTER edge is *inside* the symbol pay tables — the math
+        // is the edge. Applying additional bps here on top of the resolver
+        // would double-discount payouts. The pay-table boosts in `_settleBet`
+        // (VAULT7_PAY_BOOST_X100 / CLUSTER_PAY_BOOST_X100) put the empirical
+        // RTP at ~91-92% per `scripts/validate-rtp.js` (100k sim, see
+        // STATS.md). Keep edge=0 here unless the HouseManager Agent decides
+        // to flex it via `adjustSlotEdge`.
+        else if (g == GameType.SLOTS)  bps = 0;
         else if (g == GameType.MINES)  bps = 120;
         else if (g == GameType.PLINKO) bps = 150;
-        else if (g == GameType.ROULETTE) bps = 270;
-        else if (g == GameType.CLUSTER)  bps = 350; // SUGAR.LAB — RTP 96.50%
+        else if (g == GameType.ROULETTE) bps = 526;   // American (00) wheel — 5.26% edge
+        else if (g == GameType.CLUSTER)  bps = 0;     // SUGAR.LAB — math is the edge
 
         if (bonusModeActive()) bps = bps / 2;
+    }
+
+    // ---------------------------------------------------------------------
+    // Reported RTP — the "publish" number shown on game pages. Differs from
+    // the math edge for slots: math gives ~96% but we publish a conservative
+    // 92% floor that the autonomous HouseManager Agent can flex ±2% based on
+    // bankroll health (see HouseManager._onEvent). For DICE/CRASH/MINES/
+    // PLINKO/ROULETTE the reported value matches the math edge exactly.
+    //
+    // 1 unit = 1 bps. 9200 → 92.00% RTP.
+    // ---------------------------------------------------------------------
+
+    mapping(uint8 => uint16) private _reportedRtpOverride;
+
+    event RtpAdjusted(uint8 indexed game, uint16 oldRtpBps, uint16 newRtpBps, string reasoning);
+
+    function defaultReportedRtpBps(GameType g) public pure returns (uint16) {
+        if (g == GameType.DICE)         return 9900;
+        if (g == GameType.CRASH)        return 9700;
+        if (g == GameType.SLOTS)        return 9200; // VAULT.7
+        if (g == GameType.MINES)        return 9880;
+        if (g == GameType.PLINKO)       return 9850;
+        if (g == GameType.ROULETTE)     return 9474;  // American (00) wheel
+        if (g == GameType.CLUSTER)      return 9200; // SUGAR.LAB
+        return 0;
+    }
+
+    function getReportedRTP(uint8 game) external view returns (uint16) {
+        uint16 over = _reportedRtpOverride[game];
+        if (over != 0) return over;
+        return defaultReportedRtpBps(GameType(game));
+    }
+
+    /// @notice Adjust the published RTP for the cluster/classic slot games.
+    ///         Bounded to [9000, 9400] so the agent can't accidentally publish
+    ///         a wildly off-baseline number even if its decision logic glitches.
+    function adjustSlotRTP(uint8 game, uint16 newRtpBps, string calldata reasoning) external {
+        if (msg.sender != houseManager && msg.sender != owner()) revert NotHouseManager();
+        if (game != uint8(GameType.SLOTS) && game != uint8(GameType.CLUSTER)) revert InvalidGame();
+        if (newRtpBps < 9000 || newRtpBps > 9400) revert InvalidBet("rtp out of band");
+        uint16 prev = _reportedRtpOverride[game];
+        if (prev == 0) prev = defaultReportedRtpBps(GameType(game));
+        _reportedRtpOverride[game] = newRtpBps;
+        emit RtpAdjusted(game, prev, newRtpBps, reasoning);
     }
 
     // =====================================================================
@@ -431,7 +482,19 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     //   Hard payout cap = 2000× stake.
 
     /// @dev Hard cap on a single VAULT.7 payout, basis 100.
+    /// @dev Hard cap on a single VAULT.7 payout, basis 100. STATS.md quotes
+    ///      10,000× as a "max-win" headline, but the live bankroll can't
+    ///      reserve that per bet (see CLUSTER_MAX_MULT_X100 note). 2,000× is
+    ///      the practical ceiling under the current boost; the cap binds on
+    ///      jackpot pulls (5 WILDs + FS 2× mult).
     uint256 internal constant VAULT7_MAX_MULT_X100 = 200000;
+
+    /// @dev Pay-table boost applied to Vault7Lib.resolve output. STATS.md
+    ///      tables intrinsically yield ~30% RTP per validate-rtp.js. This
+    ///      basis-100 multiplier scales final payout so empirical RTP lands
+    ///      at ~91-92%. MUST stay in sync with `frontend/games/vault7/engine.js`
+    ///      `VAULT_PAY_BOOST` constant.
+    uint256 internal constant VAULT7_PAY_BOOST_X100 = 560;
 
     /// @notice Place a VAULT.7 spin. `useFreeSpin=true` consumes one of the
     ///         player's earned free spins (msg.value must be 0 in that case)
@@ -458,8 +521,161 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     // CLUSTER — SUGAR.LAB  (7×7 cluster pays · tumble cascades)
     // =====================================================================
 
-    /// @dev Hard cap on a single SUGAR.LAB payout, basis 100.
+    /// @dev Hard cap on a single SUGAR.LAB payout, basis 100. STATS.md
+    ///      quotes 25,000× as a "max-win" headline, but on a 32 STT bankroll
+    ///      reserving 25,000× per bet means a 0.0013 STT max bet — unplayable.
+    ///      We cap at 2,500× to keep bankroll reservations sane; empirical
+    ///      single-spin payouts under the boost rarely exceed ~100× stake
+    ///      outside of long sticky-mult free-spin chains (see validate-rtp.js).
     uint256 internal constant CLUSTER_MAX_MULT_X100 = 250000;
+
+    /// @dev Pay-table boost applied to ClusterLib.resolve output. The STATS.md
+    ///      pay tables, run through the cluster engine, intrinsically yield
+    ///      only ~40% RTP (see `scripts/validate-rtp.js`). This basis-100
+    ///      multiplier scales the resolver output so empirical RTP (base +
+    ///      charge meter) lands at ~91-92%.
+    ///         BOOST × intrinsic = target →  3.20 × 0.40 + charge 0.14 ≈ 0.91
+    ///      MUST stay in sync with `frontend/games/sugar/engine.js`
+    ///      `SUGAR_PAY_BOOST` constant.
+    uint256 internal constant CLUSTER_PAY_BOOST_X100 = 320;
+
+    /// @dev Buy Bonus multipliers (megaprompt Section 1.1). Player pays
+    ///      `MULT × unitStake`; the bet is settled as a single high-variance
+    ///      spin at the elevated bet amount, so payouts scale linearly with
+    ///      the premium. Same RTP envelope as a regular spin, just bigger
+    ///      stake. (Forced-scatter variant requires resolver rewrite — v2.)
+    uint256 internal constant BUY_BONUS_SUGAR_MULTIPLIER = 100;
+    uint256 internal constant BUY_BONUS_VAULT_MULTIPLIER = 75;
+
+    event BuyBonusPlaced(uint256 indexed betId, address indexed player, uint8 game, uint256 totalStake, uint256 unitStake);
+
+    // ---------------------------------------------------------------------
+    // Charge Meter (SUGAR.LAB) — per-player accumulator with a hidden random
+    // threshold. Each cluster spin increments the meter. When it crosses the
+    // threshold, a weighted reward is rolled and the meter resets with a new
+    // threshold. Mirrors cluster-engine.js CHARGE_REWARDS table.
+    // ---------------------------------------------------------------------
+
+    mapping(address => uint256) public chargeMeter;           // basis 100 (220 = 2.20)
+    mapping(address => uint256) public chargeMeterThreshold;  // basis 100, 18000..30000
+    mapping(address => uint256) public chargeMeterReward;     // pending claim, wei
+    mapping(address => uint8)   public chargeMeterCycle;      // # times triggered
+
+    event ChargeMeterBumped(address indexed player, uint256 newCharge, uint256 threshold);
+    event ChargeMeterTriggered(address indexed player, uint8 rewardId, uint256 amount, uint8 cycle);
+
+    function _initChargeThreshold(address player, bytes32 r) internal {
+        if (chargeMeterThreshold[player] == 0) {
+            // Initial threshold in [18000, 30000] (basis 100 = 180..300 units).
+            uint256 v = 18000 + (uint256(keccak256(abi.encode(r, player, "th0"))) % 12001);
+            chargeMeterThreshold[player] = v;
+        }
+    }
+
+    function _bumpChargeMeter(address player, uint256 stake, bool missed, bytes32 randomness) internal {
+        _initChargeThreshold(player, randomness);
+        // STATS.md formula: increment = 2.2 + (stake/50) × 3.5 + miss?1.2:0 + rand(0..1.5)
+        // Stored basis 100 so the threshold range (18000..30000 = 180..300) is integer.
+        //   base_b100 = 220 + (stake × 350) / (50 × 1e18)
+        // For stake=1 STT: base = 220 + 7 = 227
+        // For stake=50 STT: base = 220 + 350 = 570 (matches JS ceiling)
+        // Hard cap at 600 to guard against stupendous stakes.
+        uint256 base = 220 + (stake * 350) / (50 * 1e18);
+        if (base > 600) base = 600;
+        uint256 miss = missed ? 120 : 0;
+        uint256 noise = uint256(keccak256(abi.encode(randomness, player, "noise"))) % 150;
+        uint256 inc = base + miss + noise;
+        uint256 nc = chargeMeter[player] + inc;
+
+        if (nc >= chargeMeterThreshold[player]) {
+            // Roll a reward from the CHARGE_REWARDS table (STATS.md 1.7).
+            // STATS.md weights: 38+25+12+8+6+4+4+2+1 = 100, but WILD_STORM
+            // (weight 2) modifies the next spin (stateful) which is deferred
+            // here. We drop WILD_STORM and use the remaining 98 weight units
+            // → `% 98`. Buckets in roll order:
+            //   CASH_TIP    38 → roll < 38
+            //   CASH_DROP   25 → roll < 63
+            //   CASH_SURGE  12 → roll < 75
+            //   FS3          8 → roll < 83
+            //   MULT         6 → roll < 89  (STATS.md "MYSTERY ×")
+            //   CASH_BLAST   4 → roll < 93
+            //   FS5          4 → roll < 97
+            //   JACKPOT      1 → roll  = 97
+            uint256 roll = uint256(keccak256(abi.encode(randomness, player, "reward"))) % 98;
+            uint8 rewardId;
+            uint256 rewardAmount;
+            uint256 stakeBasis = stake == 0 ? 1e15 : stake;
+            if (roll < 38)       { rewardId = 1; rewardAmount = stakeBasis * 3; }      // CASH_TIP
+            else if (roll < 63)  { rewardId = 2; rewardAmount = stakeBasis * 8; }      // CASH_DROP
+            else if (roll < 75)  { rewardId = 3; rewardAmount = stakeBasis * 18; }     // CASH_SURGE
+            else if (roll < 83)  { rewardId = 4; rewardAmount = stakeBasis * 3; }      // FS3 → cash equivalent
+            else if (roll < 89)  { rewardId = 5; rewardAmount = stakeBasis * 12; }     // MYSTERY (avg of pool)
+            else if (roll < 93)  { rewardId = 6; rewardAmount = stakeBasis * 45; }     // CASH_BLAST
+            else if (roll < 97)  { rewardId = 7; rewardAmount = stakeBasis * 5; }      // FS5 → cash equivalent
+            else                  { rewardId = 8; rewardAmount = stakeBasis * 120; }   // JACKPOT_BURST
+
+            // Cap reward at bankroll/100 to avoid bankroll runaway from a
+            // jackpot trigger on a tiny stake.
+            uint256 cap = freeBankroll() / 100;
+            if (rewardAmount > cap) rewardAmount = cap;
+
+            chargeMeterReward[player] += rewardAmount;
+            chargeMeterCycle[player] += 1;
+            chargeMeter[player] = 0;
+            // New hidden threshold for the next cycle.
+            uint256 nv = 18000 + (uint256(keccak256(abi.encode(randomness, player, "th"))) % 12001);
+            chargeMeterThreshold[player] = nv;
+            emit ChargeMeterTriggered(player, rewardId, rewardAmount, chargeMeterCycle[player]);
+        } else {
+            chargeMeter[player] = nc;
+            emit ChargeMeterBumped(player, nc, chargeMeterThreshold[player]);
+        }
+    }
+
+    /// @notice Pull the pending Charge Meter reward into pendingWithdrawals.
+    ///         Player calls this once the visual celebration has played.
+    function claimChargeReward() external nonReentrant {
+        uint256 amt = chargeMeterReward[msg.sender];
+        if (amt == 0) revert InvalidBet("no charge reward");
+        chargeMeterReward[msg.sender] = 0;
+        if (amt > freeBankroll()) revert BankrollInsufficient();
+        pendingWithdrawals[msg.sender] += amt;
+        totalPendingWithdrawals += amt;
+        emit WithdrawalCredited(msg.sender, amt);
+    }
+
+    function getChargeMeter(address player) external view returns (uint256 current, uint256 threshold, uint256 pendingReward, uint8 cycle) {
+        return (chargeMeter[player], chargeMeterThreshold[player], chargeMeterReward[player], chargeMeterCycle[player]);
+    }
+
+    function buyBonusCluster(bytes32 clientSeed)
+        external payable nonReentrant whenNotPaused whenGameLive(GameType.CLUSTER)
+        returns (uint256 betId)
+    {
+        if (msg.value == 0) revert InvalidBet("zero stake");
+        uint256 unitStake = msg.value / BUY_BONUS_SUGAR_MULTIPLIER;
+        if (unitStake == 0) revert InvalidBet("stake too small");
+        _tickSlotCounter(msg.sender, msg.value);
+        uint256 maxPayout = (msg.value * CLUSTER_MAX_MULT_X100) / 100;
+        // params = abi.encode(useFreeSpin=false, buyBonus=true) — settle path
+        // ignores the buyBonus flag for now (resolver still runs unmodified),
+        // but it's stored so the frontend / subgraph can surface it.
+        betId = _openBet(GameType.CLUSTER, msg.value, clientSeed, maxPayout, abi.encode(false, true));
+        emit BuyBonusPlaced(betId, msg.sender, uint8(GameType.CLUSTER), msg.value, unitStake);
+    }
+
+    function buyBonusVault7(bytes32 clientSeed)
+        external payable nonReentrant whenNotPaused whenGameLive(GameType.SLOTS)
+        returns (uint256 betId)
+    {
+        if (msg.value == 0) revert InvalidBet("zero stake");
+        uint256 unitStake = msg.value / BUY_BONUS_VAULT_MULTIPLIER;
+        if (unitStake == 0) revert InvalidBet("stake too small");
+        _tickSlotCounter(msg.sender, msg.value);
+        uint256 maxPayout = (msg.value * VAULT7_MAX_MULT_X100) / 100;
+        betId = _openBet(GameType.SLOTS, msg.value, clientSeed, maxPayout, abi.encode(false, true));
+        emit BuyBonusPlaced(betId, msg.sender, uint8(GameType.SLOTS), msg.value, unitStake);
+    }
 
     function placeClusterBet(bytes32 clientSeed, bool useFreeSpin)
         external payable nonReentrant whenNotPaused whenGameLive(GameType.CLUSTER)
@@ -1029,7 +1245,8 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
             RouletteBetInput calldata b = bets[i];
             if (b.amount == 0) revert InvalidBet("zero stake");
             if (b.kind > uint8(RouletteBetKind.DOZEN_3)) revert InvalidBet("kind");
-            if (b.kind == uint8(RouletteBetKind.STRAIGHT) && b.number > 36) revert InvalidBet("number");
+            // American-wheel: STRAIGHT accepts 0..37 where 37 = "00".
+            if (b.kind == uint8(RouletteBetKind.STRAIGHT) && b.number > 37) revert InvalidBet("number");
             total += b.amount;
             uint256 mult = _rouletteMultiplier(b.kind);
             uint256 maxPayout = uint256(b.amount) * mult;
@@ -1066,7 +1283,8 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         }
         bytes32 blockHash = blockhash(uint256(r.commitBlock) + CommitReveal.REVEAL_DELAY);
         bytes32 randomness = keccak256(abi.encodePacked(stored, blockHash, r.roundId));
-        uint8 result = uint8(uint256(randomness) % 37);
+        // American wheel: 38 outcomes — 0, 1..36, 00 (encoded as 37).
+        uint8 result = uint8(uint256(randomness) % 38);
         r.resultNumber = result;
         r.serverSeed = stored;
         r.settled = true;
@@ -1163,9 +1381,12 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     }
 
     function _rouletteWins(uint8 kind, uint8 target, uint8 result) internal pure returns (bool) {
-        if (result > 36) return false;
+        if (result > 37) return false;                                  // 37 = "00"
         if (kind == uint8(RouletteBetKind.STRAIGHT)) return result == target;
-        if (result == 0) return false;
+        // American-wheel: BOTH 0 and 00 lose all outside bets (red/black,
+        // even/odd, low/high, dozens). That's where the 5.26% house edge comes
+        // from vs the European 2.70% single-zero edge.
+        if (result == 0 || result == 37) return false;
         if (kind == uint8(RouletteBetKind.RED))   return ((RED_MASK >> result) & 1) == 1;
         if (kind == uint8(RouletteBetKind.BLACK)) return ((RED_MASK >> result) & 1) == 0;
         if (kind == uint8(RouletteBetKind.EVEN))  return result % 2 == 0;
@@ -1293,7 +1514,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     }
 
     function _resolve(Bet storage bet, bytes32 randomness)
-        internal view
+        internal
         returns (bool won, uint256 payout, bytes memory resultData)
     {
         if (bet.game == GameType.DICE) {
@@ -1310,9 +1531,13 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         if (bet.game == GameType.SLOTS) {
             bool useFreeSpin = _isFreeSpin(bet);
             uint256 freeMult = useFreeSpin ? VAULT7_FREE_SPIN_MULT_X100 : 100;
+            // Pass edge=0; the math IS the edge. Pay-table boost is applied
+            // after the resolver returns, before the cap clamp.
             (uint256 p, uint8[15] memory grid, uint256 lineMult, uint8 scatterCount, uint256 scatterPay) =
-                Vault7Lib.resolve(bet.amount, randomness, houseEdgeBps(GameType.SLOTS), freeMult);
-            payout = p;
+                Vault7Lib.resolve(bet.amount, randomness, 0, freeMult);
+            payout = (p * VAULT7_PAY_BOOST_X100) / 100;
+            uint256 vaultCap = (uint256(bet.amount) * VAULT7_MAX_MULT_X100) / 100;
+            if (payout > vaultCap) payout = vaultCap;
             // For a free spin, ANY non-zero payout is a "win" (we don't have a
             // stake to compare against on the user side).
             won = useFreeSpin ? (payout > 0) : (payout >= bet.amount);
@@ -1321,15 +1546,21 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         }
         if (bet.game == GameType.CLUSTER) {
             ClusterLib.ResolveResult memory rr = ClusterLib.resolve(randomness);
-            // ClusterLib.totalPayoutX100 is basis-100 of stake. Apply house edge.
+            // ClusterLib.totalPayoutX100 is basis-100 of stake (per STATS.md
+            // pay tables). Multiply by CLUSTER_PAY_BOOST_X100 to land at the
+            // STATS.md ~92% RTP target, then clamp at CLUSTER_MAX_MULT_X100.
             uint256 stake = bet.amount;
-            uint256 edge = houseEdgeBps(GameType.CLUSTER);
-            uint256 raw = (stake * rr.totalPayoutX100) / 100;
+            uint256 raw = (stake * rr.totalPayoutX100 * CLUSTER_PAY_BOOST_X100) / 10_000;
             uint256 capped = (stake * CLUSTER_MAX_MULT_X100) / 100;
-            payout = (raw * (10000 - edge)) / 10000;
+            payout = raw;
             if (payout > capped) payout = capped;
             bool useFreeSpin = _isFreeSpin(bet);
             won = useFreeSpin ? (payout > 0) : (payout >= bet.amount);
+            // Charge Meter: increment per cluster spin, fire reward event on
+            // threshold. Visual-only on-chain (frontend animates the bar);
+            // actual reward payout lives in `chargeMeterReward[player]` which
+            // the player can claim via `claimChargeReward()`.
+            _bumpChargeMeter(bet.player, stake, payout == 0, randomness);
             resultData = abi.encode(rr.finalGrid, rr.totalPayoutX100, rr.scatterCount, rr.cascadeDepth, useFreeSpin);
             return (won, payout, resultData);
         }

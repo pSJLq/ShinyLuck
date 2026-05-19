@@ -10,17 +10,34 @@ const accounts = PRIVATE_KEY ? [PRIVATE_KEY] : [];
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
-    version: "0.8.24",
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 1,           // optimize for deploy size — Casino.sol is at ~30KB
-                           // pre-optimisation. testnet gas is cheap so trading
-                           // a bit of runtime efficiency for deployability is
-                           // a fair trade. Bump back to 200+ once Casino is
-                           // split into libraries.
+    compilers: [
+      {
+        version: "0.8.24",
+        settings: {
+          optimizer: { enabled: true, runs: 1 },
+          viaIR: true,
+        },
       },
-      viaIR: true,
+      {
+        // SomniaEventHandler from @somnia-chain/reactivity-contracts pins
+        // pragma solidity 0.8.30 exactly. HouseManager extends it, so it and
+        // the vendored helpers compile with 0.8.30 via the overrides below.
+        // Casino + the rest stay on 0.8.24 — bumping the whole tree to 0.8.30
+        // would shift gas costs across all 125 existing tests.
+        version: "0.8.30",
+        settings: {
+          optimizer: { enabled: true, runs: 1 },
+          viaIR: true,
+        },
+      },
+    ],
+    overrides: {
+      "contracts/HouseManager.sol": { version: "0.8.30", settings: { optimizer: { enabled: true, runs: 1 }, viaIR: true } },
+      "node_modules/@somnia-chain/reactivity-contracts/contracts/SomniaEventHandler.sol": { version: "0.8.30", settings: { optimizer: { enabled: true, runs: 1 }, viaIR: true } },
+      "node_modules/@somnia-chain/reactivity-contracts/contracts/interfaces/ISomniaEventHandler.sol": { version: "0.8.30", settings: { optimizer: { enabled: true, runs: 1 }, viaIR: true } },
+      "node_modules/@somnia-chain/reactivity-contracts/contracts/interfaces/ISomniaReactivityPrecompile.sol": { version: "0.8.30", settings: { optimizer: { enabled: true, runs: 1 }, viaIR: true } },
+      "node_modules/@somnia-chain/reactivity-contracts/contracts/interfaces/SomniaExtensions.sol": { version: "0.8.30", settings: { optimizer: { enabled: true, runs: 1 }, viaIR: true } },
+      "node_modules/@somnia-chain/reactivity-contracts/contracts/interfaces/IERC165.sol": { version: "0.8.30", settings: { optimizer: { enabled: true, runs: 1 }, viaIR: true } },
     },
   },
   networks: {

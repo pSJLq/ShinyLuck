@@ -80,33 +80,44 @@ async function refreshRecent() {
 async function onPlaceBet() {
   const placeBtn = $("[data-sl-place]");
   if (!placeBtn) return;
+  if (placeBtn.dataset.locked === "1") return;
   placeBtn.dataset.locked = "1";
+
+  const stake = readStakeStr() || "0.1";
+  const stakeErr = validateStake(stake);
+  if (stakeErr) {
+    const { toast } = await import("../ui.js");
+    toast(stakeErr, { kind: "warn" });
+    delete placeBtn.dataset.locked;
+    return;
+  }
+  const t = Math.max(2, Math.min(98, target));
+
+  // INSTANT UX: dice starts shaking the moment user clicks — the chain
+  // tx happens silently in the background. Whether Sequence (~27s) or
+  // MetaMask (~3s), the user sees a continuous rolling animation, not a
+  // "submitting…" spinner. Result fades in when the chain reveals it.
+  clearResultBanner();
+  clearFairServer();
+  setStagePill("live", "ROLLING");
+  placeBtn.textContent = "Rolling…";
+  placeBtn.disabled = true;
+  diceAnimStart();
+
   try {
-    setStagePill("live", "CONNECTING");
-    placeBtn.textContent = "Connecting…"; placeBtn.disabled = true;
+    // Connect silently if needed — no UI for "Connecting".
     await connect();
-
-    const stake = readStakeStr() || "0.1";
-    const stakeErr = validateStake(stake); if (stakeErr) throw new Error(stakeErr);
-    const t = Math.max(2, Math.min(98, target));
-    setStagePill("live", "PLACING BET");
-    placeBtn.textContent = "Placing bet…";
-    clearResultBanner(); clearFairServer();
-
     const { betId, txHash, clientSeed } = await SL.placeDice(t, direction === "over", stake);
     lastBetId = betId;
     populateFairPanel({ clientSeed, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash });
 
-    setStagePill("live", "AWAITING REVEAL");
-    placeBtn.textContent = "Awaiting reveal…";
-    diceAnimStart();
-
     const settled = await pollForSettle(betId);
-    diceAnimStop(settled && !settled.refunded ? decodeDiceResult(settled.args.resultData) || 0 : 0);
+    const roll = settled && !settled.refunded ? decodeDiceResult(settled.args.resultData) : null;
+    diceAnimStop(roll || 0);
 
     if (!settled) {
-      setStagePill(null, "REVEAL TIMED OUT");
-      placeBtn.textContent = "Reveal timed out — refresh to retry";
+      setStagePill(null, "TIMED OUT");
+      placeBtn.textContent = "Refresh to retry";
       return;
     }
     if (settled.refunded) {
@@ -115,7 +126,6 @@ async function onPlaceBet() {
       return;
     }
 
-    const roll = decodeDiceResult(settled.args.resultData);
     setText("[data-sl-result]", `${settled.args.won ? "WON" : "LOST"} · roll ${roll}`);
     populateFairPanel({
       clientSeed: settled.args.clientSeed,
@@ -134,13 +144,18 @@ async function onPlaceBet() {
     }
     refreshRecent();
   } catch (e) {
-    setStagePill(null, "ERROR");
+    diceAnimStop(null);
     const msg = friendlyError(e);
-    placeBtn.textContent = "Error: " + msg;
-    setResultBanner({ won: false, txt: `<b>FAILED</b> · ${msg}`, accent: "#facc15" });
-    console.error("[dice] place failed:", e);
+    // User rejected the tx? Quiet error — no scary banner.
+    if (/rejected|user cancelled/i.test(msg)) {
+      setStagePill("ready", "READY");
+    } else {
+      setStagePill(null, "ERROR");
+      setResultBanner({ won: false, txt: `<b>FAILED</b> · ${msg}`, accent: "#facc15" });
+      console.error("[dice] place failed:", e);
+    }
   } finally {
-    setTimeout(() => { delete placeBtn.dataset.locked; placeBtn.disabled = false; recalcSummary(); }, 1500);
+    setTimeout(() => { delete placeBtn.dataset.locked; placeBtn.disabled = false; recalcSummary(); }, 800);
   }
 }
 

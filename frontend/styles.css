@@ -2,6 +2,58 @@
    ShinyLuck — premium dark casino, AI-agent powered
    ========================================================== */
 
+/* Page-load gate: account.js / leaderboard.js / etc. add `data-loading`
+   to body until their first refresh resolves, then remove. While present,
+   the page shell is held at opacity:0 (splash covers everything) so the
+   user never sees a flash of dashed-placeholders before real data lands. */
+body[data-loading] [data-page-shell] {
+  opacity: 0;
+  pointer-events: none;
+}
+[data-page-shell] {
+  opacity: 1;
+  transition: opacity 240ms ease;
+}
+
+/* Per-game color palette for the inline tag chips used in tables (feed,
+   account, leaderboard, recent bets). Apply via `.game-tag.g-<id>` where
+   <id> is the contract GameType enum value 0..6. The neutral .game-tag
+   styling lives further down — these classes only override the border /
+   text color so the chips read at a glance. */
+.game-tag.g-0 { color: #f87171; border-color: rgba(248,113,113,0.55); }   /* DICE      red       */
+.game-tag.g-1 { color: #c084fc; border-color: rgba(192,132,252,0.55); }   /* CRASH     purple    */
+.game-tag.g-2 { color: #fbbf24; border-color: rgba(251,191,36,0.55);  }   /* VAULT.7   gold      */
+.game-tag.g-3 { color: #fb7185; border-color: rgba(251,113,133,0.55); }   /* MINES     rose      */
+.game-tag.g-4 { color: #22d3ee; border-color: rgba(34,211,238,0.55);  }   /* PLINKO    cyan      */
+.game-tag.g-5 { color: #4ade80; border-color: rgba(74,222,128,0.55);  }   /* ROULETTE  green     */
+.game-tag.g-6 { color: #ff5e8a; border-color: rgba(255,94,138,0.55);  }   /* SUGAR.LAB pink      */
+
+/* Tone down secondary columns in tables (player address, multiplier,
+   amount) so the eye lands on the row's primary signal (game + P&L).
+   Doubled selectors raise specificity above the per-table base rules
+   (e.g. .feed-table td { color: var(--fg) } would otherwise win). */
+.tbl-dim, td.tbl-dim, .feed-dim,
+.feed-table td.feed-dim, .feed-table tbody td.feed-dim,
+table td.tbl-dim, .lb-row .tbl-dim {
+  color: var(--fg-mute, #6b6b75) !important;
+}
+.feed-table td.feed-dim a, .tbl-dim a { color: inherit !important; }
+
+/* Pagination strip used by account.js + leaderboard.js. */
+.sl-pager {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 12px 0 4px; font-family: var(--mono); font-size: 11px;
+  letter-spacing: 1.5px; color: var(--fg-mute, #6b6b75);
+}
+.sl-pager button {
+  background: transparent; color: var(--fg, #fafafa);
+  border: 1px solid var(--line, #1f1f23); padding: 5px 12px;
+  cursor: pointer; font-family: inherit; font-size: 11px; letter-spacing: 1px;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.sl-pager button:hover:not(:disabled) { border-color: var(--cyan, #22D3EE); color: var(--cyan, #22D3EE); }
+.sl-pager button:disabled { opacity: 0.35; cursor: not-allowed; }
+
 :root {
   --bg: #080808;
   --bg-1: #0d0d0e;

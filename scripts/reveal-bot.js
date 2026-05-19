@@ -49,7 +49,11 @@ function makeSeedStore({ initialSeedsFile, poolFile }) {
     : [];
   console.log(`[reveal-bot] loaded ${initial.length} initial seeds from ${initialSeedsFile}`);
   if (poolFile) console.log(`[reveal-bot] watching pool file: ${poolFile}`);
-  let poolCache = {};
+  // Pool format supports both shapes:
+  //   1. { seeds: [...], hashes: [...] }  — written by deploy.js / topup-seeds.js
+  //   2. { "0": "0x...", "37": "0x...", ... }  — sparse map written by hm-cron.js
+  // We normalise to an indexed array for fast .get(idx).
+  let poolArray = [];
   let poolMtime = 0;
   function refreshPool() {
     if (!poolFile || !fs.existsSync(poolFile)) return;
@@ -57,15 +61,27 @@ function makeSeedStore({ initialSeedsFile, poolFile }) {
       const st = fs.statSync(poolFile);
       if (st.mtimeMs === poolMtime) return;
       poolMtime = st.mtimeMs;
-      poolCache = JSON.parse(fs.readFileSync(poolFile, "utf8"));
-      console.log(`[reveal-bot] pool reloaded: ${Object.keys(poolCache).length} seeds available`);
+      const raw = JSON.parse(fs.readFileSync(poolFile, "utf8"));
+      if (Array.isArray(raw.seeds)) {
+        // shape 1: contiguous array starting at index 0
+        poolArray = raw.seeds.slice();
+      } else if (raw && typeof raw === "object") {
+        // shape 2: sparse map of stringified indices → seed
+        const max = Math.max(...Object.keys(raw).map(Number).filter(Number.isFinite), -1);
+        poolArray = new Array(max + 1);
+        for (const k of Object.keys(raw)) poolArray[Number(k)] = raw[k];
+      } else {
+        poolArray = [];
+      }
+      console.log(`[reveal-bot] pool reloaded: ${poolArray.filter(Boolean).length} seeds available`);
     } catch (e) { console.warn(`[reveal-bot] pool reload: ${e.message}`); }
   }
   return {
     get(idx) {
       refreshPool();
-      if (poolCache[String(idx)]) return poolCache[String(idx)];
-      if (idx < initial.length) return initial[idx];
+      const i = Number(idx);
+      if (poolArray[i]) return poolArray[i];
+      if (i < initial.length) return initial[i];
       return null;
     },
     refresh: refreshPool,
@@ -95,12 +111,18 @@ async function main() {
 
   const currentBlock0 = await provider.getBlockNumber();
   let lastScannedBlock;
+  // Cap the cold-start range so the bot doesn't block for minutes scanning
+  // tens of thousands of blocks from deploymentBlock. Anything older than
+  // BLOCKHASH_WINDOW (256 blocks) can't be revealed anyway — it falls into
+  // the refundExpired branch which the bot reaches via the periodic sweep.
+  const COLD_START_MAX = Math.min(COLD_START_LOOKBACK || 2000, 2000);
   if (manifest.deploymentBlock) {
-    lastScannedBlock = Math.max(0, Number(manifest.deploymentBlock) - 10);
-    console.log(`[reveal-bot] cold start from manifest.deploymentBlock-10=${lastScannedBlock}`);
+    const fromManifest = Math.max(0, Number(manifest.deploymentBlock) - 10);
+    lastScannedBlock = Math.max(fromManifest, currentBlock0 - COLD_START_MAX);
+    console.log(`[reveal-bot] cold start from block ${lastScannedBlock} (head=${currentBlock0}, manifest=${fromManifest})`);
   } else {
-    lastScannedBlock = Math.max(0, currentBlock0 - COLD_START_LOOKBACK);
-    console.log(`[reveal-bot] cold start from head-${COLD_START_LOOKBACK}=${lastScannedBlock}`);
+    lastScannedBlock = Math.max(0, currentBlock0 - COLD_START_MAX);
+    console.log(`[reveal-bot] cold start from head-${COLD_START_MAX}=${lastScannedBlock}`);
   }
 
   // Per-bet pending: betId → { commitBlock, seedIdx, game, player }
@@ -215,7 +237,24 @@ async function main() {
           if (/BetAlreadySettled|BetNotFound|InvalidGame/.test(msg)) pending.delete(betId);
           else if (/RevealTooEarly/.test(msg)) {/* retry next tick */}
           else if (/RevealExpired/.test(msg)) {/* refund branch next tick */}
-          else console.warn(`[reveal-bot] ${action} ${betId}: ${msg}`);
+          else {
+            // Generic "execution reverted" — bot can't decode the custom
+            // error. Probable causes:
+            //   • on-chain bet was already settled by another caller
+            //   • the seed in our local store doesn't match the contract's
+            //     hash at this seedIdx (stale seed file vs new deploy)
+            //   • CommitReveal expired between scan and tx submit
+            // Either way, retrying forever is worse than dropping — the
+            // refundExpired path will kick in on the age check next tick if
+            // the bet is genuinely stuck.
+            info._retries = (info._retries || 0) + 1;
+            if (info._retries >= 5) {
+              console.warn(`[reveal-bot] ${action} ${betId}: ${msg} (dropping after 5 retries)`);
+              pending.delete(betId);
+            } else {
+              console.warn(`[reveal-bot] ${action} ${betId}: ${msg} (retry ${info._retries}/5)`);
+            }
+          }
         }
       }
     }

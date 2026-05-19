@@ -14,13 +14,15 @@ import { ethers } from "https://esm.sh/ethers@6.13.2";
 import { SL } from "../wallet.js";
 import { CONFIG } from "../config.js";
 import { CHAINS } from "../shinyluck-sdk.js";
-import { provider, fetchRecentLogs } from "../rpc.js";
+import { provider, wsProvider, fetchRecentLogs } from "../rpc.js";
 import { friendlyError } from "../errors.js";
 
 export { friendlyError };
 
 export const ZERO = "0x0000000000000000000000000000000000000000";
-export const SETTLE_POLL_MS = 3000;
+// Drop poll cadence — fast settle was bottlenecked here, not on-chain.
+// Frontend now subscribes to WS first; this fallback fires every 750ms.
+export const SETTLE_POLL_MS = 750;
 export const SETTLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 export const $  = (sel, root = document) => root.querySelector(sel);
@@ -148,33 +150,94 @@ export async function refreshFairFromPlayer(gameId) {
 
 export async function pollForSettle(betId) {
   const c = casinoRO();
+  const wantId = betId.toString();
+  let resolved = null;
+
+  // Fast path: WebSocket subscription. Pushes a notification within ~100ms
+  // of the settle tx being mined. Polling fallback below catches missed
+  // events if the WS silently drops.
+  const ws = wsProvider();
+  let wsSettled = null, wsRefunded = null;
+  if (ws) {
+    try {
+      const settledTopic = c.interface.getEvent("BetSettled").topicHash;
+      const refundedTopic = c.interface.getEvent("BetRefunded").topicHash;
+      const onSettled = (log) => {
+        try {
+          const p = c.interface.parseLog(log);
+          if (p.args.betId.toString() === wantId) {
+            wsSettled = { name: "BetSettled", args: p.args, transactionHash: log.transactionHash, blockNumber: log.blockNumber };
+            resolved = wsSettled;
+          }
+        } catch (_) {}
+      };
+      const onRefunded = (log) => {
+        try {
+          const p = c.interface.parseLog(log);
+          if (p.args.betId.toString() === wantId) {
+            wsRefunded = { refunded: true, args: p.args, transactionHash: log.transactionHash };
+            resolved = wsRefunded;
+          }
+        } catch (_) {}
+      };
+      ws.on({ address: CONFIG.casino, topics: [settledTopic] },  onSettled);
+      ws.on({ address: CONFIG.casino, topics: [refundedTopic] }, onRefunded);
+      // schedule a tear-down hook on a Promise we race
+      var unsubscribeWs = () => {
+        try { ws.off({ address: CONFIG.casino, topics: [settledTopic] },  onSettled); } catch (_) {}
+        try { ws.off({ address: CONFIG.casino, topics: [refundedTopic] }, onRefunded); } catch (_) {}
+      };
+    } catch (e) {
+      console.warn("[base] settle WS subscribe failed, polling only:", e.message);
+    }
+  }
+
   const start = Date.now();
+  // Tight initial polling — first check immediately (no startup delay), then
+  // every SETTLE_POLL_MS (750ms) so total reveal-to-UI latency stays under
+  // ~1s once the reveal-bot lands its settle tx.
   let scanFrom = await provider().getBlockNumber();
+  // Initial check before sleeping — in case settle already happened during
+  // the placement round-trip (Sequence + chain mining).
+  try {
+    const back = await fetchRecentLogs(c, "BetSettled", {
+      minCount: 1, maxLookback: 30,
+      filter: (ev) => ev.args.betId.toString() === wantId,
+    });
+    if (back.length > 0) { if (unsubscribeWs) unsubscribeWs(); return back[0]; }
+  } catch (_) {}
+
   while (Date.now() - start < SETTLE_TIMEOUT_MS) {
+    if (resolved) { if (unsubscribeWs) unsubscribeWs(); return resolved; }
     await new Promise((r) => setTimeout(r, SETTLE_POLL_MS));
+    if (resolved) { if (unsubscribeWs) unsubscribeWs(); return resolved; }
     let head;
     try { head = await provider().getBlockNumber(); } catch { continue; }
     if (head < scanFrom) continue;
     try {
       const settled = await fetchRecentLogs(c, "BetSettled", {
         minCount: 1,
-        maxLookback: head - scanFrom + 1,
-        filter: (ev) => ev.args.betId.toString() === betId.toString(),
+        maxLookback: head - scanFrom + 2,
+        filter: (ev) => ev.args.betId.toString() === wantId,
       });
-      if (settled.length > 0) return settled[0];
+      if (settled.length > 0) { if (unsubscribeWs) unsubscribeWs(); return settled[0]; }
     } catch (e) {
       console.warn("[base] settle poll BetSettled:", e.message);
     }
     try {
       const refunds = await fetchRecentLogs(c, "BetRefunded", {
         minCount: 1,
-        maxLookback: head - scanFrom + 1,
-        filter: (ev) => ev.args.betId.toString() === betId.toString(),
+        maxLookback: head - scanFrom + 2,
+        filter: (ev) => ev.args.betId.toString() === wantId,
       });
-      if (refunds.length > 0) return { refunded: true, args: refunds[0].args, transactionHash: refunds[0].transactionHash };
+      if (refunds.length > 0) {
+        if (unsubscribeWs) unsubscribeWs();
+        return { refunded: true, args: refunds[0].args, transactionHash: refunds[0].transactionHash };
+      }
     } catch (_) {}
     scanFrom = head + 1;
   }
+  if (unsubscribeWs) unsubscribeWs();
   return null;
 }
 
@@ -190,7 +253,8 @@ export async function refreshRecentEvents({
   decode,                       // (ev) → { label, won, isLatest } where ev.args has BetSettled fields
   emptyLabel = "no recent",
   latestBetId = null,
-  maxLookback = 200_000,
+  // 20k blocks ≈ 7 hours on Somnia. Was 200k → cold-start scan 30s+.
+  maxLookback = 20_000,
 }) {
   const root = document.querySelector(containerSelector);
   if (!root) return;

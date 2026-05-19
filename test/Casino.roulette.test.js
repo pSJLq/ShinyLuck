@@ -38,7 +38,8 @@ describe("Casino — RouletteGame (round-based + multi-bet)", function () {
     await casino.connect(hm).startRouletteRound();
     await expect(casino.connect(alice).placeRouletteBets([{ kind: 99, number: 0, amount: ethers.parseEther("0.01") }],
       { value: ethers.parseEther("0.01") })).to.be.revertedWithCustomError(casino, "InvalidBet");
-    await expect(casino.connect(alice).placeRouletteBets([{ kind: KIND.STRAIGHT, number: 37, amount: ethers.parseEther("0.01") }],
+    // American wheel: 0..37 are valid (37 = "00"); 38 is now the out-of-range guard.
+    await expect(casino.connect(alice).placeRouletteBets([{ kind: KIND.STRAIGHT, number: 38, amount: ethers.parseEther("0.01") }],
       { value: ethers.parseEther("0.01") })).to.be.revertedWithCustomError(casino, "InvalidBet");
     await bumpTime(31);
     await expect(casino.connect(alice).placeRouletteBets([{ kind: KIND.RED, number: 0, amount: ethers.parseEther("0.01") }],
@@ -84,7 +85,9 @@ describe("Casino — RouletteGame (round-based + multi-bet)", function () {
       );
       await settleRound({ casino, hm, seeds, roundId: id });
       const r = await casino.getRouletteRound(id);
-      expect(Number(r.resultNumber)).to.be.lte(36);
+      // American wheel: 0..36 plus 37 (= "00"). House edge 5.26% per
+      // `houseEdgeBps(ROULETTE)` in Casino.sol. Both 0 and 37 are house-only.
+      expect(Number(r.resultNumber)).to.be.lte(37);
       observed.push(Number(r.resultNumber));
     }
     // Spot-check: at least one of the bets was credited or zero; consistency

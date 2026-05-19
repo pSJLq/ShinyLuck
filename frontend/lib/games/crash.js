@@ -22,7 +22,11 @@ import {
 import { validateStake, validateAutoCashout } from "../errors.js";
 
 const CRASH = 1;
-const POLL_MS = 1000;
+// Was 1000ms — caused 1 RPC/s contract reads even when the round hadn't
+// changed. WS subscriptions below catch real state changes instantly; this
+// poll is just a fallback for missed events. 3s gives smooth UX without
+// hammering RPC + freeing the main thread for cursor / animations.
+const POLL_MS = 3000;
 
 let casinoRO = null;
 function casino() {
@@ -92,16 +96,74 @@ function predictedMultiplier(roundStartSec, nowSec) {
   return Math.min(100, m);
 }
 
+/// Convert the cashout multiplier (≥ 1.00) into the visual "growth" multiplier
+/// that starts at 0.00× at round start and climbs as the curve rises. Display
+/// semantics: "1.50×" on screen ≡ 2.50× actual cashout payout (the bet returns
+/// stake + 1.50× stake). Auto-cashout input is still entered as the actual
+/// cashout multiplier — the slider label conversion happens at render time.
+function toDisplayMult(actualMult) {
+  return Math.max(0, actualMult - 1);
+}
+
+/// Update the SVG curve + glowing dot to reflect the live multiplier.
+/// The viewBox is 800×420 with the round x-axis spanning 0..760 (we reserve
+/// the right strip for the multiplier label). y=400 is the 0× floor and the
+/// curve climbs logarithmically toward y=20 (the 50× ceiling).
+function _updateCrashSvg(elapsedSec, actualMult) {
+  const svg = document.querySelector(".crash-stage svg");
+  if (!svg) return;
+  const linePath = svg.querySelector("path[stroke^='url']");
+  const areaPath = svg.querySelector("path[fill^='url']");
+  const dot      = svg.querySelector("circle");
+  if (!linePath || !areaPath || !dot) return;
+
+  // The initial CSS animation set stroke-dasharray=1200/dashoffset=1200, which
+  // leaves the line invisible after the first round if we never reset. Clear
+  // both so updateSvg's `setAttribute('d', …)` actually paints.
+  if (linePath.hasAttribute("stroke-dasharray")) {
+    linePath.removeAttribute("stroke-dasharray");
+    linePath.removeAttribute("stroke-dashoffset");
+    linePath.style.strokeDasharray = "none";
+    linePath.style.strokeDashoffset = "0";
+    linePath.style.animation = "none";
+    areaPath.style.animation = "none";
+  }
+
+  // x: linear growth from 0 to 760 over the round window (≈30s typical).
+  const xCap = 760, yTop = 20, yBot = 400;
+  const x = Math.min(xCap, (elapsedSec / 30) * xCap);
+  // y: log-scaled climb from the bottom toward the top.
+  // log(actualMult) / log(50) maps actualMult=1 → 0 (bottom), actualMult=50 → 1 (top).
+  const logProg = Math.log(actualMult) / Math.log(50);
+  const y = Math.max(yTop, yBot - logProg * (yBot - yTop));
+  // Smooth cubic bezier curve from (0, yBot) to (x, y).
+  const cx1 = x * 0.4, cy1 = yBot;
+  const cx2 = x * 0.75, cy2 = yBot - (yBot - y) * 0.55;
+  const d = `M0,${yBot} C${cx1},${cy1} ${cx2},${cy2} ${x},${y}`;
+  linePath.setAttribute("d", d);
+  areaPath.setAttribute("d", d + ` L${x},${yBot} Z`);
+  dot.setAttribute("cx", x);
+  dot.setAttribute("cy", y);
+}
+
 function startTicker(roundStartSec) {
   stopTicker();
+  // First-frame update so the curve resets to (0, bottom) and the number to
+  // 0.00× the moment the round goes live (vs lingering on the previous
+  // round's crash point).
+  _updateCrashSvg(0, 1);
+  const el = $("[data-sl-crash-mult]");
+  if (el) {
+    el.textContent = "0.00";
+    el.style.color = "var(--cyan)";
+  }
   multTickerHandle = setInterval(() => {
     const now = Date.now() / 1000;
-    const m = predictedMultiplier(roundStartSec, now);
-    const el = $("[data-sl-crash-mult]");
-    if (el) {
-      el.textContent = m.toFixed(2);
-      el.style.color = "var(--cyan)";
-    }
+    const elapsed = Math.max(0, now - roundStartSec);
+    const actual = predictedMultiplier(roundStartSec, now);
+    const display = toDisplayMult(actual);
+    if (el) el.textContent = display.toFixed(2);
+    _updateCrashSvg(elapsed, actual);
   }, 60);
 }
 function stopTicker() {
@@ -110,7 +172,9 @@ function stopTicker() {
 function paintMultiplierFinal(cpX, won) {
   const el = $("[data-sl-crash-mult]");
   if (!el) return;
-  el.textContent = cpX.toFixed(2);
+  // Display the growth multiplier (cashpoint − 1) consistent with the live
+  // ticker. cpX is the actual cashout floor (e.g. 1.34); we show 0.34.
+  el.textContent = toDisplayMult(cpX).toFixed(2);
   el.style.color = won ? "var(--green)" : "var(--red)";
 }
 
@@ -149,7 +213,10 @@ async function loadActiveRound() {
       renderPhasePill("BETTING");
       startCountdown(activeRound.betWindowEnd);
       stopTicker();
-      setText("[data-sl-crash-mult]", "1.00");
+      setText("[data-sl-crash-mult]", "0.00");
+      // also reset the SVG curve to the bottom-left during BETTING phase so
+      // the previous round's crash point isn't lingering.
+      _updateCrashSvg(0, 1);
     } else if (!r.settled) {
       renderPhasePill("RUNNING");
       startTicker(activeRound.betWindowEnd);
@@ -223,35 +290,54 @@ function renderMyBet() {
 async function onPlaceBet() {
   const placeBtn = $("[data-sl-place]");
   if (!placeBtn) return;
+  if (placeBtn.dataset.locked === "1") return;
   placeBtn.dataset.locked = "1";
-  try {
-    setStagePill("live", "CONNECTING");
-    placeBtn.textContent = "Connecting…"; placeBtn.disabled = true;
-    await connect();
-    if (!activeRound || activeRound.settled) {
-      throw new Error("no open round — wait for the next one");
-    }
-    if (Math.floor(Date.now() / 1000) >= activeRound.betWindowEnd) {
-      throw new Error("betting window closed");
-    }
-    const stake = readStakeStr() || "0.1";
-    const stakeErr = validateStake(stake); if (stakeErr) throw new Error(stakeErr);
-    const ac = autoCashoutX();
-    const acErr = validateAutoCashout(ac); if (acErr) throw new Error(acErr);
 
-    clearResultBanner(); clearFairServer();
-    placeBtn.textContent = "Placing bet…";
+  const stake = readStakeStr() || "0.1";
+  const stakeErr = validateStake(stake);
+  if (stakeErr) {
+    const { toast } = await import("../ui.js"); toast(stakeErr, { kind: "warn" });
+    delete placeBtn.dataset.locked; return;
+  }
+  const ac = autoCashoutX();
+  const acErr = validateAutoCashout(ac);
+  if (acErr) {
+    const { toast } = await import("../ui.js"); toast(acErr, { kind: "warn" });
+    delete placeBtn.dataset.locked; return;
+  }
+  if (!activeRound || activeRound.settled) {
+    const { toast } = await import("../ui.js"); toast("Waiting for the next round to open…", { kind: "warn" });
+    delete placeBtn.dataset.locked; return;
+  }
+  if (Math.floor(Date.now() / 1000) >= activeRound.betWindowEnd) {
+    const { toast } = await import("../ui.js"); toast("Betting window closed", { kind: "warn" });
+    delete placeBtn.dataset.locked; return;
+  }
+
+  // INSTANT UX: button becomes "Joining round…" right away; the crash
+  // multiplier ticker keeps animating in the background as if nothing
+  // changed. No "Connecting" / "Placing bet…" interruption.
+  clearResultBanner(); clearFairServer();
+  placeBtn.textContent = "Joining round…";
+  placeBtn.disabled = true;
+
+  try {
+    await connect();
     const result = await SL.placeCrash(ac, stake);
     populateFairPanel({ clientSeed: ethers.ZeroHash, betId: activeRound.id, nonce: activeRound.id, serverSeed: ethers.ZeroHash, txHash: result.txHash });
-    placeBtn.textContent = `Bet in round #${activeRound.id}`;
+    placeBtn.textContent = `In round #${activeRound.id}`;
     await loadActiveRound();
   } catch (e) {
-    setStagePill(null, "ERROR");
     const msg = friendlyError(e);
-    placeBtn.textContent = "Error: " + msg;
-    setResultBanner({ won: false, txt: `<b>FAILED</b> · ${msg}`, accent: "#facc15" });
+    if (/rejected|user cancelled/i.test(msg)) {
+      setStagePill("ready", "READY");
+      placeBtn.textContent = "Place bet";
+    } else {
+      setStagePill(null, "ERROR");
+      setResultBanner({ won: false, txt: `<b>FAILED</b> · ${msg}`, accent: "#facc15" });
+    }
   } finally {
-    setTimeout(() => { delete placeBtn.dataset.locked; placeBtn.disabled = false; recalcSummary(); }, 1500);
+    setTimeout(() => { delete placeBtn.dataset.locked; placeBtn.disabled = false; recalcSummary(); }, 800);
   }
 }
 
@@ -275,7 +361,7 @@ async function refreshHistory() {
   if (!list) return;
   try {
     const c = casino();
-    const events = await fetchRecentLogs(c, "CrashRoundSettled", { minCount: 20, maxLookback: 100_000 });
+    const events = await fetchRecentLogs(c, "CrashRoundSettled", { minCount: 20, maxLookback: 20_000 });
     list.innerHTML = "";
     if (events.length === 0) {
       list.innerHTML = `<span class="m" style="opacity:.4;">no recent rounds</span>`;

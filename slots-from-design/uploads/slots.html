@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Slots · ShinyLuck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<script src="../partials.js" defer></script>
+<script type="module" src="../lib/wallet.js"></script>
+<script type="module" src="../lib/livedata.js"></script>
+<script type="module" src="../lib/games/slots.js"></script>
+</head>
+<body data-active-page="games">
+<div data-page-shell>
+<div data-mount="nav"></div>
+
+<div class="game-page">
+  <div class="crumb">
+    <a href="../SomniaLuck.html#games" data-link>Games</a>
+    <span class="sep">/</span>
+    <span class="here">Slots — Crypto Night</span>
+  </div>
+
+  <div class="game-hero">
+    <div>
+      <h1>Sl<span class="accent">o</span>ts.</h1>
+      <p class="lede">Three reels. Four glyphs. The agent rolls a deterministic seed across the cluster — every spin reproducible.</p>
+    </div>
+    <div class="game-hero-meta">
+      <div class="m">House Edge<b class="cyan" data-sl="houseEdge" data-game="slots">5.30%</b></div>
+      <div class="m">Max Bet<b data-sl="maxBet" data-game="slots">5 STT</b></div>
+      <div class="m">Max Win<b>50×</b></div>
+      <div class="m">Theme<b class="purple" data-sl-theme-name>Classic</b></div>
+    </div>
+  </div>
+
+  <div class="game-layout">
+    <div class="stage">
+      <div class="stage-head">
+        <span class="live-pill" data-sl-stage-pill><span class="dot"></span> READY</span>
+        <span class="round" data-sl-round-info>—</span>
+      </div>
+      <div class="stage-body">
+        <div data-sl-slots-grid style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; width: 100%; max-width: 520px; margin: 0 auto;">
+          <!-- 5×3 grid injected by lib/games/slots.js -->
+        </div>
+      </div>
+      <div class="stage-foot">
+        <span>PAYTABLE · 20 lines · WILD substitutes · ≥3 SCATTER → +10× stake</span>
+        <span style="display:flex; gap:14px; color:var(--fg-dim); font-size: 11px;">
+          <span>5× HIGH <b style="color:var(--cyan)">500×</b></span>
+          <span>5× MID <b style="color:var(--purple-2)">30×</b></span>
+          <span>5× LOW <b>10×</b></span>
+        </span>
+      </div>
+    </div>
+
+    <aside>
+      <div class="panel">
+        <h3>Place Bet</h3>
+        <div class="bet-row">
+          <label>Stake</label>
+          <div class="bet-input">
+            <input type="text" value="0.05" data-sl-stake />
+            <span class="suffix">STT</span>
+          </div>
+          <div class="preset-row">
+            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.01'">0.01</button>
+            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.05'">0.05</button>
+            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.1'">0.1</button>
+            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.5'">0.5</button>
+          </div>
+        </div>
+        <button class="btn-bet" data-hover data-sl-place>Spin</button>
+        <div class="summary">
+          <div><div class="l">Jackpot pays</div><div class="v cyan">50× stake</div></div>
+          <div><div class="l">EV <span style="opacity:.55;">(<span data-sl-ev-pct>−5.30%</span>)</span></div><div class="v" style="color:var(--red);" data-sl-ev>—</div></div>
+        </div>
+        <div data-sl-result-banner style="display:none; margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--cyan); font-family: var(--mono); font-size: 12px; letter-spacing: 1px;"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Recent spins</h3>
+        <div class="recent-mults" data-sl-slots-recent>
+          <span class="m" style="opacity:.4;">loading…</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Provably fair</h3>
+        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">CLIENT SEED</div>
+        <div data-sl-fairclient style="font-size: 12px; color: var(--cyan); word-break: break-all; margin-bottom: 16px;">—</div>
+        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">BET ID / NONCE</div>
+        <div data-sl-fairnonce style="font-size: 12px; color: var(--fg); margin-bottom: 16px;">—</div>
+        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">SERVER SEED</div>
+        <div data-sl-fairserver style="font-size: 12px; color: var(--purple-2); word-break: break-all; margin-bottom: 16px;">—</div>
+        <a data-sl-explorer-link href="#" target="_blank" rel="noopener" style="display:none; font-size: 11px; letter-spacing: 1.5px; color: var(--cyan); text-transform: uppercase; margin-bottom: 8px;">verify on explorer ↗</a>
+      </div>
+
+    </aside>
+  </div>
+</div>
+
+<div data-mount="footer"></div>
+</div>
+</body>
+</html>

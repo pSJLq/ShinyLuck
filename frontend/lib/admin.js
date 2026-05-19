@@ -10,9 +10,9 @@ import { SL, connect, shortAddr } from "./wallet.js";
 import { CONFIG } from "./config.js";
 import { provider, fetchLogs, fetchRecentLogs, fetchDeploymentBlock } from "./rpc.js";
 
-const GAME_NAMES = ["DICE","CRASH","SLOTS","MINES","PLINKO","ROULETTE"];
+const GAME_NAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.LAB"];
 const ZERO = "0x0000000000000000000000000000000000000000";
-const LOOKBACK = 200_000;
+const LOOKBACK = 20_000;
 
 const ADMIN_ABI = [
   "function owner() view returns (address)",

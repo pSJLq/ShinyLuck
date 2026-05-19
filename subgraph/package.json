@@ -1,0 +1,17 @@
+{
+  "name": "shinyluck-subgraph",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ShinyLuck historical-data subgraph (Ormi/Somnia)",
+  "scripts": {
+    "codegen": "graph codegen",
+    "build": "graph build",
+    "deploy:ormi": "graph deploy --node https://subgraph.somnia.network/deploy --ipfs https://subgraph.somnia.network/ipfs/ --deploy-key $ORMI_API_KEY shinyluck/casino",
+    "create:local": "graph create --node http://localhost:8020/ shinyluck/casino",
+    "deploy:local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 shinyluck/casino"
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "^0.71.0",
+    "@graphprotocol/graph-ts": "^0.32.0"
+  }
+}

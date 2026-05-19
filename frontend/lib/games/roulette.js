@@ -1,11 +1,14 @@
 // Roulette — round-based + multi-bet (up to 5 bets per player per round).
 //
+// American wheel: 38 outcomes — 0, 1..36, 00 (encoded on-chain as 37).
+// House edge 5.26% (vs European 2.70%).
+//
 // Workflow:
-//   1. Player clicks bet zones on the felt to build a basket (right panel).
-//   2. Click "Place bets" → SL.placeRoulette([{kind, number, amountSTT}, …])
-//      pushes the basket on-chain (one tx).
+//   1. Player clicks bet zones on the felt (built by buildFelt()) → basket.
+//   2. Click "Place bets" → SL.placeRoulette([{kind, number, amountSTT}, …]).
 //   3. After r.betWindowEnd + 4 blocks, reveal-bot calls settleRouletteRound.
-//      The wheel animation lands on the result number; winners get a banner.
+//   4. spinWheel() animates the wheel with smooth accel + decel, lands on the
+//      result segment under the pointer, then stays there until next round.
 
 import { ethers } from "https://esm.sh/ethers@6.13.2";
 import { SL, connect } from "../wallet.js";
@@ -19,12 +22,31 @@ import {
 import { validateStake } from "../errors.js";
 
 const ROULETTE = 5;
-const POLL_MS = 1000;
+// Was 1000ms — see crash.js note. WS push handles real state changes; the
+// poll is a fallback. 3s prevents main-thread spam and cursor lag.
+const POLL_MS = 3000;
 
 const KINDS = {
   STRAIGHT: 0, RED: 1, BLACK: 2, EVEN: 3, ODD: 4,
   LOW: 5, HIGH: 6, DOZEN_1: 7, DOZEN_2: 8, DOZEN_3: 9,
 };
+
+// American wheel order, clockwise from the top (12 o'clock = pocket 0).
+// 00 is encoded as 37 in the chain protocol.
+const AMERICAN_ORDER = [
+  0, 28, 9, 26, 30, 11, 7, 20, 32, 17, 5, 22, 34, 15, 3, 24, 36, 13, 1,
+  37, 27, 10, 25, 29, 12, 8, 19, 31, 18, 6, 21, 33, 16, 4, 23, 35, 14, 2,
+];
+const REDS = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
+const N_SEGMENTS = AMERICAN_ORDER.length; // 38
+
+function displayNumber(num) {
+  return num === 37 ? "00" : String(num);
+}
+function pocketFill(num) {
+  if (num === 0 || num === 37) return "#15803d";  // green
+  return REDS.has(num) ? "#dc2626" : "#0a0a0c";
+}
 
 let casinoRO = null;
 function casino() {
@@ -44,12 +66,10 @@ function casino() {
 }
 
 let activeRound = null;
-let basket = [];     // [{ kind, number, amountSTT, label }]
+let basket = [];
 let countdownHandle = null;
-const animatedRounds = new Set();  // roundIds we've already animated, so the
-                                   // 1-second poll doesn't restart the spin
-let lastRenderedRoundId = -1;       // change-detection so we don't repaint the
-                                    // pill / countdown on every tick
+const animatedRounds = new Set();
+let lastRenderedRoundId = -1;
 
 function fmtCountdown(s) {
   if (s < 0) s = 0;
@@ -99,6 +119,42 @@ async function addToBasket(kind, number, label) {
   renderBasket();
 }
 
+/// Build the American-wheel SVG: 38 segments + numbers in AMERICAN_ORDER,
+/// pocket 0 at the top (12 o'clock), 00 on the opposite side (6 o'clock).
+function buildWheel() {
+  const wheel = document.querySelector("#rsegments");
+  if (!wheel) return;
+  wheel.innerHTML = "";
+  const R = 150, r = 115;
+  for (let i = 0; i < N_SEGMENTS; i++) {
+    const num = AMERICAN_ORDER[i];
+    const a1 = (i / N_SEGMENTS) * Math.PI * 2 - Math.PI / 2;
+    const a2 = ((i + 1) / N_SEGMENTS) * Math.PI * 2 - Math.PI / 2;
+    const x1 = Math.cos(a1)*R, y1 = Math.sin(a1)*R;
+    const x2 = Math.cos(a2)*R, y2 = Math.sin(a2)*R;
+    const x3 = Math.cos(a2)*r, y3 = Math.sin(a2)*r;
+    const x4 = Math.cos(a1)*r, y4 = Math.sin(a1)*r;
+    const seg = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    seg.setAttribute("d", `M${x1},${y1} A${R},${R} 0 0 1 ${x2},${y2} L${x3},${y3} A${r},${r} 0 0 0 ${x4},${y4} Z`);
+    seg.setAttribute("fill", pocketFill(num));
+    seg.setAttribute("stroke", "#27272d");
+    seg.setAttribute("stroke-width", "0.5");
+    wheel.appendChild(seg);
+    const am = (a1 + a2) / 2;
+    const tx = Math.cos(am) * (R - 15);
+    const ty = Math.sin(am) * (R - 15);
+    const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    t.setAttribute("x", tx); t.setAttribute("y", ty);
+    t.setAttribute("text-anchor", "middle");
+    t.setAttribute("dominant-baseline", "middle");
+    t.setAttribute("font-family", "JetBrains Mono"); t.setAttribute("font-size", "9");
+    t.setAttribute("fill", "#fff");
+    t.setAttribute("transform", `rotate(${(am * 180/Math.PI) + 90}, ${tx}, ${ty})`);
+    t.textContent = displayNumber(num);
+    wheel.appendChild(t);
+  }
+}
+
 function bindBetZones() {
   $$("[data-sl-rkind]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -106,9 +162,14 @@ function bindBetZones() {
       let label = btn.textContent.trim();
       if (kind === KINDS.STRAIGHT) {
         const ni = $("[data-sl-rnumber]");
-        const num = ni ? parseInt(ni.value, 10) || 0 : 0;
-        if (num < 0 || num > 36) { import("../ui.js").then(({ toast }) => toast("Number must be 0–36", { kind: "warn" })); return; }
-        label = `STRAIGHT ${num}`;
+        const raw = ni ? ni.value.trim() : "";
+        // Accept "00" as the only string form, else integer 0..36
+        const num = raw === "00" ? 37 : parseInt(raw, 10);
+        if (isNaN(num) || num < 0 || num > 37) {
+          import("../ui.js").then(({ toast }) => toast("Number must be 0–36 or 00", { kind: "warn" }));
+          return;
+        }
+        label = `STRAIGHT ${displayNumber(num)}`;
         addToBasket(kind, num, label);
       } else {
         addToBasket(kind, 0, label);
@@ -119,25 +180,32 @@ function bindBetZones() {
   buildFelt();
 }
 
-/// GTA-style visual betting felt — 0 spans the left, 1..36 in 3 rows × 12 cols,
-/// dozens band on top, halves / red-black / even-odd band below. Clicking any
-/// number adds a straight bet for that number; outside bets share their kind.
+/// American-style felt: 0 on the LEFT (spans 3 rows), 00 right next to 0
+/// (also spans 3 rows), 1..36 in 3 rows × 12 cols, outside bets below.
 function buildFelt() {
   const root = $("[data-sl-roulette-felt]");
   if (!root) return;
-  const REDS = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
   const isRed = (n) => REDS.has(n);
   root.innerHTML = "";
   const wrap = document.createElement("div");
-  wrap.style.cssText = "display:grid; grid-template-columns: 60px repeat(12, 1fr); gap: 2px; font-family: var(--mono); font-size: 11px;";
-  // Zero — spans 3 rows on the left
+  wrap.style.cssText = "display:grid; grid-template-columns: 48px 48px repeat(12, 1fr); gap: 2px; font-family: var(--mono); font-size: 11px;";
+
+  // 0 — spans 3 rows, green
   const zero = document.createElement("button");
   zero.textContent = "0";
   zero.style.cssText = "grid-row: span 3; background: #15803d; color: #fff; border: 1px solid #16a34a; cursor: pointer; font-size: 18px; font-weight: 600;";
   zero.dataset.straight = "0";
   wrap.appendChild(zero);
-  // 3 rows of numbers in column-major fashion (top row = highest of each column).
-  // Order matches a standard roulette felt: row0 = 3,6,…,36; row1 = 2,5,…,35; row2 = 1,4,…,34.
+
+  // 00 — also spans 3 rows, on the opposite side of the wheel but on the
+  // felt it sits right after 0 (standard American felt layout).
+  const doubleZero = document.createElement("button");
+  doubleZero.textContent = "00";
+  doubleZero.style.cssText = "grid-row: span 3; background: #15803d; color: #fff; border: 1px solid #16a34a; cursor: pointer; font-size: 18px; font-weight: 600;";
+  doubleZero.dataset.straight = "37";
+  wrap.appendChild(doubleZero);
+
+  // 3 rows × 12 cols of numbers 1..36.
   for (let row = 0; row < 3; row++) {
     for (let col = 0; col < 12; col++) {
       const n = (col * 3) + (3 - row);
@@ -155,20 +223,22 @@ function buildFelt() {
   wrap.querySelectorAll("button[data-straight]").forEach((b) => {
     b.addEventListener("click", () => {
       const num = parseInt(b.dataset.straight, 10);
-      addToBasket(KINDS.STRAIGHT, num, `STRAIGHT ${num}`);
+      addToBasket(KINDS.STRAIGHT, num, `STRAIGHT ${displayNumber(num)}`);
     });
   });
   root.appendChild(wrap);
-  // Outside bets band — dozens
+
+  // Dozens band
   const dozens = document.createElement("div");
-  dozens.style.cssText = "display:grid; grid-template-columns: 60px repeat(3, 1fr); gap: 2px; margin-top: 2px; font-family: var(--mono);";
+  dozens.style.cssText = "display:grid; grid-template-columns: 96px repeat(3, 1fr); gap: 2px; margin-top: 2px; font-family: var(--mono);";
   dozens.innerHTML = `<div></div>` +
     `<button data-kind="7" style="padding: 6px 0; background:#1f1f23; color:#fff; border:1px solid var(--line); cursor:pointer;">1st 12</button>` +
     `<button data-kind="8" style="padding: 6px 0; background:#1f1f23; color:#fff; border:1px solid var(--line); cursor:pointer;">2nd 12</button>` +
     `<button data-kind="9" style="padding: 6px 0; background:#1f1f23; color:#fff; border:1px solid var(--line); cursor:pointer;">3rd 12</button>`;
   root.appendChild(dozens);
+
   const halves = document.createElement("div");
-  halves.style.cssText = "display:grid; grid-template-columns: 60px repeat(6, 1fr); gap: 2px; margin-top: 2px; font-family: var(--mono);";
+  halves.style.cssText = "display:grid; grid-template-columns: 96px repeat(6, 1fr); gap: 2px; margin-top: 2px; font-family: var(--mono);";
   halves.innerHTML = `<div></div>` +
     `<button data-kind="5" style="padding: 6px 0; background:#1f1f23; color:#fff; border:1px solid var(--line); cursor:pointer;">1-18</button>` +
     `<button data-kind="3" style="padding: 6px 0; background:#1f1f23; color:#fff; border:1px solid var(--line); cursor:pointer;">EVEN</button>` +
@@ -177,7 +247,7 @@ function buildFelt() {
     `<button data-kind="4" style="padding: 6px 0; background:#1f1f23; color:#fff; border:1px solid var(--line); cursor:pointer;">ODD</button>` +
     `<button data-kind="6" style="padding: 6px 0; background:#1f1f23; color:#fff; border:1px solid var(--line); cursor:pointer;">19-36</button>`;
   root.appendChild(halves);
-  // Wire outside-bet clicks.
+
   root.querySelectorAll("button[data-kind]").forEach((b) => {
     b.addEventListener("click", () => {
       const kind = parseInt(b.dataset.kind, 10);
@@ -197,29 +267,53 @@ function startCountdown(betWindowEnd) {
   countdownHandle = setInterval(upd, 250);
 }
 
+/// Continuous-rotation spin. We maintain `_wheelTotalDeg` as a strictly
+/// increasing rotation counter — every new spin extends the rotation forward
+/// (never resets to 0), so the wheel never visibly snaps back between rounds.
+/// During the BETTING phase the wheel just sits at the previous result.
+let _wheelTotalDeg = 0;
 function spinWheel(result, roundId) {
-  if (animatedRounds.has(roundId)) return;       // already played this spin
+  if (animatedRounds.has(roundId)) return;
   animatedRounds.add(roundId);
   const wheel = document.querySelector("svg.roulette-wheel, .roulette-big svg");
   if (!wheel) return;
-  // Reset transform first (without transition) so animations from previous
-  // rounds don't compound — otherwise the wheel "dances" every tick.
-  wheel.style.transition = "none";
-  wheel.style.transform = "rotate(0deg)";
-  // Force browser to flush the reset before the new spin animation.
-  // (Reading offsetHeight is the standard reflow trick.)
-  void wheel.offsetHeight;
-  const order = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
-  const segIdx = order.indexOf(result);
-  const N = order.length;
-  const segAngle = 360 / N;
-  const target = -(segIdx * segAngle) + 270;
-  const finalDeg = 360 * 5 + target;
-  // Apply animation on the next frame to ensure the reset took effect.
+
+  const segIdx = AMERICAN_ORDER.indexOf(result);
+  if (segIdx < 0) return;                                  // unknown result
+  const segAngle = 360 / N_SEGMENTS;
+
+  // Current rotation modulo 360 — figure out the delta needed to bring segIdx
+  // under the top pointer. Pointer is at the wheel's 12 o'clock (the rendered
+  // SVG's local "up", i.e. transform: rotate(0) origin). Segment segIdx sits
+  // at angular position (segIdx * segAngle) clockwise from the top. Rotating
+  // the wheel CW by Δ moves segment segIdx to position (segIdx*segAngle + Δ).
+  // For segIdx to be at the top (position ≡ 0 mod 360) we need
+  // Δ ≡ -(segIdx * segAngle) (mod 360).
+  const wantOffsetMod = ((360 - (segIdx * segAngle)) % 360 + 360) % 360;
+  const curMod = ((_wheelTotalDeg % 360) + 360) % 360;
+  // Always rotate FORWARD (clockwise). Add ≥ 6 full extra revolutions for a
+  // satisfying long spin. The base delta is the smallest positive value that
+  // takes us from curMod to wantOffsetMod.
+  const baseDelta = ((wantOffsetMod - curMod) % 360 + 360) % 360;
+  const extraSpins = 6 + Math.floor(Math.random() * 2); // 6 or 7 full revolutions
+  const delta = baseDelta + extraSpins * 360;
+  _wheelTotalDeg += delta;
+
+  // 8 seconds total — long enough that the user can watch the deceleration.
+  // Symmetric ease-in-out so it starts gently, peaks mid-spin, eases to a stop.
   requestAnimationFrame(() => {
-    wheel.style.transition = "transform 3.2s cubic-bezier(0.16, 0.84, 0.44, 1)";
-    wheel.style.transform = `rotate(${finalDeg}deg)`;
+    wheel.style.transition = "transform 8s cubic-bezier(0.22, 0.04, 0.18, 1)";
+    wheel.style.transform = `rotate(${_wheelTotalDeg}deg)`;
   });
+
+  // Result banner after the animation finishes.
+  setTimeout(() => {
+    setResultBanner({
+      won: false,
+      txt: `<b>RESULT</b> · <span style="color:${pocketFill(result) === "#dc2626" ? "#fca5a5" : (pocketFill(result) === "#15803d" ? "#86efac" : "#fff")}; font-size: 18px;">${displayNumber(result)}</span>`,
+      accent: pocketFill(result),
+    });
+  }, 8100);
 }
 
 async function loadActiveRound() {
@@ -237,8 +331,6 @@ async function loadActiveRound() {
       resultNumber: Number(r[5]),
     };
     const now = Math.floor(Date.now() / 1000);
-    // Only repaint static bits (round id, pill, countdown re-arm) when the
-    // *phase* changes — otherwise every 1-second poll triggers a flicker.
     const phaseKey = id * 10 + (r[4] ? 2 : (now < activeRound.betWindowEnd ? 0 : 1));
     if (lastRenderedRoundId !== phaseKey) {
       lastRenderedRoundId = phaseKey;
@@ -253,7 +345,7 @@ async function loadActiveRound() {
           pill.classList.add("live"); pill.innerHTML = `<span class="dot"></span> SPINNING`;
           setText("[data-sl-roulette-countdown]", "settling…");
         } else {
-          pill.classList.add("won"); pill.innerHTML = `<span class="dot"></span> RESULT · ${activeRound.resultNumber}`;
+          pill.classList.add("won"); pill.innerHTML = `<span class="dot"></span> RESULT · ${displayNumber(activeRound.resultNumber)}`;
           setText("[data-sl-roulette-countdown]", "round closed");
         }
       }
@@ -265,28 +357,44 @@ async function loadActiveRound() {
 async function onPlaceBet() {
   if (basket.length === 0) return;
   const placeBtn = $("[data-sl-place]");
+  if (placeBtn.dataset.locked === "1") return;
   placeBtn.dataset.locked = "1";
-  try {
-    setStagePill("live", "CONNECTING");
-    placeBtn.textContent = "Connecting…"; placeBtn.disabled = true;
-    await connect();
-    if (!activeRound || activeRound.settled) throw new Error("no open round");
-    if (Math.floor(Date.now() / 1000) >= activeRound.betWindowEnd) throw new Error("betting window closed");
 
-    clearResultBanner(); clearFairServer();
-    placeBtn.textContent = "Placing bets…";
+  if (!activeRound || activeRound.settled) {
+    const { toast } = await import("../ui.js"); toast("Waiting for the next round to open…", { kind: "warn" });
+    delete placeBtn.dataset.locked; return;
+  }
+  if (Math.floor(Date.now() / 1000) >= activeRound.betWindowEnd) {
+    const { toast } = await import("../ui.js"); toast("Betting window closed for this round", { kind: "warn" });
+    delete placeBtn.dataset.locked; return;
+  }
+
+  // INSTANT UX: the basket items get whisked away while the chain tx fires.
+  // No "Connecting" / "Placing bets…" spam — just a quiet "On the table"
+  // state until the round settles and the wheel spin starts.
+  clearResultBanner(); clearFairServer();
+  placeBtn.textContent = "Sliding chips onto table…";
+  placeBtn.disabled = true;
+
+  try {
+    await connect();
     const { txHash } = await SL.placeRoulette(basket);
     populateFairPanel({ clientSeed: ethers.ZeroHash, betId: activeRound.id, nonce: activeRound.id, serverSeed: ethers.ZeroHash, txHash });
     basket = [];
     renderBasket();
     await loadActiveRound();
+    placeBtn.textContent = "Chips on the table · waiting for spin";
   } catch (e) {
-    setStagePill(null, "ERROR");
     const msg = friendlyError(e);
-    placeBtn.textContent = "Error: " + msg;
-    setResultBanner({ won: false, txt: `<b>FAILED</b> · ${msg}`, accent: "#facc15" });
+    if (/rejected|user cancelled/i.test(msg)) {
+      setStagePill("ready", "READY");
+      placeBtn.textContent = "Add chips to basket";
+    } else {
+      setStagePill(null, "ERROR");
+      setResultBanner({ won: false, txt: `<b>FAILED</b> · ${msg}`, accent: "#facc15" });
+    }
   } finally {
-    setTimeout(() => { delete placeBtn.dataset.locked; placeBtn.disabled = false; renderBasket(); }, 1500);
+    setTimeout(() => { delete placeBtn.dataset.locked; placeBtn.disabled = false; renderBasket(); }, 800);
   }
 }
 
@@ -295,20 +403,19 @@ async function refreshHistory() {
   if (!root) return;
   try {
     const c = casino();
-    const events = await fetchRecentLogs(c, "RouletteRoundSettled", { minCount: 30, maxLookback: 100_000 });
+    const events = await fetchRecentLogs(c, "RouletteRoundSettled", { minCount: 30, maxLookback: 20_000 });
     root.innerHTML = "";
     if (events.length === 0) { root.innerHTML = `<span class="m" style="opacity:.4;">no recent</span>`; return; }
-    const reds = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
     for (const ev of events.slice(0, 30)) {
       const n = Number(ev.args.resultNumber);
       const m = document.createElement("span");
       m.className = "m";
-      m.style.background = n === 0 ? "#16a34a" : (reds.has(n) ? "#dc2626" : "#27272a");
+      m.style.background = pocketFill(n);
       m.style.color = "#fff";
       m.style.padding = "4px 8px";
       m.style.minWidth = "26px";
       m.style.textAlign = "center";
-      m.textContent = String(n);
+      m.textContent = displayNumber(n);
       root.appendChild(m);
     }
   } catch (e) { console.warn("[roulette] history:", e.message); }
@@ -316,8 +423,11 @@ async function refreshHistory() {
 
 document.addEventListener("DOMContentLoaded", () => {
   injectKeyframes();
+  // The HTML's inline <script> built the European wheel — rebuild as American
+  // (38 segments incl. 00) on top of it. Safe to do at DOMContentLoaded since
+  // the inline script also runs before this module's handler.
+  buildWheel();
   bindBetZones();
-  // Ensure the straight number input is always visible (we always allow STRAIGHT).
   const straightRow = document.querySelector("#straight-row");
   if (straightRow) straightRow.style.display = "block";
   $("[data-sl-place]")?.addEventListener("click", onPlaceBet);

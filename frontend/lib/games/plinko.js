@@ -192,27 +192,35 @@ async function refreshRecent() {
 async function onPlaceBet() {
   const placeBtn = $("[data-sl-place]");
   if (!placeBtn) return;
+  if (placeBtn.dataset.locked === "1") return;
   placeBtn.dataset.locked = "1";
+
+  const stake = readStakeStr() || "0.05";
+  const stakeErr = validateStake(stake);
+  if (stakeErr) {
+    const { toast } = await import("../ui.js");
+    toast(stakeErr, { kind: "warn" });
+    delete placeBtn.dataset.locked;
+    return;
+  }
+
+  // INSTANT UX: button says "Dropping…", chain tx happens silently in the
+  // background. When chain reveals the path, the ball animation plays — the
+  // user sees a continuous "drop" visual, not a "submitting…" wait.
+  clearResultBanner();
+  clearFairServer();
+  setStagePill("live", "DROPPING");
+  placeBtn.textContent = "Dropping…";
+  placeBtn.disabled = true;
+
   try {
-    setStagePill("live", "CONNECTING");
-    placeBtn.textContent = "Connecting…"; placeBtn.disabled = true;
     await connect();
-
-    const stake = readStakeStr() || "0.05";
-    const stakeErr = validateStake(stake); if (stakeErr) throw new Error(stakeErr);
-    setStagePill("live", "PLACING BET");
-    placeBtn.textContent = "Placing bet…";
-    clearResultBanner(); clearFairServer();
-
     const { betId, txHash, clientSeed } = await SL.placePlinko(risk, stake);
     lastBetId = betId;
     populateFairPanel({ clientSeed, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash });
 
-    setStagePill("live", "DROPPING");
-    placeBtn.textContent = "Awaiting reveal…";
-
     const settled = await pollForSettle(betId);
-    if (!settled) { setStagePill(null, "TIMED OUT"); placeBtn.textContent = "Timed out"; return; }
+    if (!settled) { setStagePill(null, "TIMED OUT"); placeBtn.textContent = "Refresh to retry"; return; }
     if (settled.refunded) {
       setStagePill(null, "REFUNDED");
       setResultBanner({ won: false, txt: `<b>REFUNDED</b> · ${settled.args.reason}`, accent: "#facc15" });
@@ -236,13 +244,16 @@ async function onPlaceBet() {
     }
     refreshRecent();
   } catch (e) {
-    setStagePill(null, "ERROR");
     const msg = friendlyError(e);
-    placeBtn.textContent = "Error: " + msg;
-    setResultBanner({ won: false, txt: `<b>FAILED</b> · ${msg}`, accent: "#facc15" });
-    console.error("[plinko] place failed:", e);
+    if (/rejected|user cancelled/i.test(msg)) {
+      setStagePill("ready", "READY");
+    } else {
+      setStagePill(null, "ERROR");
+      setResultBanner({ won: false, txt: `<b>FAILED</b> · ${msg}`, accent: "#facc15" });
+      console.error("[plinko] place failed:", e);
+    }
   } finally {
-    setTimeout(() => { delete placeBtn.dataset.locked; placeBtn.disabled = false; recalcSummary(); }, 1500);
+    setTimeout(() => { delete placeBtn.dataset.locked; placeBtn.disabled = false; recalcSummary(); }, 800);
   }
 }
 

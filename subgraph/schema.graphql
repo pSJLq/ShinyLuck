@@ -1,0 +1,105 @@
+# ShinyLuck subgraph — historical aggregations.
+#
+# The Off-chain Reactivity SDK handles live updates in the frontend; this
+# subgraph owns the leaderboard/profile/P&L queries that need indexing across
+# weeks of data. Keep entity surface narrow — every field below has a
+# concrete query in lib/leaderboard.js or lib/account.js.
+
+type Player @entity(immutable: false) {
+  id: Bytes!                    # address (lowercase)
+  totalBetsPlaced: BigInt!
+  totalWagered: BigInt!         # wei
+  totalPaid: BigInt!            # wei
+  netProfit: BigInt!            # paid - wagered (can be negative)
+  winsCount: BigInt!
+  bestSingleWin: BigInt!
+  freeSpinsEarned: BigInt!
+  freeSpinsUsed: BigInt!
+  firstSeenAt: BigInt!
+  lastSeenAt: BigInt!
+  bets: [Bet!]! @derivedFrom(field: "player")
+}
+
+type Bet @entity(immutable: true) {
+  id: ID!                       # betId from contract (uint256 → string)
+  player: Player!
+  game: Int!                    # GameType enum: 0=DICE 1=CRASH 2=SLOTS 3=MINES 4=PLINKO 5=ROULETTE 6=CLUSTER
+  amount: BigInt!               # wei staked
+  payout: BigInt!               # wei paid (0 on loss)
+  won: Boolean!
+  placedAt: BigInt!             # block timestamp
+  settledAt: BigInt              # block timestamp; null if pending/refunded
+  serverSeed: Bytes
+  clientSeed: Bytes
+  randomness: Bytes
+  blockHash: Bytes
+  nonce: BigInt
+  resultData: Bytes
+  txHashPlace: Bytes!
+  txHashSettle: Bytes
+}
+
+type CrashRound @entity(immutable: false) {
+  id: ID!                       # roundId
+  betWindowEnd: BigInt!
+  commitBlock: BigInt!
+  crashPointX100: Int           # null until settled
+  serverSeed: Bytes
+  settled: Boolean!
+  bettorCount: Int!
+  totalWagered: BigInt!
+  totalPaid: BigInt!
+  startedAt: BigInt!
+  settledAt: BigInt
+}
+
+type RouletteRound @entity(immutable: false) {
+  id: ID!                       # roundId
+  betWindowEnd: BigInt!
+  commitBlock: BigInt!
+  resultNumber: Int             # 0..37 (37 = "00") once settled
+  serverSeed: Bytes
+  settled: Boolean!
+  bettorCount: Int!
+  totalWagered: BigInt!
+  totalPaid: BigInt!
+  startedAt: BigInt!
+  settledAt: BigInt
+}
+
+type ReasoningLog @entity(immutable: true) {
+  id: ID!                       # tx-hash + logIndex
+  action: String!
+  changeBps: BigInt!
+  freeBankroll: BigInt!
+  timestamp: BigInt!
+  txHash: Bytes!
+}
+
+type RtpAdjustment @entity(immutable: true) {
+  id: ID!                       # tx-hash + logIndex
+  game: Int!
+  oldRtpBps: Int!
+  newRtpBps: Int!
+  reasoning: String!
+  timestamp: BigInt!
+  txHash: Bytes!
+}
+
+type BonusModeEvent @entity(immutable: true) {
+  id: ID!                       # tx-hash + logIndex
+  activeUntil: BigInt!
+  reasoning: String!
+  timestamp: BigInt!
+  txHash: Bytes!
+}
+
+type DailyStats @entity(immutable: false) {
+  id: ID!                       # YYYY-MM-DD
+  date: String!
+  betsCount: BigInt!
+  wagered: BigInt!
+  paid: BigInt!
+  uniquePlayers: BigInt!
+  topWin: BigInt!
+}

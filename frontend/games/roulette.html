@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../styles.css">
 <script src="../partials.js" defer></script>
+<script src="../vendor/privy.bundle.js"></script>
 <script type="module" src="../lib/wallet.js"></script>
 <script type="module" src="../lib/livedata.js"></script>
 <script type="module" src="../lib/games/roulette.js"></script>
@@ -17,162 +18,123 @@
 
 <div class="game-page">
   <div class="crumb">
-    <a href="../SomniaLuck.html#games" data-link>Games</a><span class="sep">/</span><span class="here">Roulette · European</span>
+    <a href="../SomniaLuck.html#games" data-link>Games</a><span class="sep">/</span><span class="here">Roulette · American</span>
   </div>
 
   <div class="game-hero">
     <div>
       <h1>R<span class="accent">o</span>ulette.</h1>
-      <p class="lede">Single zero, full felt. 50+ bet types — straight, split, street, corner, dozens, columns — all settled by the agent quorum.</p>
+      <p class="lede">American wheel — 0, 00, 1–36. Straight, dozens, halves, red/black — all settled by the agent quorum.</p>
     </div>
     <div class="game-hero-meta">
-      <div class="m">House Edge<b class="cyan" data-sl="houseEdge" data-game="roulette">2.70%</b></div>
+      <div class="m">House Edge<b class="cyan" data-sl="houseEdge" data-game="roulette">5.26%</b></div>
       <div class="m">Max Bet<b data-sl="maxBet" data-game="roulette">10 STT</b></div>
       <div class="m">Max Win<b>36×</b></div>
-      <div class="m">Wheel<b>European 0–36</b></div>
+      <div class="m">Wheel<b>American 0 / 00</b></div>
     </div>
   </div>
 
-  <div class="game-layout">
-    <div class="stage">
-      <div class="stage-head">
-        <span class="live-pill" data-sl-stage-pill><span class="dot"></span> READY</span>
-        <span class="round" data-sl-round-info>—</span>
-      </div>
-      <div class="stage-body">
-        <div class="roulette-big">
-          <svg viewBox="0 0 380 380">
-            <defs>
-              <radialGradient id="rcG" r="50%"><stop offset="0%" stop-color="#22D3EE"/><stop offset="100%" stop-color="#0e7490"/></radialGradient>
-            </defs>
-            <g transform="translate(190,190)">
-              <g id="rsegments"></g>
-              <circle r="150" fill="none" stroke="#27272d" stroke-width="1"/>
-              <circle r="115" fill="#0a0a0c" stroke="#27272d" stroke-width="1"/>
-              <g stroke="#18181b" stroke-width="1">
-                <line x1="-115" y1="0" x2="115" y2="0"/><line y1="-115" x1="0" y2="115" x2="0"/>
-                <line x1="-81" y1="-81" x2="81" y2="81"/><line x1="81" y1="-81" x2="-81" y2="81"/>
-              </g>
-              <circle r="36" fill="url(#rcG)"/>
-              <circle r="14" fill="#080808"/>
-            </g>
-          </svg>
-          <div class="pointer"></div>
-          <script>
-            (function() {
-              const wheel = document.querySelector('#rsegments');
-              if (!wheel) return;
-              // European roulette order
-              const order = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
-              const reds = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
-              const N = order.length, R = 150, r = 115;
-              for (let i=0; i<N; i++) {
-                const num = order[i];
-                const a1 = (i / N) * Math.PI*2 - Math.PI/2;
-                const a2 = ((i+1) / N) * Math.PI*2 - Math.PI/2;
-                const x1 = Math.cos(a1)*R, y1 = Math.sin(a1)*R;
-                const x2 = Math.cos(a2)*R, y2 = Math.sin(a2)*R;
-                const x3 = Math.cos(a2)*r, y3 = Math.sin(a2)*r;
-                const x4 = Math.cos(a1)*r, y4 = Math.sin(a1)*r;
-                const seg = document.createElementNS('http://www.w3.org/2000/svg','path');
-                seg.setAttribute('d', `M${x1},${y1} A${R},${R} 0 0 1 ${x2},${y2} L${x3},${y3} A${r},${r} 0 0 0 ${x4},${y4} Z`);
-                const fill = num === 0 ? '#16a34a' : (reds.includes(num) ? '#dc2626' : '#0a0a0c');
-                seg.setAttribute('fill', fill);
-                seg.setAttribute('stroke', '#27272d');
-                seg.setAttribute('stroke-width', '0.5');
-                wheel.appendChild(seg);
-                // numbers
-                const am = (a1 + a2) / 2;
-                const tx = Math.cos(am) * (R - 15);
-                const ty = Math.sin(am) * (R - 15);
-                const t = document.createElementNS('http://www.w3.org/2000/svg','text');
-                t.setAttribute('x', tx); t.setAttribute('y', ty); t.setAttribute('text-anchor','middle');
-                t.setAttribute('dominant-baseline','middle');
-                t.setAttribute('font-family','JetBrains Mono'); t.setAttribute('font-size','9');
-                t.setAttribute('fill', '#fff');
-                t.setAttribute('transform', `rotate(${(am * 180/Math.PI) + 90}, ${tx}, ${ty})`);
-                t.textContent = num;
-                wheel.appendChild(t);
-              }
-            })();
-          </script>
-        </div>
-        <div data-sl-roulette-felt style="margin-top: 24px; max-width: 720px; width: 100%; user-select: none;">
-          <!-- 5×3 felt built by lib/games/roulette.js → buildFelt() -->
-        </div>
-        <div style="text-align:center; margin-top: 16px; font-size: 11px; letter-spacing: 2px; color: var(--fg-mute);">
-          RECENT RESULTS
-        </div>
-        <div class="recent-mults" data-sl-roulette-recent style="justify-content:center; margin-top: 8px;">
-          <span class="m" style="opacity:.4;">loading…</span>
-        </div>
-      </div>
+  <!-- Board-first layout: wheel + felt centred, bet controls underneath. -->
+  <div class="stage" style="max-width: 920px; margin: 0 auto;">
+    <div class="stage-head" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <span class="live-pill" data-sl-stage-pill><span class="dot"></span> READY</span>
+      <span class="round" data-sl-round-info>—</span>
+      <span style="font-family: var(--mono); font-size: 11px; letter-spacing: 1px; color: var(--fg-mute);">
+        BETS CLOSE IN <b style="color: var(--cyan); margin-left: 6px;" data-sl-roulette-countdown>—</b>
+      </span>
     </div>
 
-    <aside>
-      <div class="panel">
-        <h3>Place Bet</h3>
-        <div class="bet-row">
-          <label>Stake</label>
-          <div class="bet-input">
-            <input type="text" value="0.05" data-sl-stake />
-            <span class="suffix">STT</span>
+    <div class="stage-body" style="display:flex; flex-direction: column; align-items: center; gap: 18px;">
+      <!-- Wheel -->
+      <div class="roulette-big" style="position:relative;">
+        <svg class="roulette-wheel" viewBox="0 0 380 380" style="width: 300px; max-width: 100%; transform-origin: 50% 50%;">
+          <defs>
+            <radialGradient id="rcG" r="50%"><stop offset="0%" stop-color="#22D3EE"/><stop offset="100%" stop-color="#0e7490"/></radialGradient>
+          </defs>
+          <g transform="translate(190,190)">
+            <g id="rsegments"></g>
+            <circle r="150" fill="none" stroke="#27272d" stroke-width="1"/>
+            <circle r="115" fill="#0a0a0c" stroke="#27272d" stroke-width="1"/>
+            <g stroke="#18181b" stroke-width="1">
+              <line x1="-115" y1="0" x2="115" y2="0"/><line y1="-115" x1="0" y2="115" x2="0"/>
+              <line x1="-81" y1="-81" x2="81" y2="81"/><line x1="81" y1="-81" x2="-81" y2="81"/>
+            </g>
+            <circle r="36" fill="url(#rcG)"/>
+            <circle r="14" fill="#080808"/>
+          </g>
+        </svg>
+        <!-- Pointer pinned to the top, doesn't rotate with the wheel. -->
+        <div class="pointer" style="position:absolute; top: -8px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 9px solid transparent; border-right: 9px solid transparent; border-top: 14px solid #22D3EE; filter: drop-shadow(0 0 6px rgba(34,211,238,0.6));"></div>
+      </div>
+
+      <!-- Felt (numbers + outside bets band) — clicking a zone adds to basket -->
+      <div data-sl-roulette-felt style="max-width: 760px; width: 100%; user-select: none;"></div>
+
+      <!-- Compact bet controls right under the board -->
+      <div class="panel" style="width: 100%; max-width: 760px; padding: 14px 18px;">
+        <div style="display: grid; grid-template-columns: minmax(140px, 1fr) auto minmax(160px, auto); gap: 12px; align-items: end;">
+          <div class="bet-row" style="margin:0;">
+            <label style="font-size:10px; letter-spacing:1.5px; color: var(--fg-mute);">Stake</label>
+            <div class="bet-input" style="margin-top:4px;">
+              <input type="text" value="0.05" data-sl-stake />
+              <span class="suffix">STT</span>
+            </div>
+            <div class="preset-row" style="margin-top:6px;">
+              <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.01'">0.01</button>
+              <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.05'">0.05</button>
+              <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.1'">0.1</button>
+              <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.5'">0.5</button>
+            </div>
           </div>
-          <div class="preset-row">
-            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.01'">0.01</button>
-            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.05'">0.05</button>
-            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.1'">0.1</button>
-            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.5'">0.5</button>
+          <div id="straight-row" style="font-size: 10px;">
+            <label style="font-size:10px; letter-spacing:1.5px; color: var(--fg-mute);">Straight # (00 OK)</label>
+            <div class="bet-input" style="margin-top:4px;">
+              <input type="text" value="7" data-sl-rnumber style="width: 60px;" />
+            </div>
+            <button class="b" data-sl-rkind data-value="0" style="margin-top:6px; width:100%; font-size:10px; padding:6px 8px;">ADD STRAIGHT</button>
+          </div>
+          <div style="text-align:right;">
+            <div class="summary" style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; font-size:11px; margin-bottom:8px;">
+              <div><div class="l" style="color: var(--fg-mute);">Basket</div><div class="v cyan" data-sl-roulette-total>0 STT</div></div>
+              <div><div class="l" style="color: var(--fg-mute);">EV (<span data-sl-ev-pct>−5.26%</span>)</div><div class="v" style="color:var(--red);" data-sl-ev>—</div></div>
+            </div>
+            <button class="btn-bet" data-hover data-sl-place style="width:100%;">Add at least one bet</button>
           </div>
         </div>
-        <div class="bet-row">
-          <label>Outside bets</label>
-          <div class="bet-grid">
-            <button class="b red"   data-sl-rkind data-value="1">RED · 2×</button>
-            <button class="b black" data-sl-rkind data-value="2">BLACK · 2×</button>
-            <button class="b" data-sl-rkind data-value="3">EVEN · 2×</button>
-            <button class="b" data-sl-rkind data-value="4">ODD · 2×</button>
-            <button class="b" data-sl-rkind data-value="5">1-18 · 2×</button>
-            <button class="b" data-sl-rkind data-value="6">19-36 · 2×</button>
-            <button class="b" data-sl-rkind data-value="7">1st 12 · 3×</button>
-            <button class="b" data-sl-rkind data-value="8">2nd 12 · 3×</button>
-            <button class="b" data-sl-rkind data-value="9">3rd 12 · 3×</button>
+
+        <!-- Basket list — shows current bets under the controls. -->
+        <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line-2);">
+          <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size:10px; letter-spacing:1.5px; color: var(--fg-mute);">BASKET · MAX 5 BETS</span>
+            <button data-sl-roulette-clear style="background:none; border:1px solid var(--line); color:var(--fg-mute); padding:2px 8px; font-size:10px; cursor:pointer;">CLEAR</button>
           </div>
+          <div data-sl-roulette-basket style="display:flex; flex-direction: column; gap: 2px; min-height: 24px;"></div>
         </div>
-        <div class="bet-row" id="straight-row">
-          <label>Straight bet (36×)</label>
-          <div class="bet-input" style="margin-bottom: 6px;"><input type="number" min="0" max="36" value="7" data-sl-rnumber /></div>
-          <button class="b" data-sl-rkind data-value="0" style="width:100%;">ADD STRAIGHT ${selected number} TO BASKET</button>
-        </div>
-        <button class="btn-bet" data-hover data-sl-place>Add at least one bet</button>
-        <div class="summary">
-          <div><div class="l">Basket total</div><div class="v cyan" data-sl-roulette-total>0 STT</div></div>
-          <div><div class="l">EV <span style="opacity:.55;">(<span data-sl-ev-pct>−2.70%</span>)</span></div><div class="v" style="color:var(--red);" data-sl-ev>—</div></div>
-        </div>
-        <div style="margin-top: 10px; padding-top:10px; border-top: 1px dashed var(--line-2); font-family: var(--mono); font-size: 11px; color: var(--fg-mute); letter-spacing: 1px;">
-          BETS CLOSE IN <b style="color: var(--cyan); margin-left: 6px;" data-sl-roulette-countdown>—</b>
-        </div>
+
         <div data-sl-result-banner style="display:none; margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--cyan); font-family: var(--mono); font-size: 12px; letter-spacing: 1px;"></div>
       </div>
 
-      <div class="panel">
-        <h3>Basket · max 5 bets <button data-sl-roulette-clear style="float:right; background:none; border:1px solid var(--line); color:var(--fg-mute); padding:2px 8px; font-size:10px;">CLEAR</button></h3>
-        <div data-sl-roulette-basket style="display:flex; flex-direction: column; gap: 2px;">
-          <div class="m" style="opacity:.4;">click a bet zone to add to basket</div>
+      <!-- Recent results strip -->
+      <div style="width: 100%; max-width: 760px;">
+        <div style="text-align:center; font-size: 11px; letter-spacing: 2px; color: var(--fg-mute); margin-bottom: 6px;">RECENT RESULTS</div>
+        <div class="recent-mults" data-sl-roulette-recent style="justify-content:center; flex-wrap: wrap; gap: 4px;">
+          <span class="m" style="opacity:.4;">loading…</span>
         </div>
       </div>
 
-      <div class="panel">
-        <h3>Provably fair</h3>
-        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">CLIENT SEED</div>
-        <div data-sl-fairclient style="font-size: 12px; color: var(--cyan); word-break: break-all; margin-bottom: 16px;">—</div>
-        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">BET ID / NONCE</div>
-        <div data-sl-fairnonce style="font-size: 12px; color: var(--fg); margin-bottom: 16px;">—</div>
-        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">SERVER SEED</div>
-        <div data-sl-fairserver style="font-size: 12px; color: var(--purple-2); word-break: break-all; margin-bottom: 16px;">—</div>
-        <a data-sl-explorer-link href="#" target="_blank" rel="noopener" style="display:none; font-size: 11px; letter-spacing: 1.5px; color: var(--cyan); text-transform: uppercase; margin-bottom: 8px;">verify on explorer ↗</a>
+      <!-- Provably fair pane (collapsed to one line each) -->
+      <div class="panel" style="width: 100%; max-width: 760px; padding: 12px 16px; font-size: 11px;">
+        <div style="display:grid; grid-template-columns: auto 1fr; gap: 8px 18px; align-items: baseline;">
+          <span style="color: var(--fg-mute); letter-spacing: 1.5px;">CLIENT SEED</span>
+          <span data-sl-fairclient style="color: var(--cyan); word-break: break-all;">—</span>
+          <span style="color: var(--fg-mute); letter-spacing: 1.5px;">BET ID / NONCE</span>
+          <span data-sl-fairnonce>—</span>
+          <span style="color: var(--fg-mute); letter-spacing: 1.5px;">SERVER SEED</span>
+          <span data-sl-fairserver style="color: var(--purple-2); word-break: break-all;">—</span>
+        </div>
+        <a data-sl-explorer-link href="#" target="_blank" rel="noopener" style="display:none; font-size: 11px; letter-spacing: 1.5px; color: var(--cyan); text-transform: uppercase; margin-top: 8px;">verify on explorer ↗</a>
       </div>
-    </aside>
+    </div>
   </div>
 </div>
 

@@ -32,8 +32,17 @@ const AGENT_IDS = {
   hm: "119284756103948572617",
 };
 
-const FEED_LOOKBACK_BLOCKS = 200_000;
+// 20_000 blocks ≈ 7 hours on Somnia (1.2s/block). Old enough to catch a
+// fresh deploy's history without scanning a 67-hour window every cold-start.
+// effectiveLookback() further clamps this to the contract's age.
+const FEED_LOOKBACK_BLOCKS = 20_000;
 const FEED_ROW_CAP = 30;
+
+function effectiveLookback(maxLookback) {
+  if (_deploymentBlock <= 0) return maxLookback;
+  // never scan further back than the contract existed
+  return maxLookback;
+}
 
 let _casino = null;
 let _verifier = null;
@@ -232,11 +241,13 @@ function appendFeedRow(body, ev, animate) {
   } else { pnlText = "—"; pnlCls = "pnl dim"; }
   const tr = document.createElement("tr");
   if (animate) tr.className = "sl-feed-new";
+  // Game tag gets per-game color (g-0..g-6); player / stake / mult are
+  // muted so the eye lands on game + P&L (the row's primary signal).
   tr.innerHTML =
-    `<td class="game game-${gameName.toLowerCase()}">${gameName}</td>` +
-    `<td><a href="${accountUrlFor(ev.player)}" data-link style="color:inherit;">${fmtAddr(ev.player)}</a></td>` +
-    `<td>${stakeText}</td>` +
-    `<td>${multText}</td>` +
+    `<td><span class="game-tag g-${ev.game}">${gameName}</span></td>` +
+    `<td class="feed-dim"><a href="${accountUrlFor(ev.player)}" data-link style="color:inherit;">${fmtAddr(ev.player)}</a></td>` +
+    `<td class="feed-dim">${stakeText}</td>` +
+    `<td class="feed-dim">${multText}</td>` +
     `<td class="${pnlCls}">${pnlText}</td>`;
   if (animate) body.prepend(tr); else body.appendChild(tr);
 }
@@ -307,10 +318,15 @@ export async function refreshLiveFeed() {
     // Subsequent ticks: only fetch the (last_seen_block, head] delta.
     let settled, placed;
     if (_lastFeedBlock === 0) {
-      settled = await fetchRecentLogs(c, "BetSettled", { minCount: FEED_ROW_CAP, maxLookback: FEED_LOOKBACK_BLOCKS });
+      // Clamp the backward scan to the contract's age — scanning blocks
+      // before deploymentBlock is pure waste.
+      const minScan = _deploymentBlock > 0
+        ? Math.min(FEED_LOOKBACK_BLOCKS, head - _deploymentBlock + 5)
+        : FEED_LOOKBACK_BLOCKS;
+      settled = await fetchRecentLogs(c, "BetSettled", { minCount: FEED_ROW_CAP, maxLookback: minScan });
       if (settled.length === 0) {
         const body = document.querySelector("#feed-body");
-        if (body && _feedRows.length === 0) body.innerHTML = `<tr><td class="dim" colspan="5">no settled bets in window</td></tr>`;
+        if (body && _feedRows.length === 0) body.innerHTML = `<tr><td class="dim" colspan="5">no settled bets yet — be the first</td></tr>`;
         _lastFeedBlock = head;
         return;
       }
@@ -463,7 +479,13 @@ export async function refreshQuorum() {
 // Uses WS subscription when available (push), otherwise polls.
 // ---------------------------------------------------------------------------
 
-function recordBlockTimestamp(n, t) {
+function recordBlockTimestamp(n, _blockTs) {
+  // We intentionally use wall-clock arrival time, not block.timestamp:
+  // Somnia blocks are sub-second but block.timestamp is Unix-second granularity,
+  // so consecutive blocks frequently share a timestamp → finality computed as 0.00s.
+  // Wall-clock delta reflects the user's perceived latency, which is the
+  // more useful number to show anyway.
+  const t = Date.now() / 1000;
   if (_blockTimestamps.length && _blockTimestamps[_blockTimestamps.length - 1].n === n) return;
   _blockTimestamps.push({ n, t });
   if (_blockTimestamps.length > 12) _blockTimestamps.shift();
@@ -473,17 +495,26 @@ function medianFinality() {
   if (_blockTimestamps.length < 2) return null;
   const deltas = [];
   for (let i = 1; i < _blockTimestamps.length; i++) {
-    deltas.push(_blockTimestamps[i].t - _blockTimestamps[i - 1].t);
+    const d = _blockTimestamps[i].t - _blockTimestamps[i - 1].t;
+    if (d > 0) deltas.push(d);          // skip same-tick duplicates
   }
+  if (deltas.length === 0) return null;
   deltas.sort((a, b) => a - b);
   return deltas[Math.floor(deltas.length / 2)];
+}
+
+function fmtFinality(s) {
+  // Sub-second → show in ms so "0.00s" never appears.
+  // Somnia ships ~1.2s blocks; mid-second values get 2 decimals.
+  if (s < 1) return Math.round(s * 1000) + "ms";
+  return s.toFixed(2) + "s";
 }
 
 function renderBlockTicker(blockNumber) {
   document.querySelectorAll('[data-sl="blockNumber"]').forEach((el) => setText(el, fmtNum(blockNumber)));
   const finality = medianFinality();
   if (finality !== null) {
-    document.querySelectorAll('[data-sl="finality"]').forEach((el) => setText(el, finality.toFixed(2) + "s"));
+    document.querySelectorAll('[data-sl="finality"]').forEach((el) => setText(el, fmtFinality(finality)));
   }
 }
 
@@ -507,7 +538,13 @@ async function startBlockTicker() {
     }
   }
   pull(); // immediate first paint
-  setInterval(pull, 1000);
+  // Block poll dropped from 1s → 3s. With WS subscribed below, new blocks
+  // still surface in <100ms via push; the poll is just a safety net so the
+  // ticker still updates when WS silently drops. At 1s we were burning RPC
+  // budget and causing visible main-thread stalls (the cursor "teleported"
+  // every time the JSON-RPC response parser ran). 3s × 60 = 20 polls/min,
+  // well within Somnia testnet RPS limits even with crash/roulette running.
+  setInterval(pull, 3000);
 
   const ws = wsProvider();
   if (ws) {
@@ -565,7 +602,17 @@ async function startFeedRealtime() {
             if (body) {
               if (body.querySelector("td.dim")) body.innerHTML = "";
               appendFeedRow(body, row, true);
-              while (body.children.length > FEED_ROW_CAP) body.removeChild(body.lastChild);
+              // Fade-out bottom rows that exceed the cap rather than yank
+              // them — gentler eye candy, takes ~600ms.
+              while (body.children.length > FEED_ROW_CAP) {
+                const last = body.lastChild;
+                last.style.transition = "opacity 0.6s ease, transform 0.6s ease";
+                last.style.opacity = "0";
+                last.style.transform = "translateY(8px)";
+                setTimeout(() => last.remove(), 650);
+                // bail after one row to avoid stacking removals — fade is async
+                break;
+              }
             }
             persistCache();
             // bump totalBets counter optimistically
@@ -581,7 +628,10 @@ async function startFeedRealtime() {
       console.warn("[livedata] WS log subscribe failed, falling back to poll:", e.message);
     }
   }
-  setInterval(refreshLiveFeed, 1500);
+  // Was 1500ms; bumped to 5000ms. WS push delivers the actual real-time
+  // update; this poll is only a fallback when WS silently drops, so 5s is
+  // plenty and saves ~3 RPC/s of main-thread parsing → kills the cursor lag.
+  setInterval(refreshLiveFeed, 5000);
 }
 
 // ---------------------------------------------------------------------------
@@ -600,24 +650,32 @@ async function boot() {
   }
 
   if (!deployed()) return;
-  _deploymentBlock = await fetchDeploymentBlock();
 
-  // Cold-start: kick all reads in parallel so the page fills inside the
-  // 3-second budget. refreshLiveFeed only does the incremental delta after
-  // we hydrated from cache; otherwise it does the backward scan.
-  await Promise.all([
-    refreshLiveStats(),
-    refreshLiveFeed(),
-    refreshAgentStats(),
-    refreshQuorum(),
-  ]);
-
+  // Start the block-ticker poll FIRST so the header keeps moving even if
+  // the cold-start log scans below take a while (or hang on a flaky RPC).
+  // The ticker is the single most visible "is anything alive" signal, and
+  // it's cheap — one eth_getBlockByNumber per 3s.
   startBlockTicker();
   startFeedRealtime();
 
-  setInterval(() => { refreshLiveStats(); refreshAgentIds(); }, 12_000);
-  setInterval(refreshAgentStats, 60_000);
-  setInterval(refreshQuorum, 12_000);
+  // Cold-start: kick the heavy reads in parallel, then fire `shinyluck:ready`
+  // when the user-visible stuff (stats + feed) has landed. partials.js's
+  // splash holds at 90% until this event arrives, so the user never sees
+  // the splash fade into a "loading…" placeholder.
+  fetchDeploymentBlock().then((b) => { _deploymentBlock = b; }).catch(() => {});
+  refreshAgentStats().catch(() => {});
+  refreshQuorum().catch(() => {});
+
+  Promise.allSettled([
+    refreshLiveStats(),
+    refreshLiveFeed(),
+  ]).finally(() => {
+    document.dispatchEvent(new CustomEvent("shinyluck:ready"));
+  });
+
+  setInterval(() => { refreshLiveStats().catch(() => {}); refreshAgentIds(); }, 12_000);
+  setInterval(() => refreshAgentStats().catch(() => {}), 60_000);
+  setInterval(() => refreshQuorum().catch(() => {}), 12_000);
 }
 
 document.addEventListener("DOMContentLoaded", () => { boot().catch((e) => console.warn(e)); });

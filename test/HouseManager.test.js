@@ -85,8 +85,9 @@ describe("HouseManager", function () {
     const s = await hm.snapshot();
     expect(s.freeBankroll).to.equal(ethers.parseEther("100"));
     expect(s.totalBets).to.equal(0n);
-    expect(s.paused.length).to.equal(6);
-    expect(s.maxBets.length).to.equal(6);
+    // 7 GameTypes: DICE, CRASH, SLOTS, MINES, PLINKO, ROULETTE, CLUSTER
+    expect(s.paused.length).to.equal(7);
+    expect(s.maxBets.length).to.equal(7);
   });
 
   it("triggerThemeRotation forwards", async function () {

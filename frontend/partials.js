@@ -100,10 +100,23 @@
     printed.forEach((el, i) => { if (cachedLines[i]) el.textContent = cachedLines[i]; });
   });
 
+  // Splash strategy: the bar climbs from 0% → 90% via fake timer (snappy
+  // animation that lets the user see the brand), then HOLDS at 90% until
+  // livedata.js fires `shinyluck:ready` (sent after the initial feed +
+  // stats scans complete). This guarantees the splash covers the slowest
+  // on-chain RPC the page needs — by the time the splash fades, the feed
+  // and ticker are already populated, not "loading…".
   let p = 0, lineIdx = 0;
+  let dataReady = false;
+  let finishingUp = false;
+  document.addEventListener('shinyluck:ready', () => { dataReady = true; }, { once: true });
+  // Safety: if livedata never fires (offline RPC, deploy missing) the splash
+  // should NOT trap the page. Auto-release after 8s.
+  setTimeout(() => { dataReady = true; }, 8000);
   const tick = () => {
+    const ceiling = dataReady ? 100 : 90;
     p += Math.random() * 6 + 3;
-    if (p > 100) p = 100;
+    if (p > ceiling) p = ceiling;
     fill.style.width = p + '%';
     pctEl.textContent = Math.floor(p) + '%';
     if (lineIdx < cachedLines.length && p > (lineIdx + 1) * (100 / cachedLines.length)) {
@@ -113,8 +126,15 @@
       logEl.appendChild(ln);
       lineIdx++;
     }
-    if (p < 100) requestAnimationFrame(tick);
-    else setTimeout(() => loader.classList.add('done'), 280);
+    if (p < 100) {
+      // While capped at 90%, slow the cadence so the bar doesn't visibly
+      // re-tick the same %. Use 100ms throttle vs raf.
+      if (p >= 90 && !dataReady) setTimeout(tick, 120);
+      else if (p >= 90 && dataReady && !finishingUp) { finishingUp = true; requestAnimationFrame(tick); }
+      else requestAnimationFrame(tick);
+    } else {
+      setTimeout(() => loader.classList.add('done'), 280);
+    }
   };
   if (document.readyState !== 'loading') requestAnimationFrame(tick);
   else document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(tick));

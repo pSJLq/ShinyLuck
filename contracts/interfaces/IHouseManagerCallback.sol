@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity ^0.8.24;
 
 /// @title IHouseManagerCallback
 /// @notice Interface that the Casino exposes for the HouseManager (and

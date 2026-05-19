@@ -58,7 +58,7 @@ const CASINO_EVENTS_ABI = [
 let vaultAddr = null;
 let pendingQuote = null;     // { priceSTT, reasoning, complexity }
 
-const GAME_NAMES = ["DICE","CRASH","SLOTS","MINES","PLINKO","ROULETTE"];
+const GAME_NAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.LAB"];
 
 function val(sel) { return document.querySelector(sel)?.value || ""; }
 function $(sel) { return document.querySelector(sel); }

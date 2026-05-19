@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity ^0.8.24;
 
 /// @title Somnia Agent Platform interface (subset).
 /// @dev   Source: docs.somnia.network/agents/invoking-agents/from-solidity

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity ^0.8.24;
 
 /// @title Vault7Lib
 /// @notice The on-chain resolver for VAULT.7 — the 5×3 / 20-payline slot

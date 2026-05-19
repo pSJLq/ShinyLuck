@@ -122,34 +122,46 @@ async function onPlaceBet() {
   const placeBtn = $("[data-sl-place]");
   const cashoutBtn = $("[data-sl-cashout]");
   if (!placeBtn) return;
+  if (placeBtn.dataset.locked === "1") return;
   placeBtn.dataset.locked = "1";
+
+  const stake = readStakeStr() || "0.1";
+  const stakeErr = validateStake(stake);
+  if (stakeErr) {
+    const { toast } = await import("../ui.js");
+    toast(stakeErr, { kind: "warn" });
+    delete placeBtn.dataset.locked;
+    return;
+  }
+  if (mineCount < 1 || mineCount > 24) {
+    const { toast } = await import("../ui.js");
+    toast("Mines count must be 1..24", { kind: "warn" });
+    delete placeBtn.dataset.locked;
+    return;
+  }
+
+  // INSTANT UX: clear the board and start a subtle "arming" animation
+  // immediately. Chain placement + seed reveal happen silently behind the
+  // UI; once the seed lands, the cells become tappable. No "Connecting" /
+  // "Placing bet…" / "Awaiting reveal…" spam.
+  clearResultBanner(); clearFairServer(); clearGrid();
+  cellsOpened = 0; openedBitmap = 0n;
+  setStagePill("live", "ARMING");
+  placeBtn.textContent = "Arming mines…";
+  placeBtn.disabled = true;
+  setMinesStatus(`arming ${mineCount} mines…`);
+
   try {
-    setStagePill("live", "CONNECTING");
-    placeBtn.textContent = "Connecting…"; placeBtn.disabled = true;
     await connect();
-
-    const stake = readStakeStr() || "0.1";
-    const stakeErr = validateStake(stake);
-    if (stakeErr) throw new Error(stakeErr);
-    if (mineCount < 1 || mineCount > 24) throw new Error("mineCount must be 1..24");
-    setStagePill("live", "PLACING BET");
-    placeBtn.textContent = "Placing bet…";
-    clearResultBanner(); clearFairServer(); clearGrid();
-    cellsOpened = 0; openedBitmap = 0n;
-
     const { betId, txHash, clientSeed } = await SL.placeMines(mineCount, stake);
     activeBetId = betId;
     activeStakeWei = ethers.parseEther(stake);
     populateFairPanel({ clientSeed, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash });
 
-    setStagePill("live", "AWAITING REVEAL");
-    placeBtn.textContent = "Awaiting reveal…";
-    setMinesStatus(`bet #${betId} · waiting for seed reveal…`);
-
     const revealed = await waitForSeedReveal(betId);
     if (!revealed) {
-      setStagePill(null, "REVEAL TIMED OUT");
-      placeBtn.textContent = "Reveal timed out";
+      setStagePill(null, "TIMED OUT");
+      placeBtn.textContent = "Refresh to retry";
       activeBetId = null;
       return;
     }
@@ -163,13 +175,21 @@ async function onPlaceBet() {
     setStagePill("live", "ROUND ACTIVE");
     setMinesStatus(`${mineCount} mines locked · pick a cell`);
     placeBtn.textContent = "round in progress";
-    placeBtn.disabled = true;
     if (cashoutBtn) cashoutBtn.style.display = "block";
     updateLiveMultiplier();
   } catch (e) {
-    setStagePill(null, "ERROR");
-    placeBtn.textContent = "Error: " + friendlyError(e);
-    console.error("[mines] place failed:", e);
+    const msg = friendlyError(e);
+    if (/rejected|user cancelled/i.test(msg)) {
+      setStagePill("ready", "READY");
+      setMinesStatus("");
+      placeBtn.textContent = "Start round";
+      placeBtn.disabled = false;
+    } else {
+      setStagePill(null, "ERROR");
+      setMinesStatus(msg);
+      setResultBanner({ won: false, txt: `<b>FAILED</b> · ${msg}`, accent: "#facc15" });
+      console.error("[mines] place failed:", e);
+    }
     activeBetId = null;
   } finally {
     delete placeBtn.dataset.locked;

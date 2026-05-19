@@ -1,31 +1,27 @@
 // Wallet wiring — supports two backends:
-//   1) Sequence WaaS (primary): email / social / guest login. The signer is
-//      created via getSequenceSigner() and uses Sequence's relayer under the
-//      hood — no MetaMask popup, no gas dance, no chain-switching prompts.
+//   1) Privy (primary): cross-app login to the Somnia Provider App via email
+//      magic link, then headless on-chain txs (no per-tx popup). The Privy
+//      React shell lives in `frontend/vendor/privy.bundle.js` and publishes
+//      auth state + sendTransaction onto `window.ShinyLuckAuth`. This file
+//      wraps that with an ethers Signer (PrivySigner) so the existing
+//      ShinyLuck SDK works unchanged.
 //   2) MetaMask injected EIP-1193 (fallback): the original flow, kept for
 //      developers and power-users who already have a wallet.
 //
-// On every page load we first ask Sequence "are you signed in?" — if yes,
-// we silently restore the session and dispatch `shinyluck:connected`. If
-// no Sequence session, and the user previously chose MetaMask (flag in
-// localStorage), we attempt MetaMask auto-connect.
+// On every page load we:
+//   - wait for `shinyluck:auth-state` from the Privy bundle (ready=true)
+//   - if Privy reports authenticated → silently attach a PrivySigner
+//   - else if user previously chose MetaMask (localStorage flag) → auto-MM
+//   - else → wait for an explicit "Connect Wallet" click
 //
-// Connect modal (this file injects it on demand): three buttons —
-//   • Continue with email → OTP popup
-//   • Continue as guest   → instant ephemeral wallet
+// Connect modal: two buttons —
+//   • Continue with email → Privy cross-app magic link
 //   • Connect MetaMask    → original injected flow
 
 import { ethers } from "https://esm.sh/ethers@6.13.2";
 import { ShinyLuck, CHAINS } from "./shinyluck-sdk.js";
 import { CONFIG } from "./config.js";
-import {
-  initSequence,
-  isSequenceSession,
-  signInGuest,
-  signInEmail,
-  getSequenceSigner,
-  signOutSequence,
-} from "./sequence-waas.js";
+import { PrivySigner } from "./privy-signer.js";
 
 const network = CHAINS[CONFIG.network] || CHAINS.somniaTestnet;
 
@@ -36,9 +32,9 @@ export const SL = new ShinyLuck({
 });
 
 let connected = false;
-let backend = null;          // "sequence" | "metamask"
+let backend = null;          // "privy" | "metamask"
 let lastConnectedAddr = null; // remembered for late chrome injection (nav loads after autoConnect)
-const STORAGE_KEY = "shinyluck.autoConnect"; // "metamask" or "sequence"
+const STORAGE_KEY = "shinyluck.autoConnect"; // "metamask" — Privy persists its own session
 
 export function shortAddr(a) {
   if (!a) return "";
@@ -56,7 +52,7 @@ function dispatchConnected(addr, backendName) {
   connected = true;
   backend = backendName;
   lastConnectedAddr = addr;
-  try { localStorage.setItem(STORAGE_KEY, backendName); } catch (_) {}
+  try { if (backendName === "metamask") localStorage.setItem(STORAGE_KEY, backendName); } catch (_) {}
   document.dispatchEvent(new CustomEvent("shinyluck:connected", { detail: { address: addr, backend: backendName } }));
   markButtonsConnected(addr);
 }
@@ -68,11 +64,91 @@ document.addEventListener("shinyluck:chrome-ready", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Privy path
+// ---------------------------------------------------------------------------
+
+function attachPrivySigner() {
+  const auth = window.ShinyLuckAuth;
+  if (!auth || !auth.ready || !auth.authenticated || !auth.address) {
+    throw new Error("Privy not authenticated");
+  }
+  const ro = new ethers.JsonRpcProvider(network.rpcUrls[0]);
+  SL.provider = ro;
+  SL.signer = new PrivySigner(auth.address, ro);
+  SL.address = auth.address;
+  SL._rebuildContracts();
+}
+
+// Show the deposit modal automatically when a freshly-connected Privy wallet
+// has zero STT — guides the user through funding the embedded wallet.
+async function maybePromptDeposit() {
+  if (backend !== "privy") return;
+  if (!SL.address || !SL.provider) return;
+  try {
+    const bal = await SL.provider.getBalance(SL.address);
+    if (bal > 0n) return;
+    const { showDepositModal } = await import("./deposit-modal.js");
+    const minBet = ethers.parseEther("0.001"); // smallest sensible game bet
+    await showDepositModal({
+      address: SL.address,
+      provider: SL.provider,
+      minBalance: minBet,
+      network,
+    });
+  } catch (e) { console.warn("[wallet] deposit modal failed:", e.message); }
+}
+
+document.addEventListener("shinyluck:connected", (ev) => {
+  if (ev.detail?.backend === "privy") {
+    // Defer to next tick so the connection event listeners run first
+    setTimeout(maybePromptDeposit, 50);
+  }
+});
+
+async function connectPrivy() {
+  const auth = window.ShinyLuckAuth;
+  if (!auth) throw new Error("Privy bundle not loaded — check that /vendor/privy.bundle.js is served");
+  if (!auth.ready) {
+    // Wait for the bundle to bootstrap (max 8s) — first paint can race auth.
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => { document.removeEventListener("shinyluck:auth-state", on); reject(new Error("Privy bootstrap timeout")); }, 8000);
+      function on() {
+        if (window.ShinyLuckAuth?.ready) {
+          clearTimeout(t);
+          document.removeEventListener("shinyluck:auth-state", on);
+          resolve();
+        }
+      }
+      document.addEventListener("shinyluck:auth-state", on);
+    });
+  }
+  if (!window.ShinyLuckAuth.authenticated) {
+    // Triggers Privy's hosted email magic-link UI.
+    await window.ShinyLuckAuth.login();
+    // Wait for authenticated state to land.
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => { document.removeEventListener("shinyluck:auth-state", on); reject(new Error("Privy auth timeout")); }, 120_000);
+      function on(ev) {
+        if (ev.detail?.authenticated && ev.detail.address) {
+          clearTimeout(t);
+          document.removeEventListener("shinyluck:auth-state", on);
+          resolve();
+        }
+      }
+      document.addEventListener("shinyluck:auth-state", on);
+    });
+  }
+  attachPrivySigner();
+  dispatchConnected(SL.address, "privy");
+  return SL.address;
+}
+
+// ---------------------------------------------------------------------------
 // MetaMask path
 // ---------------------------------------------------------------------------
 
 async function connectMetaMask() {
-  if (!window.ethereum) throw new Error("No injected wallet detected. Install MetaMask or use the email / guest options.");
+  if (!window.ethereum) throw new Error("No injected wallet detected. Install MetaMask or use the email option.");
   await SL.connect();           // SL.connect() handles switchToSomnia + signer + contract rebuild
   dispatchConnected(SL.address, "metamask");
 
@@ -87,52 +163,34 @@ async function connectMetaMask() {
 }
 
 // ---------------------------------------------------------------------------
-// Sequence path
-// ---------------------------------------------------------------------------
-
-async function attachSequenceSigner() {
-  // Use a read-only JsonRpcProvider as the network anchor for the Sequence
-  // signer (waas relays the actual tx, but ethers needs a Provider it can
-  // poll for receipts and reads).
-  const ro = new ethers.JsonRpcProvider(network.rpcUrls[0]);
-  const signer = await getSequenceSigner(ro);
-  if (!signer) throw new Error("Sequence session not found");
-  SL.provider = ro;
-  SL.signer = signer;
-  SL.address = await signer.getAddress();
-  SL._rebuildContracts();
-}
-
-async function connectSequenceGuest() {
-  await initSequence();
-  await signInGuest();
-  await attachSequenceSigner();
-  dispatchConnected(SL.address, "sequence");
-  return SL.address;
-}
-
-async function connectSequenceEmail(email, onCode) {
-  await initSequence();
-  await signInEmail(email, onCode);
-  await attachSequenceSigner();
-  dispatchConnected(SL.address, "sequence");
-  return SL.address;
-}
-
-// ---------------------------------------------------------------------------
 // Auto-connect on page load
 // ---------------------------------------------------------------------------
 
 async function tryAutoConnect() {
-  // First, see if Sequence has a persistent session.
-  if (await isSequenceSession()) {
-    try {
-      await attachSequenceSigner();
-      dispatchConnected(SL.address, "sequence");
-      return;
-    } catch (e) { console.warn("[wallet] sequence auto-restore failed:", e.message); }
+  // 1. Wait briefly for Privy bundle to publish auth state, then check session.
+  let privyReady = window.ShinyLuckAuth?.ready === true;
+  if (!privyReady) {
+    privyReady = await new Promise((resolve) => {
+      const t = setTimeout(() => { document.removeEventListener("shinyluck:auth-state", on); resolve(false); }, 3000);
+      function on() {
+        if (window.ShinyLuckAuth?.ready) {
+          clearTimeout(t);
+          document.removeEventListener("shinyluck:auth-state", on);
+          resolve(true);
+        }
+      }
+      document.addEventListener("shinyluck:auth-state", on);
+    });
   }
-  // Otherwise, was the user previously on MetaMask?
+  if (privyReady && window.ShinyLuckAuth?.authenticated && window.ShinyLuckAuth?.address) {
+    try {
+      attachPrivySigner();
+      dispatchConnected(SL.address, "privy");
+      return;
+    } catch (e) { console.warn("[wallet] privy auto-restore failed:", e.message); }
+  }
+
+  // 2. Otherwise, was the user previously on MetaMask?
   let pref = null;
   try { pref = localStorage.getItem(STORAGE_KEY); } catch (_) {}
   if (pref !== "metamask" || !window.ethereum) return;
@@ -147,19 +205,29 @@ async function tryAutoConnect() {
   }
 }
 
+// Also re-attach when Privy finishes login after we've already booted.
+document.addEventListener("shinyluck:auth-state", (ev) => {
+  if (connected) return;
+  if (ev.detail?.authenticated && ev.detail.address) {
+    try {
+      attachPrivySigner();
+      dispatchConnected(SL.address, "privy");
+    } catch (e) { /* not fully ready yet */ }
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Public connect()
 // ---------------------------------------------------------------------------
 
 export async function connect() {
   if (connected) return SL.address;
-  // Already have a Sequence session? Re-attach silently.
-  if (await isSequenceSession()) {
-    await attachSequenceSigner();
-    dispatchConnected(SL.address, "sequence");
+  // If Privy already authed, attach silently.
+  if (window.ShinyLuckAuth?.ready && window.ShinyLuckAuth.authenticated && window.ShinyLuckAuth.address) {
+    attachPrivySigner();
+    dispatchConnected(SL.address, "privy");
     return SL.address;
   }
-  // Otherwise, show the connect modal and let the user pick.
   const addr = await showConnectModal();
   return addr;
 }
@@ -167,6 +235,13 @@ export async function connect() {
 export async function ensureConnected() {
   if (connected) return;
   await connect();
+}
+
+export async function signOut() {
+  try { await window.ShinyLuckAuth?.logout(); } catch (_) {}
+  try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+  connected = false;
+  backend = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +260,6 @@ function injectModalCSSOnce() {
     .sl-conn-btn  { display: block; width: 100%; padding: 12px; margin-bottom: 8px; background: transparent; color: var(--fg, #fafafa); border: 1px solid var(--line, #1f1f23); cursor: pointer; font-family: inherit; font-size: 13px; letter-spacing: 1px; text-align: left; }
     .sl-conn-btn:hover { border-color: var(--cyan, #22D3EE); color: var(--cyan, #22D3EE); }
     .sl-conn-btn.primary { background: var(--cyan, #22D3EE); color: #000; }
-    .sl-conn-input { width: 100%; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--line, #1f1f23); color: var(--fg, #fafafa); font-family: inherit; font-size: 13px; margin-bottom: 8px; box-sizing: border-box; }
     .sl-conn-close { float: right; background: transparent; border: 1px solid var(--line); color: var(--fg-mute); padding: 4px 10px; cursor: pointer; }
     .sl-conn-err { color: #dc2626; font-size: 11px; margin-top: 8px; }
     .sl-conn-foot { font-size: 10px; color: var(--fg-mute); margin-top: 16px; letter-spacing: 1px; text-transform: uppercase; }
@@ -202,27 +276,13 @@ function showConnectModal() {
       <div class="sl-conn-box">
         <button class="sl-conn-close" data-close>close ✕</button>
         <h3>Connect to ShinyLuck</h3>
-        <p>Pick a sign-in method. Email gives you a fully-managed wallet
-           (no MetaMask required). Guest mode is instant but the wallet is
-           lost when you clear your browser. Power users can plug in MetaMask.</p>
+        <p>Sign in by email to get a Somnia Global Wallet — the same wallet
+           works across every Somnia-partner app, no extension required.
+           Power users can plug in MetaMask instead.</p>
         <div data-stage="root">
-          <button class="sl-conn-btn primary" data-action="email">📧 Continue with email</button>
-          <button class="sl-conn-btn" data-action="guest">👤 Continue as guest</button>
+          <button class="sl-conn-btn primary" data-action="email">📧 Continue with Email (Privy)</button>
           <button class="sl-conn-btn" data-action="metamask">🦊 Connect MetaMask</button>
-          <div class="sl-conn-foot">Powered by Sequence WaaS · network: ${network.chainName}</div>
-        </div>
-        <div data-stage="email" style="display:none;">
-          <p>Enter your email — Sequence will send a one-time code.</p>
-          <input class="sl-conn-input" type="email" data-email placeholder="you@example.com" autofocus />
-          <button class="sl-conn-btn primary" data-action="email-submit">Send code →</button>
-          <button class="sl-conn-btn" data-action="back">← back</button>
-          <div class="sl-conn-err" data-err></div>
-        </div>
-        <div data-stage="otp" style="display:none;">
-          <p>We sent a 6-digit code to <b data-email-disp></b>. Enter it below.</p>
-          <input class="sl-conn-input" type="text" data-otp placeholder="123456" maxlength="6" autofocus />
-          <button class="sl-conn-btn primary" data-action="otp-submit">Verify →</button>
-          <div class="sl-conn-err" data-err></div>
+          <div class="sl-conn-foot">Powered by Privy · Somnia Global Wallet · network: ${network.chainName}</div>
         </div>
         <div data-stage="loading" style="display:none;">
           <p data-loading-msg>Connecting…</p>
@@ -236,7 +296,7 @@ function showConnectModal() {
         el.style.display = el.dataset.stage === name ? "block" : "none";
       });
     };
-    const setErr = (txt) => { mask.querySelector("[data-err]").textContent = txt || ""; };
+    const setErr = (txt) => { const el = mask.querySelector("[data-err]"); if (el) el.textContent = txt || ""; };
     const setLoading = (msg) => { mask.querySelector("[data-loading-msg]").textContent = msg; showStage("loading"); };
 
     const close = (err, addr) => {
@@ -245,35 +305,15 @@ function showConnectModal() {
       else resolve(addr);
     };
 
-    let otpResolver = null;
-
     mask.addEventListener("click", async (e) => {
       const t = e.target;
       if (t.dataset.close !== undefined) return close(new Error("user cancelled"));
       const action = t.dataset.action;
       if (!action) return;
-      if (action === "guest") {
-        setLoading("Creating guest wallet…");
-        try { const addr = await connectSequenceGuest(); close(null, addr); }
+      if (action === "email") {
+        setLoading("Opening Privy login…");
+        try { const addr = await connectPrivy(); close(null, addr); }
         catch (err) { console.error(err); setErr(err.message); showStage("root"); }
-      } else if (action === "email") {
-        showStage("email");
-      } else if (action === "back") {
-        showStage("root");
-      } else if (action === "email-submit") {
-        const email = mask.querySelector("[data-email]").value.trim();
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErr("Invalid email"); return; }
-        mask.querySelector("[data-email-disp]").textContent = email;
-        showStage("otp");
-        try {
-          await connectSequenceEmail(email, () => new Promise((r) => { otpResolver = r; }));
-          close(null, SL.address);
-        } catch (err) { console.error(err); setErr(err.message); showStage("email"); }
-      } else if (action === "otp-submit") {
-        const code = mask.querySelector("[data-otp]").value.trim();
-        if (!/^\d{6}$/.test(code)) { setErr("Enter a 6-digit code"); return; }
-        setLoading("Verifying…");
-        if (otpResolver) otpResolver(code);
       } else if (action === "metamask") {
         setLoading("Opening MetaMask…");
         try { const addr = await connectMetaMask(); close(null, addr); }
@@ -293,15 +333,14 @@ document.addEventListener("click", async (e) => {
   e.preventDefault();
   if (btn.classList.contains("connected")) {
     const { confirmDialog, toast } = await import("./ui.js");
-    const ok = await confirmDialog("This will sign out of your Sequence session.", {
+    const ok = await confirmDialog("This will sign out of your Privy session.", {
       title: "Disconnect wallet",
       yes: "Disconnect",
       no:  "Stay connected",
       danger: true,
     });
     if (ok) {
-      try { await signOutSequence(); } catch (_) {}
-      try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+      await signOut();
       toast("Wallet disconnected", { kind: "info" });
       setTimeout(() => location.reload(), 600);
     }

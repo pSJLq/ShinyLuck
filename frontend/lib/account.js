@@ -18,17 +18,75 @@ import { CONFIG } from "./config.js";
 import { provider, fetchLogs, fetchRecentLogs, fetchDeploymentBlock } from "./rpc.js";
 import "./ui.js"; // side-effect: injects `.sl-styled-input` + toast/modal CSS
 
-const GAME_NAMES = ["DICE","CRASH","SLOTS","MINES","PLINKO","ROULETTE"];
+const GAME_NAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.LAB"];
 const ZERO = "0x0000000000000000000000000000000000000000";
-const LOOKBACK = 200_000;
+// 20k blocks ≈ 7 hours on Somnia. Was 200k → cold-start scan took 30s+.
+const LOOKBACK = 20_000;
 const EXPLORER = "https://shannon-explorer.somnia.network";
 
 let viewAddress = null;          // address being viewed (may differ from SL.address)
 let isReadOnly = true;           // true if not the connected wallet
 const cache = { settled: [], placed: [], deposits: [], claims: [] };
 
+// Pagination state per tab. Page is reset to 0 on every fresh refresh so
+// new bets surface immediately; the user explicitly navigates back via the
+// pager buttons. 15 rows per page keeps the panel compact (no scrolling
+// inside the page).
+const PAGE_SIZE = 15;
+const _page = { bets: 0, deposits: 0, withdrawals: 0, receipts: 0 };
+
+/// Mount or update a pager strip directly after the given <table> element.
+/// Wires Prev / Next buttons that call `onChange(newPageIdx)`.
+function mountPager(parentPanel, totalRows, pageIdx, onChange) {
+  let pager = parentPanel.querySelector(".sl-pager");
+  if (!pager) {
+    pager = document.createElement("div");
+    pager.className = "sl-pager";
+    parentPanel.appendChild(pager);
+  }
+  const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+  const safeIdx = Math.min(pageIdx, totalPages - 1);
+  if (totalRows <= PAGE_SIZE) { pager.style.display = "none"; return; }
+  pager.style.display = "flex";
+  pager.innerHTML = `
+    <button data-pg-prev ${safeIdx <= 0 ? "disabled" : ""}>← PREV</button>
+    <span>PAGE ${safeIdx + 1} / ${totalPages} · ${totalRows} total</span>
+    <button data-pg-next ${safeIdx >= totalPages - 1 ? "disabled" : ""}>NEXT →</button>
+  `;
+  pager.querySelector("[data-pg-prev]").onclick = () => onChange(Math.max(0, safeIdx - 1));
+  pager.querySelector("[data-pg-next]").onclick = () => onChange(Math.min(totalPages - 1, safeIdx + 1));
+}
+
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
+
+/// Robust clipboard write: tries navigator.clipboard first, then falls back to
+/// a hidden <textarea> + execCommand path so the button still works on http://
+/// origins (navigator.clipboard requires a secure context, and on Windows
+/// localhost some browsers still flake). Returns boolean.
+async function copyToClipboard(text) {
+  if (!text) return false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (_) { /* fall through to legacy */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed; top:-9999px; left:-9999px;";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
 function fmtSTT(wei) {
   if (typeof wei !== "bigint") wei = BigInt(wei);
   const eth = Number(ethers.formatEther(wei));
@@ -206,12 +264,18 @@ async function buildPnLChart(settled, stakeByBet) {
 
 function renderBetsTab(settled, stakeByBet) {
   const body = $("[data-sl-acc-bets-body]");
+  const panel = body?.closest('[data-sl-acc-tab-panel="bets"]');
   body.innerHTML = "";
   if (settled.length === 0) {
     body.innerHTML = `<tr><td class="dim" colspan="6">no settled bets in window</td></tr>`;
+    if (panel) mountPager(panel, 0, 0, () => {});
     return;
   }
-  const slice = settled.slice(0, 50);
+  // Clamp page to the available range — defensive against stale state.
+  const totalPages = Math.max(1, Math.ceil(settled.length / PAGE_SIZE));
+  if (_page.bets >= totalPages) _page.bets = 0;
+  const start = _page.bets * PAGE_SIZE;
+  const slice = settled.slice(start, start + PAGE_SIZE);
   for (const ev of slice) {
     const game = GAME_NAMES[Number(ev.args.game)] || "?";
     const stakeWei = BigInt(stakeByBet.get(ev.args.betId.toString()) || 0n);
@@ -226,26 +290,37 @@ function renderBetsTab(settled, stakeByBet) {
     let pnlText, pnlColor;
     if (won) { pnlText = "+ " + fmtSTT(payout - stakeWei); pnlColor = "var(--green)"; }
     else     { pnlText = "− " + fmtSTT(stakeWei);          pnlColor = "var(--red)"; }
+    const gId = Number(ev.args.game);
     const tr = document.createElement("tr");
     tr.innerHTML =
-      `<td><a href="${explorerTx(ev.transactionHash)}" target="_blank" rel="noopener" class="dim" style="color:var(--fg-mute);">#${ev.args.betId}</a></td>` +
-      `<td><span class="game-tag">${game}</span></td>` +
-      `<td>${stake} STT</td>` +
+      `<td><a href="${explorerTx(ev.transactionHash)}" target="_blank" rel="noopener" class="tbl-dim" style="color:var(--fg-mute);">#${ev.args.betId}</a></td>` +
+      `<td><span class="game-tag g-${gId}">${game}</span></td>` +
+      `<td class="tbl-dim">${stake} STT</td>` +
       `<td>${won ? "won" : "lost"}</td>` +
-      `<td>${mult}</td>` +
+      `<td class="tbl-dim">${mult}</td>` +
       `<td style="color:${pnlColor}">${pnlText}</td>`;
     body.appendChild(tr);
   }
+  if (panel) mountPager(panel, settled.length, _page.bets, (idx) => {
+    _page.bets = idx;
+    renderBetsTab(settled, stakeByBet);
+  });
 }
 
-function renderEventTable(bodySel, events, valueExtract) {
+function renderEventTable(bodySel, events, valueExtract, pageKey) {
   const body = $(bodySel);
+  const panel = body?.closest("[data-sl-acc-tab-panel]");
   body.innerHTML = "";
   if (events.length === 0) {
     body.innerHTML = `<tr><td class="dim" colspan="3">no events in window</td></tr>`;
+    if (panel && pageKey) mountPager(panel, 0, 0, () => {});
     return;
   }
-  for (const ev of events) {
+  const totalPages = Math.max(1, Math.ceil(events.length / PAGE_SIZE));
+  if (pageKey && _page[pageKey] >= totalPages) _page[pageKey] = 0;
+  const start = (pageKey ? _page[pageKey] : 0) * PAGE_SIZE;
+  const slice = pageKey ? events.slice(start, start + PAGE_SIZE) : events;
+  for (const ev of slice) {
     const wei = valueExtract(ev);
     const tr = document.createElement("tr");
     tr.innerHTML =
@@ -254,28 +329,41 @@ function renderEventTable(bodySel, events, valueExtract) {
       `<td>${fmtSTT(wei)} STT</td>`;
     body.appendChild(tr);
   }
+  if (panel && pageKey) mountPager(panel, events.length, _page[pageKey], (idx) => {
+    _page[pageKey] = idx;
+    renderEventTable(bodySel, events, valueExtract, pageKey);
+  });
 }
 
 function renderReceipts(settled) {
   const body = $("[data-sl-acc-receipts-body]");
+  const panel = body?.closest('[data-sl-acc-tab-panel="receipts"]');
   body.innerHTML = "";
   if (settled.length === 0) {
     body.innerHTML = `<tr><td class="dim" colspan="5">no settled bets in window</td></tr>`;
+    if (panel) mountPager(panel, 0, 0, () => {});
     return;
   }
-  for (const ev of settled.slice(0, 50)) {
+  const totalPages = Math.max(1, Math.ceil(settled.length / PAGE_SIZE));
+  if (_page.receipts >= totalPages) _page.receipts = 0;
+  const start = _page.receipts * PAGE_SIZE;
+  for (const ev of settled.slice(start, start + PAGE_SIZE)) {
     const game = GAME_NAMES[Number(ev.args.game)] || "?";
     const won = ev.args.won;
     const payout = BigInt(ev.args.payout);
     const tr = document.createElement("tr");
     tr.innerHTML =
-      `<td>#${ev.args.betId}</td>` +
-      `<td><span class="game-tag">${game}</span></td>` +
-      `<td>${fmtSTT(payout)} STT</td>` +
+      `<td class="tbl-dim">#${ev.args.betId}</td>` +
+      `<td><span class="game-tag g-${Number(ev.args.game)}">${game}</span></td>` +
+      `<td class="tbl-dim">${fmtSTT(payout)} STT</td>` +
       `<td style="color:${won ? 'var(--green)' : 'var(--red)'}">${won ? "WON" : "LOST"}</td>` +
       `<td><a href="fair.html?betId=${ev.args.betId}" data-link style="color:var(--cyan);">open receipt →</a></td>`;
     body.appendChild(tr);
   }
+  if (panel) mountPager(panel, settled.length, _page.receipts, (idx) => {
+    _page.receipts = idx;
+    renderReceipts(settled);
+  });
 }
 
 function bindTabs() {
@@ -302,7 +390,8 @@ async function refresh() {
 
   const dep = await fetchDeploymentBlock();
   const head = await provider().getBlockNumber();
-  const fromBlock = Math.max(dep || head - LOOKBACK, head - LOOKBACK);
+  // Clamp to contract age — never scan blocks before deploy.
+  const fromBlock = dep > 0 ? Math.max(dep, head - LOOKBACK) : (head - LOOKBACK);
 
   // All reads in parallel.
   const [nativeBal, pending, placed, settled, claims, deposits] = await Promise.all([
@@ -373,12 +462,12 @@ async function refresh() {
     }
   }
 
-  // Tabs
+  // Tabs (pagination key drives state per-table)
   renderBetsTab(mySettled, stakeByBet);
   renderEventTable("[data-sl-acc-withdrawals-body]", myClaims,
-                   (ev) => BigInt(ev.args.amount));
+                   (ev) => BigInt(ev.args.amount), "withdrawals");
   renderEventTable("[data-sl-acc-deposits-body]", myDeposits,
-                   (ev) => BigInt(ev.args.amount));
+                   (ev) => BigInt(ev.args.amount), "deposits");
   renderReceipts(mySettled);
 
   // Chart
@@ -411,18 +500,32 @@ async function refresh() {
 document.addEventListener("DOMContentLoaded", () => {
   bindTabs();
   bindMode();
-  // first render straight away (read-only profile doesn't need connection)
-  refresh().catch((e) => console.warn("[acc] initial refresh:", e.message));
+  // Loading gate: hide page-shell + splash holds until refresh() lands once.
+  document.body.dataset.loading = "1";
+  refresh()
+    .catch((e) => console.warn("[acc] initial refresh:", e.message))
+    .finally(() => {
+      delete document.body.dataset.loading;
+      document.dispatchEvent(new CustomEvent("shinyluck:ready"));
+    });
   document.addEventListener("shinyluck:connected", () => refresh().catch(() => {}));
 
   $("[data-sl-acc-copy]")?.addEventListener("click", async () => {
     const text = viewAddress || SL.address || "";
-    if (text && navigator.clipboard) {
-      await navigator.clipboard.writeText(text);
-      const btn = $("[data-sl-acc-copy]");
+    const btn = $("[data-sl-acc-copy]");
+    if (!text) {
+      const { toast } = await import("./ui.js");
+      toast("no address yet — connect a wallet first", { kind: "warn" });
+      return;
+    }
+    const ok = await copyToClipboard(text);
+    if (ok && btn) {
       const old = btn.textContent;
       btn.textContent = "✓ copied";
       setTimeout(() => { btn.textContent = old; }, 1500);
+    } else {
+      const { toast } = await import("./ui.js");
+      toast("Couldn't copy — copy manually: " + text, { kind: "error", ttl: 8000 });
     }
   });
   $("[data-sl-acc-share]")?.addEventListener("click", async (e) => {
@@ -457,13 +560,16 @@ document.addEventListener("DOMContentLoaded", () => {
   $("[data-sl-acc-copy-receive]")?.addEventListener("click", async () => {
     const addr = $("[data-sl-acc-receive-addr]").textContent;
     if (!addr || addr === "—") return;
-    try {
-      await navigator.clipboard.writeText(addr);
-      const b = $("[data-sl-acc-copy-receive]");
+    const ok = await copyToClipboard(addr);
+    const b = $("[data-sl-acc-copy-receive]");
+    if (ok && b) {
       const old = b.textContent;
       b.textContent = "✓ copied";
       setTimeout(() => { b.textContent = old; }, 1500);
-    } catch (_) {}
+    } else if (!ok) {
+      const { toast } = await import("./ui.js");
+      toast("Couldn't copy — copy manually: " + addr, { kind: "error", ttl: 8000 });
+    }
   });
 
   $("[data-sl-acc-send]")?.addEventListener("click", async () => {
