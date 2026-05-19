@@ -20,6 +20,7 @@ import {
   populateFairPanel, friendlyError, fmtSTT, refreshEV,
 } from "./_base.js";
 import { validateStake } from "../errors.js";
+import { readMaxBet } from "../casino-limits.js";
 
 const ROULETTE = 5;
 // Was 1000ms — see crash.js note. WS push handles real state changes; the
@@ -378,6 +379,22 @@ async function onPlaceBet() {
 
   try {
     await connect();
+    // Defense in depth: read live maxBet and refuse if total exceeds it.
+    // (Roulette has multi-bet semantics — instead of auto-scaling each chip
+    // we tell the user to remove some — that's more honest.)
+    const totalWei = basket.reduce((acc, b) => acc + ethers.parseEther(String(b.amountSTT)), 0n);
+    const maxBet = await readMaxBet("roulette");
+    const cap = (maxBet * 95n) / 100n;
+    if (totalWei > cap) {
+      const { toast } = await import("../ui.js");
+      const human = (Number(cap) / 1e18).toFixed(4);
+      toast(`Total ${(Number(totalWei) / 1e18).toFixed(4)} STT exceeds casino max ${human} STT — remove some bets.`, { kind: "warn", ttl: 5000 });
+      setStagePill("ready", "READY");
+      placeBtn.textContent = "Place bets";
+      placeBtn.disabled = false;
+      delete placeBtn.dataset.locked;
+      return;
+    }
     const { txHash } = await SL.placeRoulette(basket);
     populateFairPanel({ clientSeed: ethers.ZeroHash, betId: activeRound.id, nonce: activeRound.id, serverSeed: ethers.ZeroHash, txHash });
     basket = [];

@@ -14,6 +14,7 @@ import {
   pollForSettle, fmtSTT, friendlyError, refreshEV,
 } from "./_base.js";
 import { validateStake } from "../errors.js";
+import { clampStakeStr, applyMaxToInput } from "../casino-limits.js";
 
 const PLINKO = 4;
 const ROWS = 16;
@@ -215,7 +216,15 @@ async function onPlaceBet() {
 
   try {
     await connect();
-    const { betId, txHash, clientSeed } = await SL.placePlinko(risk, stake);
+    const finalStake = await clampStakeStr(stake, "plinko");
+    if (finalStake == null) {
+      setStagePill("ready", "READY");
+      placeBtn.textContent = "Drop ball";
+      placeBtn.disabled = false;
+      delete placeBtn.dataset.locked;
+      return;
+    }
+    const { betId, txHash, clientSeed } = await SL.placePlinko(risk, finalStake);
     lastBetId = betId;
     populateFairPanel({ clientSeed, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash });
 
@@ -271,6 +280,8 @@ document.addEventListener("DOMContentLoaded", () => {
   if (stakeEl) {
     stakeEl.addEventListener("input", recalcSummary);
     stakeEl.addEventListener("change", recalcSummary);
+    applyMaxToInput(stakeEl, "plinko").catch(() => {});
+    setInterval(() => applyMaxToInput(stakeEl, "plinko").catch(() => {}), 10_000);
   }
   $$(".preset[onclick]").forEach((btn) => {
     const oldHandler = btn.onclick;

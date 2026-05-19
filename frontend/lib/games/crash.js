@@ -20,6 +20,7 @@ import {
   populateFairPanel, friendlyError, fmtSTT, refreshEV,
 } from "./_base.js";
 import { validateStake, validateAutoCashout } from "../errors.js";
+import { clampStakeStr, applyMaxToInput } from "../casino-limits.js";
 
 const CRASH = 1;
 // Was 1000ms — caused 1 RPC/s contract reads even when the round hadn't
@@ -323,7 +324,15 @@ async function onPlaceBet() {
 
   try {
     await connect();
-    const result = await SL.placeCrash(ac, stake);
+    const finalStake = await clampStakeStr(stake, "crash");
+    if (finalStake == null) {
+      setStagePill("ready", "READY");
+      placeBtn.textContent = "Place bet";
+      placeBtn.disabled = false;
+      delete placeBtn.dataset.locked;
+      return;
+    }
+    const result = await SL.placeCrash(ac, finalStake);
     populateFairPanel({ clientSeed: ethers.ZeroHash, betId: activeRound.id, nonce: activeRound.id, serverSeed: ethers.ZeroHash, txHash: result.txHash });
     placeBtn.textContent = `In round #${activeRound.id}`;
     await loadActiveRound();
@@ -394,6 +403,8 @@ document.addEventListener("DOMContentLoaded", () => {
   if (stakeEl) {
     stakeEl.addEventListener("input", recalcSummary);
     stakeEl.addEventListener("change", recalcSummary);
+    applyMaxToInput(stakeEl, "crash").catch(() => {});
+    setInterval(() => applyMaxToInput(stakeEl, "crash").catch(() => {}), 10_000);
   }
   $$(".preset[onclick]").forEach((btn) => {
     const oldHandler = btn.onclick;

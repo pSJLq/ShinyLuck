@@ -9,6 +9,7 @@ import {
   pollForSettle, fmtSTT, friendlyError, refreshEV,
 } from "./_base.js";
 import { validateStake } from "../errors.js";
+import { clampStakeStr, applyMaxToInput } from "../casino-limits.js";
 
 const DICE = 0;
 let direction = "over";
@@ -107,7 +108,18 @@ async function onPlaceBet() {
   try {
     // Connect silently if needed — no UI for "Connecting".
     await connect();
-    const { betId, txHash, clientSeed } = await SL.placeDice(t, direction === "over", stake);
+    // Clamp stake to live maxBet (defense in depth — Casino will revert with
+    // BetTooLarge if bankroll drops further between this read and submit).
+    const finalStake = await clampStakeStr(stake, "dice");
+    if (finalStake == null) {
+      diceAnimStop(null);
+      setStagePill("ready", "READY");
+      placeBtn.textContent = "Place bet";
+      placeBtn.disabled = false;
+      delete placeBtn.dataset.locked;
+      return;
+    }
+    const { betId, txHash, clientSeed } = await SL.placeDice(t, direction === "over", finalStake);
     lastBetId = betId;
     populateFairPanel({ clientSeed, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash });
 
@@ -177,6 +189,9 @@ document.addEventListener("DOMContentLoaded", () => {
   if (stakeEl) {
     stakeEl.addEventListener("input", recalcSummary);
     stakeEl.addEventListener("change", recalcSummary);
+    // Pin the input's max= attr to the live casino cap, refreshed every 10s.
+    applyMaxToInput(stakeEl, "dice").catch(() => {});
+    setInterval(() => applyMaxToInput(stakeEl, "dice").catch(() => {}), 10_000);
   }
   $$(".preset[onclick]").forEach((btn) => {
     const oldHandler = btn.onclick;

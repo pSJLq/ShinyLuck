@@ -20,6 +20,7 @@ import {
 } from "./_base.js";
 import { validateStake } from "../errors.js";
 import { provider, fetchRecentLogs } from "../rpc.js";
+import { clampStakeStr, applyMaxToInput } from "../casino-limits.js";
 
 const MINES = 3;
 const TOTAL_CELLS = 25;
@@ -153,9 +154,18 @@ async function onPlaceBet() {
 
   try {
     await connect();
-    const { betId, txHash, clientSeed } = await SL.placeMines(mineCount, stake);
+    const finalStake = await clampStakeStr(stake, "mines");
+    if (finalStake == null) {
+      setStagePill("ready", "READY");
+      placeBtn.textContent = "Place bet";
+      placeBtn.disabled = false;
+      delete placeBtn.dataset.locked;
+      setMinesStatus("waiting for stake");
+      return;
+    }
+    const { betId, txHash, clientSeed } = await SL.placeMines(mineCount, finalStake);
     activeBetId = betId;
-    activeStakeWei = ethers.parseEther(stake);
+    activeStakeWei = ethers.parseEther(finalStake);
     populateFairPanel({ clientSeed, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash });
 
     const revealed = await waitForSeedReveal(betId);
@@ -367,6 +377,8 @@ document.addEventListener("DOMContentLoaded", () => {
   if (stakeEl) {
     stakeEl.addEventListener("input", recalcSummary);
     stakeEl.addEventListener("change", recalcSummary);
+    applyMaxToInput(stakeEl, "mines").catch(() => {});
+    setInterval(() => applyMaxToInput(stakeEl, "mines").catch(() => {}), 10_000);
   }
   $$(".preset[onclick]").forEach((btn) => {
     const oldHandler = btn.onclick;

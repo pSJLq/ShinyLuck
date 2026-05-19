@@ -59,6 +59,22 @@
   import { SL, connect } from '/lib/wallet.js';
   import { decodeVault7Result } from '/lib/slot-decoders.js';
   import { CONFIG } from '/lib/config.js';
+  import { clampStake } from '/lib/casino-limits.js';
+  import { toast } from '/lib/ui.js';
+
+  async function clampOrToast(stakeWei, game) {
+    try {
+      const { stake, clamped } = await clampStake(stakeWei, game);
+      if (clamped) {
+        const human = (Number(stake) / 1e18).toFixed(4);
+        toast(`Stake clamped to ${human} STT (live max).`, { kind: 'warn', ttl: 4000 });
+      }
+      return stake;
+    } catch (e) {
+      toast(e.message || 'Casino is restocking', { kind: 'warn', ttl: 4500 });
+      throw e;
+    }
+  }
 
   const gate = document.getElementById('gate');
   const gateStatus = document.getElementById('gate-status');
@@ -83,15 +99,17 @@
       initialBalance: playerBalance,
 
       onSpinRequest: async (stakeWei) => {
-        const placeRes = await SL.placeSlots(Number(stakeWei) / 1e18, false);
+        const stake = await clampOrToast(stakeWei, 'slots');
+        const placeRes = await SL.placeSlots(Number(stake) / 1e18, false);
         const settled = await SL.waitForSettle(placeRes.betId);
-        return decodeVault7Result({ settled, stakeWei, isBuyBonus: false });
+        return decodeVault7Result({ settled, stakeWei: stake, isBuyBonus: false });
       },
 
       onBuyBonusRequest: async (stakeWei) => {
-        const placeRes = await SL.buyBonusVault7(Number(stakeWei) / 1e18);
+        const stake = await clampOrToast(stakeWei, 'slots');
+        const placeRes = await SL.buyBonusVault7(Number(stake) / 1e18);
         const settled = await SL.waitForSettle(placeRes.betId);
-        return decodeVault7Result({ settled, stakeWei, isBuyBonus: true });
+        return decodeVault7Result({ settled, stakeWei: stake, isBuyBonus: true });
       },
 
       onSpinCompleted: async (_result) => {

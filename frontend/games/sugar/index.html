@@ -59,6 +59,23 @@
   import { SL, connect, ensureConnected, backend } from '/lib/wallet.js';
   import { decodeSugarLabResult, extractChargeMeterEvent } from '/lib/slot-decoders.js';
   import { CONFIG } from '/lib/config.js';
+  import { clampStake } from '/lib/casino-limits.js';
+  import { toast } from '/lib/ui.js';
+
+  // Shared helper: clamp stake to live maxBet + show toast if reduced.
+  async function clampOrToast(stakeWei, game) {
+    try {
+      const { stake, clamped, maxBet } = await clampStake(stakeWei, game);
+      if (clamped) {
+        const human = (Number(stake) / 1e18).toFixed(4);
+        toast(`Stake clamped to ${human} STT (live max). Casino restocking.`, { kind: 'warn', ttl: 4000 });
+      }
+      return stake;
+    } catch (e) {
+      toast(e.message || 'Casino is restocking, try a smaller stake', { kind: 'warn', ttl: 4500 });
+      throw e;
+    }
+  }
 
   const gate = document.getElementById('gate');
   const gateStatus = document.getElementById('gate-status');
@@ -98,19 +115,23 @@
       initialChargeMeter: { current: chargeMeter.current, threshold: chargeMeter.threshold },
 
       onSpinRequest: async (stakeWei) => {
-        const placeRes = await SL.placeCluster(Number(stakeWei) / 1e18, false);
+        const stake = await clampOrToast(stakeWei, 'cluster');
+        const placeRes = await SL.placeCluster(Number(stake) / 1e18, false);
         const settled = await SL.waitForSettle(placeRes.betId);
         const txReceipt = await SL.provider.getTransactionReceipt(settled.txHash);
         const chargeEvent = extractChargeMeterEvent(SL.casino, txReceipt?.logs || []);
-        return decodeSugarLabResult({ settled, stakeWei, chargeEvent, isBuyBonus: false });
+        return decodeSugarLabResult({ settled, stakeWei: stake, chargeEvent, isBuyBonus: false });
       },
 
       onBuyBonusRequest: async (stakeWei) => {
-        const placeRes = await SL.buyBonusCluster(Number(stakeWei) / 1e18);
+        // Buy bonus costs 100× stake; clamp the UNIT stake so the total stays
+        // within the cluster game cap.
+        const stake = await clampOrToast(stakeWei, 'cluster');
+        const placeRes = await SL.buyBonusCluster(Number(stake) / 1e18);
         const settled = await SL.waitForSettle(placeRes.betId);
         const txReceipt = await SL.provider.getTransactionReceipt(settled.txHash);
         const chargeEvent = extractChargeMeterEvent(SL.casino, txReceipt?.logs || []);
-        return decodeSugarLabResult({ settled, stakeWei, chargeEvent, isBuyBonus: true });
+        return decodeSugarLabResult({ settled, stakeWei: stake, chargeEvent, isBuyBonus: true });
       },
 
       onChargeRewardClaimed: async (_reward) => {
