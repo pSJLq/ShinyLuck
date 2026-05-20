@@ -9,31 +9,6 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../../styles.css">
 <link rel="stylesheet" href="styles.css">
-<style>
-  .sugar-gate {
-    position: fixed; inset: 0; display: flex; align-items: center;
-    justify-content: center; background: rgba(8, 10, 18, 0.92);
-    backdrop-filter: blur(10px); z-index: 9999;
-  }
-  .sugar-gate .card {
-    text-align: center; padding: 32px 40px; max-width: 420px;
-    border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px;
-    background: linear-gradient(135deg, #1a1830, #0e0d20);
-    font-family: 'JetBrains Mono', monospace;
-  }
-  .sugar-gate h2 { font-size: 22px; margin: 0 0 12px; color: #fff; letter-spacing: 1px; }
-  .sugar-gate p  { color: #b6b0c8; margin: 0 0 22px; line-height: 1.55; font-size: 14px; }
-  .sugar-gate .actions { display: flex; gap: 10px; justify-content: center; }
-  .sugar-gate button {
-    padding: 12px 22px; border: 0; border-radius: 10px; cursor: pointer;
-    font-family: inherit; font-weight: 700; letter-spacing: 0.5px;
-    background: linear-gradient(135deg, #ff5ec8, #b794ff); color: #0a0a12;
-  }
-  .sugar-gate button.ghost {
-    background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.15);
-  }
-  .sugar-gate small { display: block; margin-top: 16px; font-size: 11px; color: #777; }
-</style>
 </head>
 <body data-active-page="games">
 <div data-page-shell>
@@ -55,30 +30,21 @@
 <script src="/partials.js" defer></script>
 <script type="module" src="/lib/livedata.js"></script>
 
-<div class="sugar-gate" id="gate" style="display:none">
-  <div class="card">
-    <h2>SUGAR.LAB · Cluster Cascade</h2>
-    <p>Sign in to play on Somnia Testnet. Bets settle on-chain — every cluster grid is provably fair and the seed is published after reveal.</p>
-    <div class="actions">
-      <button id="gate-connect">Connect Wallet</button>
-      <button class="ghost" id="gate-demo">Try Demo Mode</button>
-    </div>
-    <small id="gate-status">Checking session…</small>
-  </div>
-</div>
-
 <script type="module">
+  // No gate page — slot mounts immediately. If user is not connected, slot
+  // runs in demo mode (deterministic local engine). When the user clicks
+  // the partials nav's "Connect Wallet" button and `shinyluck:connected`
+  // fires, we hot-swap to production mode (live placeCluster + waitForSettle).
   import { SugarSlot } from './api.js';
-  import { SL, connect, ensureConnected, backend } from '/lib/wallet.js';
+  import { SL, connect } from '/lib/wallet.js';
   import { decodeSugarLabResult, extractChargeMeterEvent } from '/lib/slot-decoders.js';
   import { CONFIG } from '/lib/config.js';
   import { clampStake } from '/lib/casino-limits.js';
   import { toast } from '/lib/ui.js';
 
-  // Shared helper: clamp stake to live maxBet + show toast if reduced.
   async function clampOrToast(stakeWei, game) {
     try {
-      const { stake, clamped, maxBet } = await clampStake(stakeWei, game);
+      const { stake, clamped } = await clampStake(stakeWei, game);
       if (clamped) {
         const human = (Number(stake) / 1e18).toFixed(4);
         toast(`Stake clamped to ${human} STT (live max). Casino restocking.`, { kind: 'warn', ttl: 4000 });
@@ -90,13 +56,14 @@
     }
   }
 
-  const gate = document.getElementById('gate');
-  const gateStatus = document.getElementById('gate-status');
   const root = document.getElementById('slot-root');
   let currentSlot = null;
+  let mode = 'demo';  // current mode of the mounted slot
 
   function mountDemo() {
+    if (currentSlot && mode === 'demo') return;
     if (currentSlot) currentSlot.destroy();
+    mode = 'demo';
     currentSlot = new SugarSlot(root, {
       mode: 'demo',
       initialBalance: 1000n * 1_000_000_000_000_000_000n,
@@ -107,109 +74,93 @@
 
   async function mountProduction() {
     if (currentSlot) currentSlot.destroy();
+    mode = 'production';
 
     const playerBalance = await SL.getNativeBalance();
-    let chargeMeter = { current: 0, threshold: 240, pendingReward: 0n, cycle: 1 };
+    let chargeMeter = { current: 0, threshold: 240 };
     try {
       const raw = await SL.casino.getChargeMeter(SL.address);
-      chargeMeter = {
-        current:        Number(raw.current) / 100,
-        threshold:      Number(raw.threshold) / 100,
-        pendingReward:  BigInt(raw.pendingReward),
-        cycle:          Number(raw.cycle),
-      };
-    } catch (e) {
-      console.warn('[sugar] getChargeMeter failed:', e.message);
-    }
+      chargeMeter = { current: Number(raw.current) / 100, threshold: Number(raw.threshold) / 100 };
+    } catch (e) { console.warn('[sugar] getChargeMeter failed:', e.message); }
 
     currentSlot = new SugarSlot(root, {
       mode: 'production',
       initialBalance: playerBalance,
       initialChargeMeter: { current: chargeMeter.current, threshold: chargeMeter.threshold },
+      // Turbo by default in production — empty baseCascades (no per-step
+      // animation) + faster sleep timing means the spin lands in ~1s after
+      // settle instead of ~3s of grid-drop-and-hold.
+      turbo: true,
 
       onSpinRequest: async (stakeWei) => {
         const stake = await clampOrToast(stakeWei, 'cluster');
         const placeRes = await SL.placeCluster(Number(stake) / 1e18, false);
         const settled = await SL.waitForSettle(placeRes.betId);
-        const txReceipt = await SL.provider.getTransactionReceipt(settled.txHash);
-        const chargeEvent = extractChargeMeterEvent(SL.casino, txReceipt?.logs || []);
+        let chargeEvent = null;
+        try {
+          const txReceipt = await SL.provider.getTransactionReceipt(settled.txHash);
+          chargeEvent = extractChargeMeterEvent(SL.casino, txReceipt?.logs || []);
+        } catch (_) {}
         return decodeSugarLabResult({ settled, stakeWei: stake, chargeEvent, isBuyBonus: false });
       },
 
       onBuyBonusRequest: async (stakeWei) => {
-        // Buy bonus sends 100× stake on-chain → contract reserves another
-        // 2500× over THAT → so it needs `100 × 2500 × stake = 250,000 × stake`
-        // of free bankroll. On our testnet (~50 STT) the smallest practical
-        // stake to make buy-bonus survive the BankrollInsufficient check is
-        // ~0.0002 STT — too small to be interesting. Refuse politely instead
-        // of letting the contract revert with an opaque error.
         const free = await SL.casino.freeBankroll();
         const required = BigInt(stakeWei) * 100n * 2500n;
         if (required > free) {
           const human = (Number(required) / 1e18).toFixed(0);
           const have = (Number(free) / 1e18).toFixed(2);
-          toast(`Buy bonus needs ~${human} STT in bankroll, casino has ${have} STT. Spin normally instead — same RTP.`, { kind: 'warn', ttl: 6000 });
+          toast(`Buy bonus needs ~${human} STT bankroll, casino has ${have} STT. Spin normally — same RTP.`, { kind: 'warn', ttl: 6000 });
           throw new Error('buy-bonus: insufficient casino bankroll');
         }
         const stake = await clampOrToast(stakeWei, 'cluster');
         const placeRes = await SL.buyBonusCluster(Number(stake) / 1e18);
         const settled = await SL.waitForSettle(placeRes.betId);
-        const txReceipt = await SL.provider.getTransactionReceipt(settled.txHash);
-        const chargeEvent = extractChargeMeterEvent(SL.casino, txReceipt?.logs || []);
+        let chargeEvent = null;
+        try {
+          const txReceipt = await SL.provider.getTransactionReceipt(settled.txHash);
+          chargeEvent = extractChargeMeterEvent(SL.casino, txReceipt?.logs || []);
+        } catch (_) {}
         return decodeSugarLabResult({ settled, stakeWei: stake, chargeEvent, isBuyBonus: true });
       },
 
-      onChargeRewardClaimed: async (_reward) => {
+      onChargeRewardClaimed: async () => {
         try { await SL.claimChargeReward(); }
         catch (e) { console.warn('[sugar] claim failed:', e.message); }
       },
 
-      onSpinCompleted: async (_result) => {
-        // refresh balance + charge meter into the slot UI for next spin
+      onSpinCompleted: async () => {
         try {
           const bal = await SL.getNativeBalance();
           currentSlot.updateBalance(bal);
           const cm = await SL.casino.getChargeMeter(SL.address);
           currentSlot.updateChargeMeter(Number(cm.current) / 100, Number(cm.threshold) / 100);
-        } catch (e) {
-          console.warn('[sugar] post-spin refresh failed:', e.message);
-        }
+        } catch (e) { console.warn('[sugar] post-spin refresh failed:', e.message); }
       },
     });
+    // Explicitly turbo the animator (constructor flag is read by api.js, but
+    // the animator instance is created inside — flip it directly to be sure).
+    if (currentSlot.animator) currentSlot.animator.setTurbo(true);
+    currentSlot.turbo = true;
     window.slot = currentSlot;
   }
 
-  document.getElementById('gate-demo').addEventListener('click', () => {
-    gate.style.display = 'none';
-    mountDemo();
-  });
-  document.getElementById('gate-connect').addEventListener('click', async () => {
-    gateStatus.textContent = 'Opening connect flow…';
-    try {
-      await connect();
-      // wait for shinyluck:connected listener to fire
-    } catch (e) {
-      gateStatus.textContent = 'Connect failed: ' + (e.message || e);
-    }
-  });
+  // Mount immediately in demo mode so the slot is interactive from page load.
+  mountDemo();
 
+  // Hot-swap to production when the user connects via partials' Connect button.
   document.addEventListener('shinyluck:connected', () => {
-    gate.style.display = 'none';
     mountProduction().catch(e => {
-      gateStatus.textContent = 'Mount failed: ' + (e.message || e);
-      gate.style.display = 'flex';
+      toast('Could not enable on-chain mode: ' + (e.message || e), { kind: 'error', ttl: 5000 });
     });
   });
 
-  // boot — if casino addr is configured, show gate; otherwise demo straight
+  // If the user is ALREADY connected on page load (Privy session restored),
+  // wait for SL to attach and swap to production.
   if (CONFIG.casino && CONFIG.casino !== '0x0000000000000000000000000000000000000000') {
-    gate.style.display = 'flex';
-    // give wallet.js a beat to auto-restore Sequence / MetaMask session
     setTimeout(() => {
-      if (!SL.address) gateStatus.textContent = 'Sign in to play on-chain · demo available below.';
-    }, 1500);
-  } else {
-    mountDemo();
+      if (SL.address) mountProduction().catch(() => {});
+    }, 2000);
   }
 </script>
 </body>

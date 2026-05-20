@@ -401,14 +401,20 @@ document.addEventListener("click", async (e) => {
 });
 
 /// "Account" nav link → own profile when connected (canonical query form).
+/// Path prefix depends on nesting depth (root vs /games/X vs /games/X/Y).
 document.addEventListener("click", (e) => {
   const a = e.target.closest('a[data-page="account"]');
   if (!a) return;
   if (!connected || !SL.address) return;
   e.preventDefault();
   e.stopPropagation();
-  const inGames = location.pathname.includes("/games/");
-  const prefix = inGames ? "../" : "";
+  // depth = number of dirs above the root frontend dir we are sitting in
+  const segs = location.pathname.split("/").filter(Boolean);
+  // /SomniaLuck.html         → segs=['SomniaLuck.html']      → depth=0
+  // /games/dice.html         → segs=['games','dice.html']    → depth=1
+  // /games/sugar/index.html  → segs=['games','sugar','index.html'] → depth=2
+  const depth = Math.max(0, segs.length - 1);
+  const prefix = "../".repeat(depth);
   window.location.href = `${prefix}account.html?address=${SL.address.toLowerCase()}`;
 }, true);
 

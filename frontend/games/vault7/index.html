@@ -9,41 +9,14 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../../styles.css">
 <link rel="stylesheet" href="styles.css">
-<style>
-  .v7-gate {
-    position: fixed; inset: 0; display: flex; align-items: center;
-    justify-content: center; background: rgba(8, 10, 18, 0.92);
-    backdrop-filter: blur(10px); z-index: 9999;
-  }
-  .v7-gate .card {
-    text-align: center; padding: 32px 40px; max-width: 420px;
-    border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px;
-    background: linear-gradient(135deg, #1a1830, #0e0d20);
-    font-family: 'JetBrains Mono', monospace;
-  }
-  .v7-gate h2 { font-size: 22px; margin: 0 0 12px; color: #fff; letter-spacing: 1px; }
-  .v7-gate p  { color: #b6b0c8; margin: 0 0 22px; line-height: 1.55; font-size: 14px; }
-  .v7-gate .actions { display: flex; gap: 10px; justify-content: center; }
-  .v7-gate button {
-    padding: 12px 22px; border: 0; border-radius: 10px; cursor: pointer;
-    font-family: inherit; font-weight: 700; letter-spacing: 0.5px;
-    background: linear-gradient(135deg, #4ee3ff, #b794ff); color: #0a0a12;
-  }
-  .v7-gate button.ghost {
-    background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.15);
-  }
-  .v7-gate small { display: block; margin-top: 16px; font-size: 11px; color: #777; }
-</style>
 </head>
 <body data-active-page="games">
 <div data-page-shell>
 
-<!-- Shared site nav (injected by partials.js — matches lobby + dice etc.) -->
 <div data-mount="nav"></div>
 
 <div id="slot-root"></div>
 
-<!-- Shared site footer (injected by partials.js) -->
 <div data-mount="footer"></div>
 
 </div>
@@ -52,19 +25,9 @@
 <script src="/partials.js" defer></script>
 <script type="module" src="/lib/livedata.js"></script>
 
-<div class="v7-gate" id="gate" style="display:none">
-  <div class="card">
-    <h2>VAULT.7 · 5×3 / 20 lines</h2>
-    <p>Sign in to play on Somnia Testnet. Reels are deterministic from a published seed — verifiable after every spin.</p>
-    <div class="actions">
-      <button id="gate-connect">Connect Wallet</button>
-      <button class="ghost" id="gate-demo">Try Demo Mode</button>
-    </div>
-    <small id="gate-status">Checking session…</small>
-  </div>
-</div>
-
 <script type="module">
+  // See sugar/index.html — same hot-swap pattern (demo immediately, swap
+  // to production on shinyluck:connected).
   import { Vault7Slot } from './api.js';
   import { SL, connect } from '/lib/wallet.js';
   import { decodeVault7Result } from '/lib/slot-decoders.js';
@@ -86,13 +49,14 @@
     }
   }
 
-  const gate = document.getElementById('gate');
-  const gateStatus = document.getElementById('gate-status');
   const root = document.getElementById('slot-root');
   let currentSlot = null;
+  let mode = 'demo';
 
   function mountDemo() {
+    if (currentSlot && mode === 'demo') return;
     if (currentSlot) currentSlot.destroy();
+    mode = 'demo';
     currentSlot = new Vault7Slot(root, {
       mode: 'demo',
       initialBalance: 1000n * 1_000_000_000_000_000_000n,
@@ -103,26 +67,25 @@
 
   async function mountProduction() {
     if (currentSlot) currentSlot.destroy();
+    mode = 'production';
     const playerBalance = await SL.getNativeBalance();
     currentSlot = new Vault7Slot(root, {
       mode: 'production',
       initialBalance: playerBalance,
-
+      turbo: true,
       onSpinRequest: async (stakeWei) => {
         const stake = await clampOrToast(stakeWei, 'slots');
         const placeRes = await SL.placeSlots(Number(stake) / 1e18, false);
         const settled = await SL.waitForSettle(placeRes.betId);
         return decodeVault7Result({ settled, stakeWei: stake, isBuyBonus: false });
       },
-
       onBuyBonusRequest: async (stakeWei) => {
-        // See sugar/index.html — buy bonus needs ~150,000× stake in bankroll.
         const free = await SL.casino.freeBankroll();
         const required = BigInt(stakeWei) * 75n * 2000n;
         if (required > free) {
           const human = (Number(required) / 1e18).toFixed(0);
           const have = (Number(free) / 1e18).toFixed(2);
-          toast(`Buy bonus needs ~${human} STT in bankroll, casino has ${have} STT. Spin normally instead.`, { kind: 'warn', ttl: 6000 });
+          toast(`Buy bonus needs ~${human} STT bankroll, casino has ${have} STT.`, { kind: 'warn', ttl: 6000 });
           throw new Error('buy-bonus: insufficient casino bankroll');
         }
         const stake = await clampOrToast(stakeWei, 'slots');
@@ -130,42 +93,30 @@
         const settled = await SL.waitForSettle(placeRes.betId);
         return decodeVault7Result({ settled, stakeWei: stake, isBuyBonus: true });
       },
-
-      onSpinCompleted: async (_result) => {
+      onSpinCompleted: async () => {
         try {
           const bal = await SL.getNativeBalance();
           currentSlot.updateBalance(bal);
         } catch (e) { console.warn('[vault7] balance refresh failed:', e.message); }
       },
     });
+    if (currentSlot.animator) currentSlot.animator.setTurbo(true);
+    currentSlot.turbo = true;
     window.slot = currentSlot;
   }
 
-  document.getElementById('gate-demo').addEventListener('click', () => {
-    gate.style.display = 'none';
-    mountDemo();
-  });
-  document.getElementById('gate-connect').addEventListener('click', async () => {
-    gateStatus.textContent = 'Opening connect flow…';
-    try { await connect(); }
-    catch (e) { gateStatus.textContent = 'Connect failed: ' + (e.message || e); }
-  });
+  mountDemo();
 
   document.addEventListener('shinyluck:connected', () => {
-    gate.style.display = 'none';
     mountProduction().catch(e => {
-      gateStatus.textContent = 'Mount failed: ' + (e.message || e);
-      gate.style.display = 'flex';
+      toast('Could not enable on-chain mode: ' + (e.message || e), { kind: 'error', ttl: 5000 });
     });
   });
 
   if (CONFIG.casino && CONFIG.casino !== '0x0000000000000000000000000000000000000000') {
-    gate.style.display = 'flex';
     setTimeout(() => {
-      if (!SL.address) gateStatus.textContent = 'Sign in to play on-chain · demo available below.';
-    }, 1500);
-  } else {
-    mountDemo();
+      if (SL.address) mountProduction().catch(() => {});
+    }, 2000);
   }
 </script>
 </body>

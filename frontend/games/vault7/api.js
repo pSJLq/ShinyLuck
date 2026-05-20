@@ -144,12 +144,7 @@ export class Vault7Slot {
   _render() {
     this.container.innerHTML = `
 <div class="vault-shell">
-  <div class="ambient">
-    <div class="ambient-stars"></div>
-    <div class="ambient-orb o1"></div>
-    <div class="ambient-orb o2"></div>
-    <div class="ambient-orb o3"></div>
-  </div>
+  <!-- ambient layer removed (clashed with partials' .amb causing cursor lag) -->
 
   <!-- nav-bar removed — partials.js injects shared chrome (see sugar/api.js). -->
   <div class="slot-tools-row" style="display:flex; gap:10px; justify-content:flex-end; padding: 0 5% 10px;">

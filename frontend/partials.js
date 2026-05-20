@@ -229,20 +229,24 @@
 
   // ---------- INSERT INTO PAGE ----------
   function fixRelative(html) {
-    // Template paths use `../X.html` — designed for `/games/X.html` (1 deep).
-    // For `/games/sugar/index.html` (2 deep) we need an extra `../` prefix.
-    // For root pages we strip the leading `../` (it's irrelevant from `/`).
+    // Template paths use `../X.html` — that's correct from `/games/X.html`
+    // (1 dir deep). For root pages we strip the `../` since it's irrelevant.
+    // For nested game pages `/games/sugar/index.html` (2 dirs deep) we
+    // PREFIX an extra `../` per extra level.
     const path = location.pathname.replace(/[^/]*$/, '');           // dir part
     const inGames = path.includes('/games/');
     const segs = path.split('/').filter(Boolean);
     const gamesIdx = segs.indexOf('games');
+    // depthInGames: how many extra dirs we are below /games/
+    //   /games/dice.html      → dir = '/games/'         → segs=['games']         → depth=0
+    //   /games/sugar/X.html   → dir = '/games/sugar/'   → segs=['games','sugar'] → depth=1
     const depthInGames = gamesIdx >= 0 ? Math.max(0, segs.length - gamesIdx - 1) : 0;
     if (!inGames) {
       return html.replace(/href="\.\.\//g, 'href="').replace(/src="\.\.\//g, 'src="');
     }
-    if (depthInGames > 1) {
-      // Add (depthInGames - 1) extra `../` to every `href="../` and `src="../`.
-      const extra = '../'.repeat(depthInGames - 1);
+    if (depthInGames >= 1) {
+      // Add depthInGames extra `../` to every `href="../` and `src="../`.
+      const extra = '../'.repeat(depthInGames);
       return html
         .replace(/href="\.\.\//g, `href="${extra}../`)
         .replace(/src="\.\.\//g, `src="${extra}../`);
@@ -307,6 +311,8 @@
   else document.addEventListener('DOMContentLoaded', mount);
 
   // ---------- PAGE TRANSITIONS ----------
+  // Was a 520ms setTimeout fade — felt laggy. Now: navigate immediately, the
+  // overlay shows for ~120ms while the new page is fetching (visual courtesy).
   document.addEventListener('click', (e) => {
     const a = e.target.closest('a[data-link], a[href]');
     if (!a) return;
@@ -315,7 +321,7 @@
     if (!href.endsWith('.html') && !href.includes('.html#') && !href.includes('.html?')) return;
     e.preventDefault();
     transition.classList.add('active');
-    setTimeout(() => { window.location.href = href; }, 520);
+    window.location.href = href;
   });
 
   // ---------- CURSOR ----------

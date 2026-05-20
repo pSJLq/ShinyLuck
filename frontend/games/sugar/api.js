@@ -258,12 +258,9 @@ export class SugarSlot {
   _render() {
     this.container.innerHTML = `
 <div class="sugar-shell">
-  <div class="ambient">
-    <div class="ambient-stars"></div>
-    <div class="ambient-orb o1"></div>
-    <div class="ambient-orb o2"></div>
-    <div class="ambient-orb o3"></div>
-  </div>
+  <!-- ambient layer removed — partials.js injects its own .amb layer at the
+       page level. Two ambient layers caused cursor lag (perceived rendering
+       slowdown). The site-wide .amb covers slot pages too. -->
 
   <!-- nav-bar removed — partials.js (loaded from index.html) injects the
        shared site nav into <div data-mount="nav"> above this slot root.
