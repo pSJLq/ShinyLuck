@@ -12,11 +12,16 @@
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/games/sugar/styles.css">
 <style>
-  /* Slot pages are heavy on CSS animations. The shared site cursor
-     interpolates with a trailing ring; with too much per-frame work, the
-     ring visibly lags. We give native cursor here so the slot stays snappy. */
-  html, body { cursor: auto !important; }
-  .cursor-dot, .cursor-ring { display: none !important; }
+  /* Keep the shared custom cursor (user wants it consistent across pages).
+     To prevent it from visibly lagging behind the mouse, we kill the
+     heaviest in-slot CSS animations: the ambient orbs (4 large blurred
+     gradients with continuous keyframe motion) and the marquee scroll
+     ticker. These are pure decoration; removing them frees the main
+     thread for the cursor's RAF and the cascade animation. */
+  .sugar-shell .ambient,
+  .sugar-shell .ambient-orb { display: none !important; }
+  .sugar-shell .marquee .scroll,
+  .sugar-shell .marquee .track { animation: none !important; }
 
   .sl-connect-prompt {
     position: fixed; inset: 0; display: flex; align-items: center;

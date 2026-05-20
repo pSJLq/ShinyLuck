@@ -91,28 +91,41 @@ export class Vault7Animator {
 
   setTurbo(v) { this.turbo = !!v; }
 
-  // Optimistic UX (see sugar/animation.js startSpinning). Adds .spinning to
-  // the reels frame + animates a fast scroll loop so the user sees the reels
-  // moving within 50ms of click. play(result) below stops the loop.
+  // Optimistic UX: spin the .reel-strip (the inner scrolling element) — NOT
+  // the .reel container. The container has overflow:hidden and a fixed
+  // height; moving it makes the reels visibly fly out of the frame. The
+  // strip is what's supposed to scroll. We also apply blur to .reel for the
+  // motion-blur look, since blur on the moving strip blurs the un-revealed
+  // symbols above.
   startSpinning() {
     if (!this.frameEl) return;
     this.frameEl.classList.add('spinning');
     if (this._spinLoopTimer) return;
     const reels = $$('.reel', this.reelsEl);
+    const strips = reels.map(r => $('.reel-strip', r));
+    // Compute the per-cell height so the jitter wraps cleanly without ever
+    // exposing the empty area above the strip's first cell.
+    const cellH = reels[0]?.clientWidth || 80;
+    for (const r of reels) r.style.filter = 'blur(1.5px)';
     let phase = 0;
     this._spinLoopTimer = setInterval(() => {
       phase = (phase + 1) % 1000;
-      for (const r of reels) {
-        // Apply a quick vertical jitter so the reels visibly move.
-        r.style.transform = `translateY(${(phase * 17) % 80 - 40}px)`;
-        r.style.filter = 'blur(2px)';
+      // Move within ±0.5×cellH so the visible cells just blur in place. The
+      // strip's existing 3 cells stay within the .reel viewport.
+      const y = ((phase * 9) % cellH) - cellH * 0.5;
+      for (const strip of strips) {
+        if (strip) strip.style.transform = `translateY(${y}px)`;
       }
     }, 30);
   }
   stopSpinning() {
     if (this._spinLoopTimer) { clearInterval(this._spinLoopTimer); this._spinLoopTimer = null; }
     const reels = $$('.reel', this.reelsEl);
-    for (const r of reels) { r.style.transform = ''; r.style.filter = ''; }
+    for (const r of reels) {
+      r.style.filter = '';
+      const strip = $('.reel-strip', r);
+      if (strip) strip.style.transform = '';
+    }
   }
 
   /** Play one Vault7ResultData: base spin + optional FS chain */
