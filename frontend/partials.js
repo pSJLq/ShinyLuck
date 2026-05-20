@@ -253,6 +253,16 @@
   async function mount() {
     const page = document.querySelector('[data-page-shell]');
     if (!page) return;
+    // Inject favicon link if the page doesn't have one. The user put their
+    // .ico file at /Luck.ico (also duplicated to /favicon.ico for browsers
+    // that probe the root by convention).
+    if (!document.querySelector('link[rel="icon"]')) {
+      const link = document.createElement('link');
+      link.rel = 'icon';
+      link.type = 'image/x-icon';
+      link.href = '/favicon.ico';
+      document.head.appendChild(link);
+    }
     if (!document.querySelector('.amb')) {
       const amb = document.createElement('div');
       amb.className = 'amb';
