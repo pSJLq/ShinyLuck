@@ -85,7 +85,14 @@
 
   async function mountProduction() {
     if (mounting || currentSlot) return;
+    if (!SL.address || !SL.signer) {
+      console.warn('[vault7] mountProduction called but SL not ready yet');
+      return;
+    }
     mounting = true;
+    // Hide the prompt the moment we commit — if mounting fails, we restore it
+    // in the catch block.
+    prompt.style.display = 'none';
     try {
       const playerBalance = await SL.getNativeBalance();
       currentSlot = new Vault7Slot(root, {
@@ -122,21 +129,33 @@
       if (currentSlot.animator) currentSlot.animator.setTurbo(true);
       currentSlot.turbo = true;
       window.slot = currentSlot;
-      prompt.style.display = 'none';
+    } catch (e) {
+      console.error('[vault7] mount failed:', e);
+      prompt.style.display = '';
+      currentSlot = null;
+      toast('Mount failed: ' + (e.message || e), { kind: 'error', ttl: 5000 });
     } finally {
       mounting = false;
     }
   }
 
-  document.addEventListener('shinyluck:connected', () => {
-    mountProduction().catch(e => {
-      toast('Mount failed: ' + (e.message || e), { kind: 'error', ttl: 5000 });
-    });
-  });
-
-  setTimeout(() => {
-    if (SL.address && !currentSlot) mountProduction().catch(() => {});
-  }, 1500);
+  // Mount-trigger uses a polling loop so we catch the case where Privy
+  // restored its session before this page's listeners attached. See the sugar
+  // page for the same logic + rationale.
+  let pollHandle = null;
+  function tryMount() {
+    if (currentSlot || mounting) return true;
+    if (!SL.address || !SL.signer) return false;
+    mountProduction().catch(() => {});
+    return true;
+  }
+  document.addEventListener('shinyluck:connected', tryMount);
+  document.addEventListener('shinyluck:auth-state', tryMount);
+  pollHandle = setInterval(() => {
+    if (tryMount()) clearInterval(pollHandle);
+  }, 250);
+  setTimeout(() => { if (pollHandle) clearInterval(pollHandle); }, 30000);
+  tryMount();
 </script>
 </body>
 </html>
