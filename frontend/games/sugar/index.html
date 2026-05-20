@@ -7,8 +7,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../../styles.css">
-<link rel="stylesheet" href="styles.css">
+<!-- Absolute paths so the page works even when http-server serves index.html
+     without redirecting `/games/sugar` → `/games/sugar/` (trailing slash). -->
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/games/sugar/styles.css">
 <style>
   /* Slot pages are heavy on CSS animations. The shared site cursor
      interpolates with a trailing ring; with too much per-frame work, the
@@ -62,7 +64,7 @@
 <script type="module" src="/lib/livedata.js"></script>
 
 <script type="module">
-  import { SugarSlot } from './api.js';
+  import { SugarSlot } from '/games/sugar/api.js';
   import { SL } from '/lib/wallet.js';
   import { decodeSugarLabResult, extractChargeMeterEvent } from '/lib/slot-decoders.js';
   import { CONFIG } from '/lib/config.js';

@@ -260,11 +260,17 @@ export class SugarSlot {
        Balance pill is kept inline (in the cabinet header above the reels) so
        the slot HUD shows live balance after every spin.  data-balance-mini
        still updates from this.balance in _updateUI(). -->
+  <!-- Slot's own nav-bar is hidden — partials.js provides the shared site nav.
+       We keep the data-sound button (still wired by _wireControls + the 'M' key
+       shortcut) and data-balance-mini in the DOM tree, just invisible. -->
   <div class="nav-bar" style="display:none">
     <div class="brand">SHINY·LUCK</div>
     <div class="navlinks"><a href="#" class="active">Slots</a></div>
     <div class="right">
       <div class="bal"><span class="dot"></span><b data-balance-mini>0.00</b> STT</div>
+      <button class="sound-tog" data-sound>
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06A9 9 0 0 0 14 3.23z"/></svg>
+      </button>
     </div>
   </div>
 

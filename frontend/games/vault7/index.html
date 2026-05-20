@@ -7,8 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../../styles.css">
-<link rel="stylesheet" href="styles.css">
+<!-- Absolute paths — works even when http-server doesn't redirect trailing-slash. -->
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/games/vault7/styles.css">
 <style>
   html, body { cursor: auto !important; }
   .cursor-dot, .cursor-ring { display: none !important; }
@@ -57,7 +58,7 @@
 <script type="module" src="/lib/livedata.js"></script>
 
 <script type="module">
-  import { Vault7Slot } from './api.js';
+  import { Vault7Slot } from '/games/vault7/api.js';
   import { SL } from '/lib/wallet.js';
   import { decodeVault7Result } from '/lib/slot-decoders.js';
   import { CONFIG } from '/lib/config.js';
