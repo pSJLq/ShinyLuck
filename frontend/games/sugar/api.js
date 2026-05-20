@@ -23,22 +23,16 @@ const fmtStt = (wei, d=2) => (Number(BigInt(wei)) / 1e18).toLocaleString('en-US'
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // --------------- preset stakes (in wei) ----------------
-// Cluster reserves stake × 2500 from bankroll. With a typical testnet
-// bankroll (50-100 STT) the effective max stake is ~0.02-0.04 STT. The
-// presets start at 0.001 STT so the user always has a workable step under
-// the live cap (the UI clamps to live maxBet, see clampOrToast in
-// frontend/games/sugar/index.html). On a much larger bankroll, the upper
-// steps become reachable.
 const STAKE_STEPS_WEI = [
-  1n    * WEI_PER_STT / 1000n,   // 0.001
-  5n    * WEI_PER_STT / 1000n,   // 0.005
-  10n   * WEI_PER_STT / 1000n,   // 0.010
-  25n   * WEI_PER_STT / 1000n,   // 0.025
-  50n   * WEI_PER_STT / 1000n,   // 0.050
-  100n  * WEI_PER_STT / 1000n,   // 0.100
-  250n  * WEI_PER_STT / 1000n,   // 0.250
-  500n  * WEI_PER_STT / 1000n,   // 0.500
-  1000n * WEI_PER_STT / 1000n,   // 1.000
+  10n  * WEI_PER_STT / 100n,    // 0.10
+  25n  * WEI_PER_STT / 100n,    // 0.25
+  50n  * WEI_PER_STT / 100n,    // 0.50
+  100n * WEI_PER_STT / 100n,    // 1.00
+  250n * WEI_PER_STT / 100n,    // 2.50
+  500n * WEI_PER_STT / 100n,    // 5.00
+  1000n * WEI_PER_STT / 100n,   // 10.00
+  2500n * WEI_PER_STT / 100n,   // 25.00
+  5000n * WEI_PER_STT / 100n,   // 50.00
 ];
 
 export class SugarSlot {
@@ -50,7 +44,7 @@ export class SugarSlot {
 
     // ----- state -----
     this.balance = options.initialBalance ?? 1000n * WEI_PER_STT;
-    this.stakeIdx = 2; // 0.010 STT default — fits under typical testnet bankroll's cluster cap
+    this.stakeIdx = 3; // 1.00 STT default
     this.minStake = options.minStake ?? STAKE_STEPS_WEI[0];
     this.maxStake = options.maxStake ?? STAKE_STEPS_WEI[STAKE_STEPS_WEI.length - 1];
     this.charge = options.initialChargeMeter?.current ?? 0;
@@ -116,13 +110,10 @@ export class SugarSlot {
     this.busy = true;
     SFX.click();
     $('[data-spin]', this.container).classList.add('spinning');
-
-    // OPTIMISTIC UX: kick off a visible "rolling" animation (rim glow +
-    // symbol shuffle) within ~50ms of the click. The chain tx fires in
-    // parallel; play(result) replaces this with the real animation when the
-    // settle lands. Without this, the grid stayed static for 2-3s — which
-    // felt frozen.
-    this.animator.startSpinning();
+    // OPTIMISTIC: start a visible rolling/shuffle animation IMMEDIATELY so the
+    // grid doesn't sit static during the on-chain tx + reveal wait. animator
+    // .play(result) calls stopSpinning() and takes over with the real cascade.
+    if (this.animator.startSpinning) this.animator.startSpinning();
 
     // In autospin, force the animator into turbo timing so symbols never
     // get stuck mid-cascade. User can still toggle turbo manually for base spins.
@@ -258,21 +249,23 @@ export class SugarSlot {
   _render() {
     this.container.innerHTML = `
 <div class="sugar-shell">
-  <!-- ambient layer removed — partials.js injects its own .amb layer at the
-       page level. Two ambient layers caused cursor lag (perceived rendering
-       slowdown). The site-wide .amb covers slot pages too. -->
+  <div class="ambient">
+    <div class="ambient-stars"></div>
+    <div class="ambient-orb o1"></div>
+    <div class="ambient-orb o2"></div>
+    <div class="ambient-orb o3"></div>
+  </div>
 
-  <!-- nav-bar removed — partials.js (loaded from index.html) injects the
-       shared site nav into <div data-mount="nav"> above this slot root.
-       The slot is now just the game canvas; chrome lives outside. -->
-  <div class="slot-tools-row" style="display:flex; gap:10px; justify-content:flex-end; padding: 0 5% 10px;">
-    <div class="bal" style="font-family: 'JetBrains Mono', monospace; font-size:12px; color: var(--fg-mute, #b6b0c8); padding: 6px 12px; border:1px solid rgba(255,255,255,0.08); border-radius:6px;">
-      <span class="dot" style="display:inline-block;width:6px;height:6px;background:#4ee3ff;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>
-      <b data-balance-mini style="color:#fafafa;">0.00</b> STT
+  <!-- Slot's own nav-bar is hidden — partials.js provides the shared site nav.
+       Balance pill is kept inline (in the cabinet header above the reels) so
+       the slot HUD shows live balance after every spin.  data-balance-mini
+       still updates from this.balance in _updateUI(). -->
+  <div class="nav-bar" style="display:none">
+    <div class="brand">SHINY·LUCK</div>
+    <div class="navlinks"><a href="#" class="active">Slots</a></div>
+    <div class="right">
+      <div class="bal"><span class="dot"></span><b data-balance-mini>0.00</b> STT</div>
     </div>
-    <button class="sound-tog" data-sound style="background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--fg-mute,#b6b0c8);padding:6px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;">
-      <svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06A9 9 0 0 0 14 3.23z"/></svg>
-    </button>
   </div>
 
   <div class="game-hero">
@@ -304,9 +297,9 @@ export class SugarSlot {
             <span class="item">All seeds verifiable post-spin</span>
           </div>
         </div>
-        <div class="jp" style="display:none;" data-architect-note="hidden P0: jackpot ticker not wired; architect may wire in P1">
+        <div class="jp" style="display:none">
           <span class="lbl">CASINO JACKPOT</span>
-          <span class="v" data-jp>$142,318.42</span>
+          <span class="v" data-jp>$0.00</span>
         </div>
       </div>
 
@@ -615,23 +608,20 @@ export class SugarSlot {
   }
 
   _fakeTicker() {
-    // P0 fix: kill the fake ticker — judges should see *real* spins only.
-    // The empty state is honest; real player spins push real entries via
-    // `_pushTicker({ who: 'YOU' })` inside `spin()`. (Architect explicitly
-    // rejected piping demo-bot fake addresses into the feed — those show up
-    // naturally as on-chain BetSettled events visible in the lobby feed.)
+    // P0 fix: kill the fake names ticker. Real player spins still push live
+    // rows via `_pushTicker({who:'YOU'})` inside spin(). Showing an honest
+    // empty state keeps the casino's "agent-settled, no demo addresses"
+    // story tight (this ticker is sugar-page-local; the global lobby feed
+    // shows real BetSettled events from any address via livedata.js).
     const list = $('[data-ticker]', this.container);
     if (list) {
-      list.innerHTML = `<div class="ticker-row" style="opacity:.5;"><div class="who" style="color:var(--fg-mute,#6b6b75);">No spins yet<small>SUGAR.LAB</small></div><div class="amt" style="color:var(--fg-mute,#6b6b75);">be the first<small></small></div></div>`;
+      list.innerHTML = `<div class="ticker-row" style="opacity:.45"><div class="who" style="color:var(--fg-mute,#b6b0c8)">No spins yet<small>SUGAR.LAB</small></div><div class="amt" style="color:var(--fg-mute,#b6b0c8)">be the first<small></small></div></div>`;
     }
   }
   _jackpotDrift() {
-    let jp = 142318.42;
-    const el = $('[data-jp]', this.container);
-    this._jpInt = setInterval(() => {
-      jp += Math.random() * 1.5 + 0.1;
-      if (el) el.textContent = '$' + jp.toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
-    }, 600);
+    // P0 fix: stop the 600ms setInterval — element is display:none anyway.
+    // (Removing the timer eliminates per-frame work that contributed to the
+    //  page being heavy enough for the custom cursor to feel laggy.)
   }
 }
 

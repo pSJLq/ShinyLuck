@@ -11,17 +11,16 @@ const WEI_PER_STT = 1_000_000_000_000_000_000n;
 const fmtStt = (wei, d=2) => (Number(BigInt(wei)) / 1e18).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// VAULT.7 reserves stake × 2000 from bankroll. See sugar/api.js comment.
 const STAKE_STEPS_WEI = [
-  1n    * WEI_PER_STT / 1000n,   // 0.001
-  5n    * WEI_PER_STT / 1000n,   // 0.005
-  10n   * WEI_PER_STT / 1000n,   // 0.010
-  25n   * WEI_PER_STT / 1000n,   // 0.025
-  50n   * WEI_PER_STT / 1000n,   // 0.050
-  100n  * WEI_PER_STT / 1000n,   // 0.100
-  250n  * WEI_PER_STT / 1000n,   // 0.250
-  500n  * WEI_PER_STT / 1000n,   // 0.500
-  1000n * WEI_PER_STT / 1000n,   // 1.000
+  10n  * WEI_PER_STT / 100n,
+  25n  * WEI_PER_STT / 100n,
+  50n  * WEI_PER_STT / 100n,
+  100n * WEI_PER_STT / 100n,
+  250n * WEI_PER_STT / 100n,
+  500n * WEI_PER_STT / 100n,
+  1000n * WEI_PER_STT / 100n,
+  2500n * WEI_PER_STT / 100n,
+  5000n * WEI_PER_STT / 100n,
 ];
 
 export class Vault7Slot {
@@ -32,7 +31,7 @@ export class Vault7Slot {
     this.mode = options.mode || 'demo';
 
     this.balance = options.initialBalance ?? 1000n * WEI_PER_STT;
-    this.stakeIdx = 2; // 0.010 STT default — fits under typical testnet bankroll's vault cap
+    this.stakeIdx = 3;
     this.minStake = options.minStake ?? STAKE_STEPS_WEI[0];
     this.maxStake = options.maxStake ?? STAKE_STEPS_WEI[STAKE_STEPS_WEI.length - 1];
     this.freeSpinsRemaining = 0;
@@ -69,9 +68,9 @@ export class Vault7Slot {
     this.busy = true;
     SFX.click();
     $('[data-spin]', this.container).classList.add('spinning');
-    // Optimistic — reels start moving instantly. play(result) takes over once
-    // the chain settles (see vault7/animation.js startSpinning / stopSpinning).
-    this.animator.startSpinning();
+    // OPTIMISTIC: reels start moving instantly; play(result) takes over once
+    // the chain settles.
+    if (this.animator.startSpinning) this.animator.startSpinning();
 
     if (this.mode === 'demo' && !isFree) this.balance -= cost;
     this.opts.onSpinStarted?.(this.stakeWei);
@@ -144,17 +143,17 @@ export class Vault7Slot {
   _render() {
     this.container.innerHTML = `
 <div class="vault-shell">
-  <!-- ambient layer removed (clashed with partials' .amb causing cursor lag) -->
+  <div class="ambient">
+    <div class="ambient-stars"></div>
+    <div class="ambient-orb o1"></div>
+    <div class="ambient-orb o2"></div>
+    <div class="ambient-orb o3"></div>
+  </div>
 
-  <!-- nav-bar removed — partials.js injects shared chrome (see sugar/api.js). -->
-  <div class="slot-tools-row" style="display:flex; gap:10px; justify-content:flex-end; padding: 0 5% 10px;">
-    <div class="bal" style="font-family: 'JetBrains Mono', monospace; font-size:12px; color: var(--fg-mute, #b6b0c8); padding: 6px 12px; border:1px solid rgba(255,255,255,0.08); border-radius:6px;">
-      <span class="dot" style="display:inline-block;width:6px;height:6px;background:#4ee3ff;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>
-      <b data-balance-mini style="color:#fafafa;">0.00</b> STT
-    </div>
-    <button class="sound-tog" data-sound style="background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--fg-mute,#b6b0c8);padding:6px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;">
-      <svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
-    </button>
+  <!-- Slot's own nav-bar hidden — partials.js provides shared site nav. -->
+  <div class="nav-bar" style="display:none">
+    <div class="brand">SHINY·LUCK</div>
+    <div class="right"><div class="bal"><b data-balance-mini>0.00</b> STT</div></div>
   </div>
 
   <div class="game-hero">
@@ -418,16 +417,12 @@ export class Vault7Slot {
     if (fresh) setTimeout(()=> div.classList.remove('fresh'), 800);
   }
   _fakeTicker() {
-    // P0 fix: kill the fake ticker — real spins only. (See sugar/api.js.)
     const list = $('[data-ticker]', this.container);
     if (list) {
-      list.innerHTML = `<div class="ticker-row" style="opacity:.5;"><div class="who" style="color:var(--fg-mute,#6b6b75);">No spins yet<small>VAULT.7</small></div><div class="amt" style="color:var(--fg-mute,#6b6b75);">be the first<small></small></div></div>`;
+      list.innerHTML = `<div class="ticker-row" style="opacity:.45"><div class="who" style="color:var(--fg-mute,#b6b0c8)">No spins yet<small>VAULT.7</small></div><div class="amt" style="color:var(--fg-mute,#b6b0c8)">be the first<small></small></div></div>`;
     }
   }
-  _jackpotDrift() {
-    let jp = 142318.42;
-    this._jpInt = setInterval(() => { jp += Math.random() * 1.5 + 0.1; }, 600);
-  }
+  _jackpotDrift() { /* P0: removed setInterval (cursor lag) */ }
 }
 
 function $(q, el) { return (el || document).querySelector(q); }

@@ -16,8 +16,12 @@ if (!fs.existsSync(seedsDir)) {
   process.exit(1);
 }
 
+// Filter: only files named `${NET}-<digits>.json` (the seed batches written
+// by deploy.js / topup-seeds.js). EXCLUDE `${NET}-pool.json` — that's the
+// shared HM-cron pool file which gets new mtimes every topup, so it would
+// otherwise outrank the actual batch files.
 const candidates = fs.readdirSync(seedsDir)
-  .filter((f) => f.startsWith(`${NET}-`) && f.endsWith(".json"))
+  .filter((f) => f.startsWith(`${NET}-`) && /\d/.test(f.replace(`${NET}-`, "")) && !f.endsWith("-pool.json") && f.endsWith(".json"))
   .map((f) => ({ name: f, mtime: fs.statSync(path.join(seedsDir, f)).mtimeMs }))
   .sort((a, b) => b.mtime - a.mtime);
 
