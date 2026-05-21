@@ -102,6 +102,12 @@
         mode: 'production',
         initialBalance: playerBalance,
         turbo: true,
+        // Bubbled from api.js's spin() catch — show a toast instead of the
+        // silent revert that leaves the reels in a frozen state.
+        onError: ({ kind, message }) => {
+          const ttl = kind === 'paused' ? 5000 : 4500;
+          toast(message, { kind: 'warn', ttl });
+        },
         onSpinRequest: async (stakeWei) => {
           const stake = await clampOrToast(stakeWei, 'slots');
           const placeRes = await SL.placeSlots(Number(stake) / 1e18, false);

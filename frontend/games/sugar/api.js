@@ -146,9 +146,20 @@ export class SugarSlot {
         if (buyBonus) this.opts.onBuyBonusTriggered?.(this.stakeWei);
       }
     } catch (e) {
+      // Mirror vault7: stop the optimistic shuffle so the grid doesn't
+      // strobe forever, and bubble a typed error so the page can toast it.
       console.error('[SugarSlot] spin error:', e);
+      try { this.animator.stopSpinning?.(); this.animator.frameEl?.classList.remove('spinning'); } catch (_) {}
       this.busy = false;
       $('[data-spin]', this.container).classList.remove('spinning');
+      const msg = String(e?.message || e);
+      if (/0x61bc0a1e|GameIsPaused/i.test(msg)) {
+        this.opts.onError?.({ kind: 'paused', message: 'SUGAR.LAB is temporarily paused — try again in a few seconds.' });
+      } else if (/BankrollInsufficient|0x8f523bc4/i.test(msg)) {
+        this.opts.onError?.({ kind: 'bankroll', message: 'Casino bankroll low — try a smaller stake.' });
+      } else {
+        this.opts.onError?.({ kind: 'revert', message: e?.shortMessage || msg.slice(0, 200) });
+      }
       return;
     }
 

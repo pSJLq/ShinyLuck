@@ -91,35 +91,34 @@ export class Vault7Animator {
 
   setTurbo(v) { this.turbo = !!v; }
 
-  // Optimistic UX: spin the .reel-strip (the inner scrolling element) — NOT
-  // the .reel container. The container has overflow:hidden and a fixed
-  // height; moving it makes the reels visibly fly out of the frame. The
-  // strip is what's supposed to scroll. We also apply blur to .reel for the
-  // motion-blur look, since blur on the moving strip blurs the un-revealed
-  // symbols above.
+  // Optimistic UX. Mirrors sugar/animation.js startSpinning() — we shuffle
+  // the glyphs inside the existing visible cells instead of translating the
+  // strips. Translating the strips was buggy: in the idle state each strip
+  // has only 3 cells filling the .reel viewport exactly, so any vertical
+  // translate exposes the empty area above/below them, leaving holes in the
+  // grid. Glyph-shuffle keeps the 15-cell layout intact and gives the same
+  // "something's happening" feedback while we wait for the on-chain reveal.
   startSpinning() {
     if (!this.frameEl) return;
     this.frameEl.classList.add('spinning');
-    if (this._spinLoopTimer) return;
+    if (this._shuffleTimer) return;
+    const glyphValues = Object.values(SYM_GLYPH);
+    const symEls = $$('.cell .glyph .sym', this.reelsEl);
+    if (!symEls.length) return;
+    // Apply a soft blur to .reel so the swap doesn't look jarring.
     const reels = $$('.reel', this.reelsEl);
-    const strips = reels.map(r => $('.reel-strip', r));
-    // Compute the per-cell height so the jitter wraps cleanly without ever
-    // exposing the empty area above the strip's first cell.
-    const cellH = reels[0]?.clientWidth || 80;
-    for (const r of reels) r.style.filter = 'blur(1.5px)';
-    let phase = 0;
-    this._spinLoopTimer = setInterval(() => {
-      phase = (phase + 1) % 1000;
-      // Move within ±0.5×cellH so the visible cells just blur in place. The
-      // strip's existing 3 cells stay within the .reel viewport.
-      const y = ((phase * 9) % cellH) - cellH * 0.5;
-      for (const strip of strips) {
-        if (strip) strip.style.transform = `translateY(${y}px)`;
+    for (const r of reels) r.style.filter = 'blur(0.8px)';
+    this._shuffleTimer = setInterval(() => {
+      for (const s of symEls) {
+        s.textContent = glyphValues[Math.floor(Math.random() * glyphValues.length)];
       }
-    }, 30);
+    }, 80);
   }
   stopSpinning() {
-    if (this._spinLoopTimer) { clearInterval(this._spinLoopTimer); this._spinLoopTimer = null; }
+    if (this._shuffleTimer) { clearInterval(this._shuffleTimer); this._shuffleTimer = null; }
+    // Clear the visual side-effects so a spin that aborts (e.g. contract
+    // revert) doesn't leave the reels blurred. play(result) will replace
+    // the symbols anyway on success; on failure this restores idle state.
     const reels = $$('.reel', this.reelsEl);
     for (const r of reels) {
       r.style.filter = '';

@@ -91,8 +91,25 @@ export class Vault7Slot {
         if (buyBonus) this.opts.onBuyBonusTriggered?.(this.stakeWei);
       }
     } catch (e) {
+      // CRITICAL: stopSpinning() must be called or the optimistic anim leaves
+      // the reels blurred/frozen forever. Also remove the .spinning class
+      // from the SPIN button so it stops pulsing.
       console.error('[Vault7] spin error', e);
-      this.busy = false; $('[data-spin]', this.container).classList.remove('spinning'); return;
+      try { this.animator.stopSpinning?.(); this.animator.frameEl?.classList.remove('spinning'); } catch (_) {}
+      this.busy = false;
+      $('[data-spin]', this.container).classList.remove('spinning');
+      // Surface the most common contract reverts to the user. The full
+      // mapping (custom-error selector → human msg) lives in api.js's caller
+      // wrapper; here we just translate a couple of high-frequency ones.
+      const msg = String(e?.message || e);
+      if (/0x61bc0a1e|GameIsPaused/i.test(msg)) {
+        this.opts.onError?.({ kind: 'paused', message: 'VAULT.7 is temporarily paused — try again in a few seconds.' });
+      } else if (/BankrollInsufficient|0x8f523bc4/i.test(msg)) {
+        this.opts.onError?.({ kind: 'bankroll', message: 'Casino bankroll low — try a smaller stake.' });
+      } else {
+        this.opts.onError?.({ kind: 'revert', message: e?.shortMessage || msg.slice(0, 200) });
+      }
+      return;
     }
 
     this.freeSpinsRemaining = result.freeSpinsTriggered || 0;

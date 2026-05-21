@@ -119,6 +119,12 @@
         initialBalance: playerBalance,
         initialChargeMeter: { current: chargeMeter.current, threshold: chargeMeter.threshold },
         turbo: true,
+        // Surface typed contract reverts as toasts (paused / bankroll-low /
+        // generic) instead of swallowing them silently.
+        onError: ({ kind, message }) => {
+          const ttl = kind === 'paused' ? 5000 : 4500;
+          toast(message, { kind: 'warn', ttl });
+        },
 
         onSpinRequest: async (stakeWei) => {
           const stake = await clampOrToast(stakeWei, 'cluster');
