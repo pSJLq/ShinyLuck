@@ -110,9 +110,23 @@
           toast(message, { kind: 'warn', ttl });
         },
         onSpinRequest: async (stakeWei) => {
+          // Per-step timing log so the wait breakdown is visible in DevTools.
+          const tStart = performance.now();
+          const t1 = performance.now();
           const stake = await clampOrToast(stakeWei, 'slots');
+          const clampMs = performance.now() - t1;
+
+          const t2 = performance.now();
           const placeRes = await SL.placeSlots(Number(stake) / 1e18, false);
+          const placeMs = performance.now() - t2;
+
+          const t3 = performance.now();
           const settled = await SL.waitForSettle(placeRes.betId);
+          const waitMs = performance.now() - t3;
+
+          const totalMs = performance.now() - tStart;
+          console.log(`[vault7] spin total ${totalMs.toFixed(0)}ms  (clamp ${clampMs.toFixed(0)}ms · place ${placeMs.toFixed(0)}ms · wait ${waitMs.toFixed(0)}ms)`);
+
           return decodeVault7Result({ settled, stakeWei: stake, isBuyBonus: false });
         },
         onBuyBonusRequest: async (stakeWei) => {

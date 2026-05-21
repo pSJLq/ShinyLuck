@@ -92,12 +92,12 @@ function attachPrivySigner() {
     throw new Error("Privy not authenticated");
   }
   const ro = new ethers.JsonRpcProvider(network.rpcUrls[0]);
-  // Lower polling from ethers' 4000ms default to 1000ms so casino.on(
-  // "BetSettled") fires within ~1s of the event landing on chain (instead of
-  // ~4s). Trade-off: 4× more eth_getLogs calls, but acceptable on Somnia
-  // testnet RPS budget and *required* for the "click → result" loop to feel
-  // instant.
-  ro.pollingInterval = 1000;
+  // Aggressive polling: 500ms. WaitForSettle also races a WS subscription
+  // when available, so the HTTP path is the fallback — but if the gateway
+  // rejects WS, we want this to be as tight as Somnia's RPS budget allows.
+  // 500ms is comfortably under the 1.2s block time, so we never miss a
+  // single-block-old event.
+  ro.pollingInterval = 500;
   SL.provider = ro;
   SL.signer = new PrivySigner(auth.address, ro);
   SL.address = auth.address;

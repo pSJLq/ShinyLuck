@@ -28,7 +28,7 @@ const path = require("path");
 // to reveal before then. So the practical click→settle floor is poll +
 // reveal-delay + RPC roundtrip ≈ 0.8 + 1.6 + 0.4 = ~2.8s. Going below 800ms
 // burns RPC budget without helping.
-const POLL_MS = parseInt(process.env.POLL_MS || "800", 10);
+const POLL_MS = parseInt(process.env.POLL_MS || "300", 10);
 const REVEAL_DELAY = 3n;
 const BLOCKHASH_WINDOW = 256n;
 const COLD_START_LOOKBACK = parseInt(process.env.COLD_START_LOOKBACK || "200000", 10);

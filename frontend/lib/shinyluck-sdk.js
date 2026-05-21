@@ -412,17 +412,73 @@ export class ShinyLuck {
   }
 
   /// @notice Wait for a BetSettled event matching betId.
+  ///
+  /// Race two subscriptions:
+  ///   (a) WS push subscription (if Somnia gateway accepts upgrade) —
+  ///       events arrive <200ms after the settle tx is mined.
+  ///   (b) The default HTTP-poll-based contract event — falls back when
+  ///       WS isn't available.
+  /// Whichever fires first wins; we cancel the loser.
+  ///
+  /// This shaves ~800-1000ms off the end-of-spin latency that the default
+  /// 1000ms ethers polling interval otherwise imposes on top of the
+  /// 3-block reveal delay.
   async waitForSettle(betId, timeoutMs = 60_000) {
-    return new Promise((resolve, reject) => {
-      const handler = (id, player, game, won, payout, randomness, serverSeed, clientSeed, blockHash, nonce, resultData, ev) => {
-        if (BigInt(id) === BigInt(betId)) {
-          this.casino.off("BetSettled", handler);
-          resolve({ id, player, game, won, payout, randomness, serverSeed, clientSeed, blockHash, nonce, resultData, txHash: ev?.log?.transactionHash });
+    const t0 = performance.now();
+    const targetId = BigInt(betId);
+    return new Promise(async (resolve, reject) => {
+      let done = false;
+      let cleanupWs = null;
+      let cleanupHttp = null;
+      const settle = (src, parsed) => {
+        if (done) return;
+        done = true;
+        const dt = (performance.now() - t0).toFixed(0);
+        console.log(`[SDK] waitForSettle resolved via ${src} in ${dt}ms (betId=${betId})`);
+        cleanupWs?.(); cleanupHttp?.();
+        clearTimeout(timer);
+        resolve(parsed);
+      };
+
+      // (a) WS subscription via raw filter — bypasses ethers contract event
+      // polling, pushes from the gateway.
+      try {
+        const { wsProvider } = await import("./rpc.js");
+        const ws = wsProvider();
+        if (ws) {
+          const topic0 = this.casino.interface.getEvent("BetSettled").topicHash;
+          const filter = { address: this.casino.target, topics: [topic0] };
+          const onWsLog = (log) => {
+            try {
+              const p = this.casino.interface.parseLog({ topics: log.topics, data: log.data });
+              if (BigInt(p.args.id ?? p.args.betId ?? p.args[0]) === targetId) {
+                const a = p.args;
+                settle("ws", {
+                  id: a.id ?? a.betId, player: a.player, game: a.game, won: a.won,
+                  payout: a.payout, randomness: a.randomness, serverSeed: a.serverSeed,
+                  clientSeed: a.clientSeed, blockHash: a.blockHash, nonce: a.nonce,
+                  resultData: a.resultData, txHash: log.transactionHash,
+                });
+              }
+            } catch (_) {}
+          };
+          ws.on(filter, onWsLog);
+          cleanupWs = () => { try { ws.off(filter, onWsLog); } catch (_) {} };
+        }
+      } catch (e) { console.warn("[SDK] ws subscribe failed, http only:", e.message); }
+
+      // (b) HTTP-poll fallback (the original path)
+      const httpHandler = (id, player, game, won, payout, randomness, serverSeed, clientSeed, blockHash, nonce, resultData, ev) => {
+        if (BigInt(id) === targetId) {
+          settle("http", { id, player, game, won, payout, randomness, serverSeed, clientSeed, blockHash, nonce, resultData, txHash: ev?.log?.transactionHash });
         }
       };
-      this.casino.on("BetSettled", handler);
-      setTimeout(() => {
-        this.casino.off("BetSettled", handler);
+      this.casino.on("BetSettled", httpHandler);
+      cleanupHttp = () => { try { this.casino.off("BetSettled", httpHandler); } catch (_) {} };
+
+      const timer = setTimeout(() => {
+        if (done) return; done = true;
+        cleanupWs?.(); cleanupHttp?.();
         reject(new Error("settle timeout"));
       }, timeoutMs);
     });

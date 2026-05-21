@@ -127,14 +127,34 @@
         },
 
         onSpinRequest: async (stakeWei) => {
+          // Per-step timing log so you can see exactly where the wait is.
+          // Output looks like:  [sugar] spin total 5234ms  (clamp 87ms · place 1432ms · wait 3520ms · receipt 195ms)
+          const tStart = performance.now();
+          const tag = (label, t0) => `${label} ${(performance.now() - t0).toFixed(0)}ms`;
+
+          const t1 = performance.now();
           const stake = await clampOrToast(stakeWei, 'cluster');
+          const clampMs = performance.now() - t1;
+
+          const t2 = performance.now();
           const placeRes = await SL.placeCluster(Number(stake) / 1e18, false);
+          const placeMs = performance.now() - t2;
+
+          const t3 = performance.now();
           const settled = await SL.waitForSettle(placeRes.betId);
+          const waitMs = performance.now() - t3;
+
+          const t4 = performance.now();
           let chargeEvent = null;
           try {
             const rec = await SL.provider.getTransactionReceipt(settled.txHash);
             chargeEvent = extractChargeMeterEvent(SL.casino, rec?.logs || []);
           } catch (_) {}
+          const receiptMs = performance.now() - t4;
+
+          const totalMs = performance.now() - tStart;
+          console.log(`[sugar] spin total ${totalMs.toFixed(0)}ms  (clamp ${clampMs.toFixed(0)}ms · place ${placeMs.toFixed(0)}ms · wait ${waitMs.toFixed(0)}ms · receipt ${receiptMs.toFixed(0)}ms)`);
+
           return decodeSugarLabResult({ settled, stakeWei: stake, chargeEvent, isBuyBonus: false });
         },
 
