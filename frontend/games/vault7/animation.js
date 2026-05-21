@@ -120,8 +120,17 @@ export class Vault7Animator {
     }
   }
 
-  /** Play one Vault7ResultData: base spin + optional FS chain */
+  /** Play one Vault7ResultData: base spin + optional FS chain.
+   *  Hard guard against being invoked from anywhere other than spin(): if
+   *  no user-initiated spin is in flight, refuse and log a stack trace so
+   *  whatever is calling us can be identified. This is the claude-design
+   *  fix for "reels animate on page load" reports. */
   async play(result) {
+    if (!this._userInitiated) {
+      console.warn('[Vault7] play() called outside of a user-initiated spin — ignored.');
+      console.trace('[Vault7] play() unauthorized call');
+      return;
+    }
     this.stopSpinning();
     this.frameEl.classList.add('spinning');
     this.winCounter.classList.remove('show');

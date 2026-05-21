@@ -115,7 +115,11 @@ export class Vault7Slot {
     this.freeSpinsRemaining = result.freeSpinsTriggered || 0;
     this._updateUI();
 
-    await this.animator.play(result);
+    // Mark this play() as user-initiated. The animator's play() refuses
+    // to run otherwise — protects against rogue callers on mount.
+    this.animator._userInitiated = true;
+    try { await this.animator.play(result); }
+    finally { this.animator._userInitiated = false; }
 
     if (this.mode === 'demo' && result.totalPayout > 0n) this.balance += BigInt(result.totalPayout);
 

@@ -87,8 +87,15 @@ export class SugarAnimator {
 
   // ---------- main: play a full ResultData ----------
   async play(result) {
-    // If the caller started an optimistic shuffle via startSpinning(),
-    // stop it now — play() takes over with the real animation.
+    // Hard guard (per claude-design recommendation): play() must only run
+    // when api.js's spin() asked for it. If anything else calls in — a
+    // stray promise resolution, a stale wallet event, a duplicate
+    // page-script — refuse and log a trace so we can find the caller.
+    if (!this._userInitiated) {
+      console.warn('[SugarSlot] play() called outside of a user-initiated spin — ignored.');
+      console.trace('[SugarSlot] play() unauthorized call');
+      return;
+    }
     this.stopSpinning();
     this.frameEl.classList.add('spinning');
     this.hudEl.classList.remove('show');

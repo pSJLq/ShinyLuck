@@ -168,7 +168,11 @@ export class SugarSlot {
     this.totalFsForBonus = this.freeSpinsRemaining;
     this._updateUI();
 
-    await this.animator.play(result);
+    // Mark this play() as user-initiated so the animator's guard accepts
+    // it. Reset in finally so the guard re-arms for the next iteration.
+    this.animator._userInitiated = true;
+    try { await this.animator.play(result); }
+    finally { this.animator._userInitiated = false; }
 
     // credit (demo only)
     if (this.mode === 'demo' && result.totalPayout > 0n) {
