@@ -195,6 +195,15 @@ export class Vault7Animator {
   /** Animate reels to land on `targetGrid` (column-major: grid[col][row]).
       `scatterCount` triggers anticipation slowdown on later reels. */
   async _spinToGrid(targetGrid, scatterCount = 0) {
+    // Defense-in-depth: even though only play() calls this, refuse if a
+    // user-initiated spin isn't active. Same rationale as the play()
+    // guard — a rogue caller would otherwise wipe strips and visually
+    // animate without any user input.
+    if (!this._userInitiated) {
+      console.warn('[Vault7] _spinToGrid called outside a spin — ignored.');
+      console.trace('[Vault7] _spinToGrid unauthorized call');
+      return;
+    }
     const reels = $$('.reel', this.reelsEl);
     const strips = reels.map(r => $('.reel-strip', r));
     // Wait for a real layout before measuring cellH. Without this, an
