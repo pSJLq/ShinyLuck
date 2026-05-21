@@ -100,10 +100,11 @@ export class SugarAnimator {
     this.frameEl.classList.add('spinning');
     this.hudEl.classList.remove('show');
 
-    // shake & dim before spin — short
+    // shake & dim before spin — kept very short in turbo. Each ms here is
+    // dead time before the first cell drops in.
     $$('.sym', this.root).forEach(s => { s.classList.remove('idle'); s.style.transform = 'scale(.92)'; });
     SFX.startReelLoop();
-    await sleep(this.turbo ? 110 : 200);
+    await sleep(this.turbo ? 50 : 140);
 
     // drop in initial grid
     await this._dropInGrid(result.initialGrid);
@@ -137,10 +138,11 @@ export class SugarAnimator {
 
     // free spins triggered → intro then play each spin's cascades
     if (result.freeSpinsTriggered > 0) {
-      await sleep(500);
+      // Was fixed 500ms regardless of turbo. Turbo-aware now.
+      await sleep(this.turbo ? 200 : 400);
       SFX.bonusTrigger();
       this.hooks.onFsIntro?.(result.freeSpinsTriggered);
-      await sleep(this.turbo ? 1400 : 2400);
+      await sleep(this.turbo ? 1100 : 2200);
       this.activeOrbs.clear();
       this.frameEl.classList.add('bonus-mode');
 
@@ -257,9 +259,11 @@ export class SugarAnimator {
   async _dropInGrid(grid) {
     // remove all existing syms (NOT orbs)
     $$('.sym', this.root).forEach(s => s.remove());
-    const colDelay = this.turbo ? 14 : 26;
-    const rowDelay = this.turbo ? 10 : 18;
-    const dur = this.turbo ? 320 : 460;
+    // Turbo timings tightened: per-cell delays cut by ~30% and drop
+    // duration trimmed. Total dropInGrid in turbo now ~290ms vs ~440ms.
+    const colDelay = this.turbo ? 10 : 22;
+    const rowDelay = this.turbo ? 7 : 16;
+    const dur = this.turbo ? 240 : 400;
     for (let c = 0; c < GRID_SIZE; c++) {
       for (let r = 0; r < GRID_SIZE; r++) {
         const slot = $(`#s-${r}-${c}`, this.root);
@@ -281,7 +285,9 @@ export class SugarAnimator {
   }
 
   async _popCells(cells) {
-    const shakeDur = this.turbo ? 140 : 240;
+    // Tightened: turbo path now 80+120=200ms total (was 140+200=340ms),
+    // shaves ~700ms off a 5-cascade chain.
+    const shakeDur = this.turbo ? 80 : 180;
     cells.forEach(([r, c]) => {
       const slot = $(`#s-${r}-${c}`, this.root);
       const sym = $('.sym', slot);
@@ -298,7 +304,7 @@ export class SugarAnimator {
       this._spawnCoins(slot);
       if (i < 6) SFX.symbolPop(i);
     });
-    await sleep(this.turbo ? 200 : 320);
+    await sleep(this.turbo ? 120 : 240);
     cells.forEach(([r, c]) => {
       const slot = $(`#s-${r}-${c}`, this.root);
       if (slot) $$('.sym', slot).forEach(e => e.remove());
@@ -306,7 +312,8 @@ export class SugarAnimator {
   }
 
   async _tumbleTo(beforeGrid, afterGrid) {
-    const dur = this.turbo ? 180 : 320;
+    // Tightened: 130ms turbo (was 180), shaves another ~250ms on 5 chains.
+    const dur = this.turbo ? 130 : 280;
     const removedSet = new Set();
     for (let r = 0; r < GRID_SIZE; r++) for (let c = 0; c < GRID_SIZE; c++) {
       const slot = $(`#s-${r}-${c}`, this.root);

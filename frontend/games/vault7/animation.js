@@ -49,6 +49,12 @@ export class Vault7Animator {
       reel.className = 'reel'; reel.dataset.col = c;
       const strip = document.createElement('div');
       strip.className = 'reel-strip'; strip.dataset.col = c;
+      // Belt-and-suspenders: explicitly pin the strip at translateY(0) with
+      // no transition. If any prior session's CSS or animation engine
+      // somehow leaks a translate value into the new instance, this resets
+      // it before the first paint.
+      strip.style.transform = 'translateY(0)';
+      strip.style.transition = 'none';
       const initSeq = [
         ['DIAM','BOLT','A'],
         ['CRYS','COIN','F'],
