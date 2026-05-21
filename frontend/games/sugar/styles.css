@@ -250,12 +250,12 @@ body {
 /* 7x7 grid */
 .grid {
   position:relative; display:grid;
-  grid-template-columns: repeat(7,1fr); grid-template-rows: repeat(7,1fr);
+  /* Same fix as vault7's .reels — `1fr` is `minmax(auto, 1fr)` which lets
+     one column's content steal width from the others. `minmax(0, 1fr)`
+     guarantees every column/row is exactly its 1fr share. */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-rows: repeat(7, minmax(0, 1fr));
   gap:6px; aspect-ratio:1/1; max-width:700px; margin:0 auto;
-  /* Safety: if a parent briefly has 0 width during hydration, aspect-ratio
-     would collapse the grid to 0×0 and the symbol drop-in math (which uses
-     slot.clientHeight) would produce nonsense positions. Floor the grid
-     so cells never go missing. */
   min-height: 480px; min-width: 480px;
 }
 .slot {

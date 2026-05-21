@@ -160,16 +160,28 @@ body { font-family: var(--mono); color: var(--ink-0); background: var(--bg-0); m
 .reels-frame.spinning .glow-rim { opacity:.55; }
 
 .reels {
-  position:relative; display:grid; grid-template-columns: repeat(5, 1fr);
+  position:relative; display:grid;
+  /* CRITICAL: `repeat(5, 1fr)` is implicitly `minmax(auto, 1fr)`. With
+     the responsive `font-size: clamp(36px, 4.2vw, 64px)` on .cell, one
+     column's content can demand more than its 1fr share — the grid
+     accommodates by stealing width from the other columns until they
+     collapse to ~0. Result: only one column shows cells, the rest look
+     empty. `minmax(0, 1fr)` forces every column to its exact 1fr share
+     regardless of content size. This was the visible "only middle
+     column has cells" bug. */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap:6px; max-width:760px; margin:0 auto;
-  /* min-height as a safety net: if any ancestor is briefly 0×0 during
-     mount/hydration, _sizeReels would set cells to height:0 and the grid
-     would visually collapse (the user reported cells "flying out"). The
-     min-height keeps the reel frame at a usable size while
-     ResizeObserver + the rAF-deferred _sizeReels catch up. */
   min-height: 360px;
 }
-.reel { position:relative; overflow:hidden; border-radius:4px; background: linear-gradient(180deg, #0a0c12, #07090f); border:1px solid rgba(255,255,255,.04); min-height: 110px; }
+.reel {
+  position:relative; overflow:hidden; border-radius:4px;
+  background: linear-gradient(180deg, #0a0c12, #07090f);
+  border:1px solid rgba(255,255,255,.04);
+  min-height: 110px;
+  /* Belt-and-suspenders: prevent the cell content from forcing the
+     grid item to grow beyond its allotted 1fr. */
+  min-width: 0;
+}
 .reel.anticipating { filter: drop-shadow(0 0 14px rgba(255,210,85,.5)); }
 .reel.anticipating::after { content:""; position:absolute; inset:0; background: radial-gradient(circle at 50% 50%, rgba(255,210,85,.18), transparent 70%); pointer-events:none; animation: anticipate-pulse .5s ease-in-out infinite; }
 @keyframes anticipate-pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
