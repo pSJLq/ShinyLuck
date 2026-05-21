@@ -66,7 +66,16 @@ const server = http.createServer((req, res) => {
     const ext = path.extname(filePath).toLowerCase();
     res.statusCode = 200;
     res.setHeader("content-type", MIME[ext] || "application/octet-stream");
-    res.setHeader("cache-control", "no-cache");
+    // FORCE no-store on JS/CSS/HTML — browsers were serving stale
+    // animation.js even after the user did Ctrl+Shift+R. `no-cache` only
+    // asks the browser to revalidate; `no-store` forbids storage entirely.
+    if (ext === ".js" || ext === ".mjs" || ext === ".css" || ext === ".html") {
+      res.setHeader("cache-control", "no-store, no-cache, must-revalidate, max-age=0");
+      res.setHeader("pragma", "no-cache");
+      res.setHeader("expires", "0");
+    } else {
+      res.setHeader("cache-control", "no-cache");
+    }
     console.log(`[${ts}] 200  ${req.method} ${parsed.pathname}  (${body.length} B)`);
     res.end(body);
   });
