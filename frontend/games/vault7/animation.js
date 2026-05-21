@@ -68,6 +68,16 @@ export class Vault7Animator {
     const reels = $$('.reel', this.reelsEl);
     if (!reels.length) return;
     const w = reels[0].clientWidth;
+    // GUARD (per claude-design diagnosis): if the container hasn't been
+    // laid out yet, w is 0, cells get height: 0, and the entire grid
+    // collapses. We retry on the next rAF tick until the container has
+    // a real size. ResizeObserver picks up any subsequent change.
+    if (w < 10) {
+      if (this._pendingSize) return;
+      this._pendingSize = true;
+      requestAnimationFrame(() => { this._pendingSize = false; this._sizeReels(); });
+      return;
+    }
     const cellH = Math.round(w);
     for (const r of reels) {
       r.style.height = (cellH * 3) + 'px';
@@ -195,7 +205,17 @@ export class Vault7Animator {
   async _spinToGrid(targetGrid, scatterCount = 0) {
     const reels = $$('.reel', this.reelsEl);
     const strips = reels.map(r => $('.reel-strip', r));
-    const cellH = reels[0].clientWidth;
+    // Wait for a real layout before measuring cellH. Without this, an
+    // unlucky early call sets cell heights to 0 and the entire grid
+    // disappears for the rest of the session.
+    let cellH = reels[0].clientWidth;
+    if (cellH < 10) {
+      this._sizeReels();
+      // give the browser one frame to reflow
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      cellH = reels[0].clientWidth;
+      if (cellH < 10) cellH = 80; // last-resort fallback so the math doesn't NaN
+    }
     const SCROLL = 24;
     for (let c = 0; c < COLS; c++) {
       const strip = strips[c];

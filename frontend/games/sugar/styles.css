@@ -252,6 +252,11 @@ body {
   position:relative; display:grid;
   grid-template-columns: repeat(7,1fr); grid-template-rows: repeat(7,1fr);
   gap:6px; aspect-ratio:1/1; max-width:700px; margin:0 auto;
+  /* Safety: if a parent briefly has 0 width during hydration, aspect-ratio
+     would collapse the grid to 0×0 and the symbol drop-in math (which uses
+     slot.clientHeight) would produce nonsense positions. Floor the grid
+     so cells never go missing. */
+  min-height: 480px; min-width: 480px;
 }
 .slot {
   position:relative; border-radius:8px;
