@@ -101,39 +101,22 @@ export class Vault7Animator {
 
   setTurbo(v) { this.turbo = !!v; }
 
-  // Optimistic UX. Mirrors sugar/animation.js startSpinning() — we shuffle
-  // the glyphs inside the existing visible cells instead of translating the
-  // strips. Translating the strips was buggy: in the idle state each strip
-  // has only 3 cells filling the .reel viewport exactly, so any vertical
-  // translate exposes the empty area above/below them, leaving holes in the
-  // grid. Glyph-shuffle keeps the 15-cell layout intact and gives the same
-  // "something's happening" feedback while we wait for the on-chain reveal.
+  // Optimistic-spin marker: only flip on .spinning so the rim glow
+  // brightens. Reels stay STILL until _spinToGrid() takes over with the
+  // real reel scroll — user explicitly wants no pre-spin animation. The
+  // glow-rim opacity bump is the only visual cue during the on-chain wait.
   startSpinning() {
     if (!this.frameEl) return;
     this.frameEl.classList.add('spinning');
-    if (this._shuffleTimer) return;
-    const glyphValues = Object.values(SYM_GLYPH);
-    const symEls = $$('.cell .glyph .sym', this.reelsEl);
-    if (!symEls.length) return;
-    // Apply a soft blur to .reel so the swap doesn't look jarring.
-    const reels = $$('.reel', this.reelsEl);
-    for (const r of reels) r.style.filter = 'blur(0.8px)';
-    this._shuffleTimer = setInterval(() => {
-      for (const s of symEls) {
-        s.textContent = glyphValues[Math.floor(Math.random() * glyphValues.length)];
-      }
-    }, 80);
   }
   stopSpinning() {
-    if (this._shuffleTimer) { clearInterval(this._shuffleTimer); this._shuffleTimer = null; }
-    // Clear the visual side-effects so a spin that aborts (e.g. contract
-    // revert) doesn't leave the reels blurred. play(result) will replace
-    // the symbols anyway on success; on failure this restores idle state.
+    // Clear any blur/transform that might have been applied by an older
+    // build still cached in someone's browser. No-op for fresh loads.
     const reels = $$('.reel', this.reelsEl);
     for (const r of reels) {
-      r.style.filter = '';
+      if (r.style.filter) r.style.filter = '';
       const strip = $('.reel-strip', r);
-      if (strip) strip.style.transform = '';
+      if (strip && strip.style.transform) strip.style.transform = '';
     }
   }
 

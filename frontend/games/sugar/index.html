@@ -12,12 +12,12 @@
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/games/sugar/styles.css">
 <style>
-  /* Keep the shared custom cursor (user wants it consistent across pages).
-     To prevent it from visibly lagging behind the mouse, we kill the
-     heaviest in-slot CSS animations: the ambient orbs (4 large blurred
-     gradients with continuous keyframe motion) and the marquee scroll
-     ticker. These are pure decoration; removing them frees the main
-     thread for the cursor's RAF and the cascade animation. */
+  /* Use native OS cursor on slot pages — the shared custom cursor's
+     trailing ring can lag behind the cascade animation on lower-end
+     hardware. Also kill the heaviest decorations (ambient orbs + marquee
+     scroll) for the same reason — they're pure decoration. */
+  html, body { cursor: auto !important; }
+  .cursor-dot, .cursor-ring { display: none !important; }
   .sugar-shell .ambient,
   .sugar-shell .ambient-orb { display: none !important; }
   .sugar-shell .marquee .scroll,

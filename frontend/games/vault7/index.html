@@ -11,8 +11,9 @@
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/games/vault7/styles.css">
 <style>
-  /* Keep the shared custom cursor. Disable the heaviest decoration so it
-     doesn't lag behind the pointer during reel spins. */
+  /* Native cursor on slot pages — same rationale as sugar/index.html. */
+  html, body { cursor: auto !important; }
+  .cursor-dot, .cursor-ring { display: none !important; }
   .vault-shell .ambient,
   .vault-shell .ambient-orb { display: none !important; }
 
