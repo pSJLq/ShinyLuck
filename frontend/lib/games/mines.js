@@ -9,7 +9,7 @@
 //      - mine → MinesBust event, game over
 //   4. Cashout at any time → MinesCashout event with payout.
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect } from "../wallet.js";
 import {
   $, $$, setText, fmtSTTfromString, readStakeStr, injectKeyframes,

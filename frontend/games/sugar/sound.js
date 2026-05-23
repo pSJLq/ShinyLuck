@@ -1,5 +1,5 @@
 /* ============================================================================
- * sugar/sound.js — synthesized audio (Web Audio, no external assets)
+ * sugar/sound.js - synthesized audio (Web Audio, no external assets)
  * ES module. Lazy init on first user gesture.
  * ============================================================================ */
 
@@ -7,6 +7,7 @@ let ctx = null;
 let master = null;
 let enabled = true;
 let inited = false;
+let userGestured = false; // becomes true after first click/keydown
 let reelLoopNodes = null;
 
 function init() {
@@ -21,8 +22,18 @@ function init() {
 }
 function ensure() {
   if (!inited) init();
-  if (ctx && ctx.state === 'suspended') ctx.resume();
-  return inited && enabled;
+  if (!enabled || !inited || !ctx) return false;
+  // CRITICAL: AudioContext.resume() WITHOUT a user gesture spams the
+  // console with `AudioContext was not allowed to start` and silently
+  // stays suspended anyway. Hovers fire many times before the user
+  // clicks anywhere → 14 warnings on page load. Skip until we've seen
+  // an actual gesture. After the first click/keydown we resume once
+  // and stay running.
+  if (ctx.state === 'suspended') {
+    if (!userGestured) return false;
+    ctx.resume().catch(() => {});
+  }
+  return true;
 }
 function tone({ freq=440, type='sine', dur=0.15, vol=0.3, attack=0.005, decay=0.08, sustain=0, release=0.08, detune=0 }) {
   if (!ensure()) return;
@@ -130,5 +141,11 @@ function stopReelLoop() {
   reelLoopNodes = null;
 }
 
-document.addEventListener('click', () => init(), { once: true });
-document.addEventListener('keydown', () => init(), { once: true });
+function onFirstGesture() {
+  userGestured = true;
+  init();
+  if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+}
+document.addEventListener('click',       onFirstGesture, { once: true });
+document.addEventListener('keydown',     onFirstGesture, { once: true });
+document.addEventListener('pointerdown', onFirstGesture, { once: true });

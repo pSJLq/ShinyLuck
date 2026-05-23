@@ -1,4 +1,4 @@
-// One-off diagnostic — bankroll + balances + bet state.
+// One-off diagnostic - bankroll + balances + bet state.
 const { ethers } = require("ethers");
 const fs = require("fs");
 require("dotenv").config();

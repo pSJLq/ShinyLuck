@@ -1,4 +1,4 @@
-// docs.html — client-side fuzzy search over <h1>/<h2>/<h3> + their first
+// docs.html - client-side fuzzy search over <h1>/<h2>/<h3> + their first
 // paragraph. Cmd+K / Ctrl+K focuses the input; Esc clears.
 //
 // Indexing strategy:

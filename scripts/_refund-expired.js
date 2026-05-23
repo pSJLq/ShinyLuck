@@ -2,7 +2,7 @@
 // whose commitBlock fell out of BLOCKHASH_WINDOW (256 blocks ≈ 5 min).
 // Recovers the lockedReserve they were holding back into freeBankroll.
 //
-// Use after a long stretch where reveal-bot was down — those bets can never
+// Use after a long stretch where reveal-bot was down - those bets can never
 // settle (the EVM no longer has the blockhash to verify the seed), they're
 // just sitting on the casino books burning bankroll.
 const { ethers } = require("hardhat");
@@ -40,7 +40,7 @@ async function main() {
   }
   console.log(`[refund] expired-unsettled candidates: ${candidates.length}`);
   if (candidates.length === 0) {
-    console.log(`[refund] nothing to do — either all settled, or the expired window doesn't apply.`);
+    console.log(`[refund] nothing to do - either all settled, or the expired window doesn't apply.`);
     return;
   }
   const totalAmt = candidates.reduce((a, c) => a + BigInt(c.amount), 0n);

@@ -143,6 +143,13 @@ function AuthBridge() {
     const embeddedWallet = (Array.isArray(wallets)
       && wallets.find((w) => w?.walletClientType === 'privy')) || null;
 
+    // Cache the EIP-1193 provider across sendTransaction calls. The first
+    // `getEthereumProvider()` may lazily initialise iframe channels —
+    // subsequent calls should reuse the same object. We re-fetch on demand
+    // if the cache is stale (wallet remount, address rotation).
+    let cachedEip1193 = null;
+    let cachedEip1193ForAddr = null;
+
     const api = {
       ready: true,
       authenticated,
@@ -154,6 +161,50 @@ function AuthBridge() {
       login: () => loginRef.current(),
       logout: () => logoutRef.current(),
 
+      // FASTEST PATH: sign in Privy iframe via eth_signTransaction (returns
+      // raw signed tx hex), then caller broadcasts via our own RPC. Skips
+      // Privy's backend broadcast which adds 300-500ms.
+      //
+      // IMPORTANT: Privy embedded wallet's eth_signTransaction does NOT
+      // populate nonce/gas/fees — caller MUST provide them populated.
+      // Privy ALSO defaults to EIP-1559 (type-2) tx shape, so `gasPrice`
+      // alone gets silently dropped; you must pass `maxFeePerGas` +
+      // `maxPriorityFeePerGas`. Confirmed by RLP-decoding the rejected
+      // signed tx — gasPrice was zero on the wire.
+      signTransaction: async (tx) => {
+        if (!address) throw new Error('Privy: not logged in (no embedded wallet)');
+        if (!embeddedWallet || typeof embeddedWallet.getEthereumProvider !== 'function') {
+          throw new Error('Privy embedded wallet missing getEthereumProvider');
+        }
+        if (tx.nonce == null || tx.gas == null
+            || (tx.maxFeePerGas == null && tx.gasPrice == null)) {
+          throw new Error('signTransaction requires populated {nonce, gas, maxFeePerGas (or gasPrice)}');
+        }
+        let eip1193 = cachedEip1193;
+        if (!eip1193 || cachedEip1193ForAddr !== address) {
+          eip1193 = await embeddedWallet.getEthereumProvider();
+          cachedEip1193 = eip1193;
+          cachedEip1193ForAddr = address;
+        }
+        const params = [{
+          from: address,
+          to: tx.to,
+          value: tx.value != null ? '0x' + BigInt(tx.value).toString(16) : '0x0',
+          data: tx.data || '0x',
+          nonce: '0x' + BigInt(tx.nonce).toString(16),
+          gas: '0x' + BigInt(tx.gas).toString(16),
+          ...(tx.maxFeePerGas != null
+            ? {
+                maxFeePerGas: '0x' + BigInt(tx.maxFeePerGas).toString(16),
+                maxPriorityFeePerGas: '0x' + BigInt(tx.maxPriorityFeePerGas ?? tx.maxFeePerGas).toString(16),
+              }
+            : { gasPrice: '0x' + BigInt(tx.gasPrice).toString(16) }),
+        }];
+        // Result is the raw signed tx (hex string starting 0x) per EIP-1474.
+        const raw = await eip1193.request({ method: 'eth_signTransaction', params });
+        return raw;
+      },
+
       // FAST PATH: sign via embedded wallet's EIP-1193 provider, broadcast
       // ourselves. Falls back to the React-hook path on any error.
       sendTransaction: async (tx) => {
@@ -161,7 +212,15 @@ function AuthBridge() {
         // Try the fast EIP-1193 path first.
         if (embeddedWallet && typeof embeddedWallet.getEthereumProvider === 'function') {
           try {
-            const eip1193 = await embeddedWallet.getEthereumProvider();
+            // Reuse the EIP-1193 provider across spins — the first call
+            // sometimes pays for iframe-channel setup. Re-fetch only if the
+            // user's address rotated (rare; happens on re-login).
+            let eip1193 = cachedEip1193;
+            if (!eip1193 || cachedEip1193ForAddr !== address) {
+              eip1193 = await embeddedWallet.getEthereumProvider();
+              cachedEip1193 = eip1193;
+              cachedEip1193ForAddr = address;
+            }
             const params = [{
               from: address,
               to: tx.to,
@@ -171,6 +230,9 @@ function AuthBridge() {
             const hash = await eip1193.request({ method: 'eth_sendTransaction', params });
             return { hash };
           } catch (e) {
+            // Drop the cache on any error so the next attempt re-initialises.
+            cachedEip1193 = null;
+            cachedEip1193ForAddr = null;
             // If the fast path errors (rare — invalid params, gateway issue)
             // fall through to the React hook so we don't lose the user's bet.
             console.warn('[privy] eip1193 fast send failed, falling back:', e?.message || e);

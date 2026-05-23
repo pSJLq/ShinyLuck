@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ShinyLuck — The house is an AI Agent</title>
+<title>ShinyLuck - The house is an AI Agent</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -12,6 +12,7 @@
 <script src="vendor/privy.bundle.js"></script>
 <script type="module" src="lib/wallet.js"></script>
 <script type="module" src="lib/livedata.js"></script>
+<script type="module" src="lib/agent-activity.js"></script>
 </head>
 <body data-active-page="games">
 <div data-page-shell>
@@ -24,32 +25,32 @@
   <div class="hero-inner">
     <div class="eyebrow">
       <span class="dot-blink"></span>
-      <span>SOMNIA · BLOCK <span data-sl="blockNumber">—</span> · <span data-sl="finality">—</span> FINALITY</span>
+      <span>SOMNIA · BLOCK <span data-sl="blockNumber">-</span> · <span data-sl="finality">-</span> FINALITY</span>
     </div>
     <h1>The <span class="underline">house</span> is an<br>
       <span class="accent">AI Agent.</span>
     </h1>
     <p>Six provably fair games. Four autonomous agents settling every bet on-chain in real time.
-      No pit boss, no closed RNG, no excuses — just deterministic consensus across Somnia's agent registry.</p>
+      No pit boss, no closed RNG, no excuses - just deterministic consensus across Somnia's agent registry.</p>
     <div class="hero-cta">
       <button class="btn btn-primary" data-hover data-sl-enter-lobby>Enter Lobby →</button>
       <a class="btn btn-ghost" data-hover href="docs.html" data-link>Read Whitepaper</a>
       <div class="ticker">
         <span class="label">CASINO</span>
-        <span class="value mono"><span data-sl-contract="casino">—</span></span>
+        <span class="value mono"><span data-sl-contract="casino">-</span></span>
       </div>
     </div>
 
     <div class="stat-row" data-reveal>
       <div class="stat">
         <div class="label"><span>BANKROLL</span><span>STT</span></div>
-        <div class="value mono"><span data-sl="bankroll" data-count="42718304" data-sl-role="bankroll" data-prefix="">— STT</span></div>
+        <div class="value mono"><span data-sl="bankroll" data-count="42718304" data-sl-role="bankroll" data-prefix="">- STT</span></div>
         <div class="delta">free of locked reserves</div>
         <span class="stat-corner"></span>
       </div>
       <div class="stat">
         <div class="label"><span>BONUS MODE</span><span>HOUSE EDGE × 0.5</span></div>
-        <div class="value mono"><span data-sl="bonusMode">—</span></div>
+        <div class="value mono"><span data-sl="bonusMode">-</span></div>
         <div class="delta">activated by HM agent</div>
         <span class="stat-corner"></span>
       </div>
@@ -167,7 +168,7 @@
           <div class="game-desc">5 reels, 20 paylines. Wilds substitute, scatters drop free spins. Loyalty: 150 spins → +5 free.</div>
           <div class="agent-pill"><span class="dot purple"></span> POWERED · LLM Inference Agent</div>
           <div class="game-meta">
-            <div class="game-meta-item">RTP<b class="cyan">92.00%</b></div>
+            <div class="game-meta-item">RTP<b class="cyan" data-sl="rtp" data-game="slots">…</b></div>
             <div class="game-meta-item">Max Bet<b data-sl="maxBet" data-game="slots">5 STT</b></div>
             <div class="game-meta-item">Max Win<b>2 000×</b></div>
           </div>
@@ -239,7 +240,7 @@
           <div class="game-desc">7×7 cluster cascade. 5+ touching symbols detonate, gravity refills, chain forever.</div>
           <div class="agent-pill"><span class="dot purple"></span> POWERED · LLM Inference Agent</div>
           <div class="game-meta">
-            <div class="game-meta-item">RTP<b class="cyan">92.00%</b></div>
+            <div class="game-meta-item">RTP<b class="cyan" data-sl="rtp" data-game="cluster">…</b></div>
             <div class="game-meta-item">Max Bet<b data-sl="maxBet" data-game="cluster">5 STT</b></div>
             <div class="game-meta-item">Max Win<b>2 500×</b></div>
           </div>
@@ -368,7 +369,7 @@
             <div class="game-title">Mines</div>
             <div class="game-num">// 05</div>
           </div>
-          <div class="game-desc">Pick gems, dodge bombs. Cash out anytime — every safe tile compounds the multiplier.</div>
+          <div class="game-desc">Pick gems, dodge bombs. Cash out anytime - every safe tile compounds the multiplier.</div>
           <div class="agent-pill"><span class="dot red"></span> POWERED · House Manager Agent</div>
           <div class="game-meta">
             <div class="game-meta-item">House Edge<b class="cyan" data-sl="houseEdge" data-game="mines">1.20 %</b></div>
@@ -382,7 +383,7 @@
       <!-- ===== ROULETTE ===== -->
       <a class="game" href="games/roulette.html" data-link data-hover>
         <div class="game-preview-wrap">
-          <span class="game-corner-tag">EUROPEAN · 0–36</span>
+          <span class="game-corner-tag">EUROPEAN · 0-36</span>
           <div class="roulette-stage">
             <svg viewBox="0 0 200 200" width="180" height="180" class="roulette-wheel">
               <defs>
@@ -464,8 +465,8 @@
     <div class="feed-head">
       <span class="live-pill"><span class="dot"></span> LIVE</span>
       <span class="feed-count">games settled · <span data-sl="totalBets">0</span></span>
-      <span class="feed-count" style="margin-left: 16px;">bonus mode · <b data-sl="bonusMode" style="color:var(--cyan);">—</b></span>
-      <span class="feed-count" style="margin-left: 16px;">bankroll · <b data-sl="bankroll">—</b></span>
+      <span class="feed-count" style="margin-left: 16px;">bonus mode · <b data-sl="bonusMode" style="color:var(--cyan);">-</b></span>
+      <span class="feed-count" style="margin-left: 16px;">bankroll · <b data-sl="bankroll">-</b></span>
       <a href="leaderboard.html" data-link style="margin-left:auto; color: var(--cyan); font-size: 11px; letter-spacing: 2px; text-transform: uppercase;">Open leaderboard →</a>
     </div>
     <table class="feed-table">
@@ -498,7 +499,7 @@
           <span class="agent-dot cyan"></span>
           <h3>JSON API Agent</h3>
         </div>
-        <div class="agent-id">ID: <b data-sl-agent-id="json">—</b></div>
+        <div class="agent-id">ID: <b data-sl-agent-id="json">-</b></div>
         <p class="agent-desc">Fetches JSON from public API endpoints and extracts specific values. Available on Somnia Agent Platform; not in the money path.</p>
         <div class="chips">
           <span class="chip">oracle</span>
@@ -519,7 +520,7 @@
           <span class="agent-dot purple"></span>
           <h3>LLM Inference Agent</h3>
         </div>
-        <div class="agent-id">ID: <b data-sl-agent-id="llm">—</b></div>
+        <div class="agent-id">ID: <b data-sl-agent-id="llm">-</b></div>
         <p class="agent-desc">String-in, string-out inference. Used by AgentQuorumVerifier as a redundancy check (3-of-4 signers re-derive randomness). Slot themes & HM reasoning narration also flow through here.</p>
         <div class="chips">
           <span class="chip">qwen3-30b</span>
@@ -540,7 +541,7 @@
           <span class="agent-dot amber"></span>
           <h3>Parse Website Agent</h3>
         </div>
-        <div class="agent-id">ID: <b data-sl-agent-id="parse">—</b></div>
+        <div class="agent-id">ID: <b data-sl-agent-id="parse">-</b></div>
         <p class="agent-desc">Scrapes URLs/domains and extracts structured data. Reserved for v2 (external tournament leaderboards). Not yet wired into v1 contracts.</p>
         <div class="chips">
           <span class="chip">scraping</span>
@@ -560,7 +561,7 @@
           <span class="agent-dot red"></span>
           <h3>House Manager Agent <span class="badge-mainnet" style="margin-left:8px; color:var(--red); border-color:var(--red)">AUTONOMOUS</span></h3>
         </div>
-        <div class="agent-id">ID: <b data-sl-agent-id="hm">—</b></div>
+        <div class="agent-id">ID: <b data-sl-agent-id="hm">-</b></div>
         <p class="agent-desc">Rebalances bankroll, sizes max bets, activates Bonus Mode, and triggers circuit breakers when variance exceeds tolerance. Writes reasoning logs on-chain.</p>
         <div class="chips">
           <span class="chip">treasury</span>
@@ -568,9 +569,9 @@
           <span class="chip">circuit-breaker</span>
         </div>
         <div class="agent-stats" data-sl-agent-stats="hm">
-          <div class="agent-stat"><div class="l">Reasoning logs / 24h</div><div class="v" style="color:var(--red)">—</div></div>
-          <div class="agent-stat"><div class="l">Bonus mode</div><div class="v" data-sl="bonusMode">—</div></div>
-          <div class="agent-stat"><div class="l">Bankroll</div><div class="v" data-sl="bankroll">—</div></div>
+          <div class="agent-stat"><div class="l">Reasoning logs / 24h</div><div class="v" style="color:var(--red)">-</div></div>
+          <div class="agent-stat"><div class="l">Bonus mode</div><div class="v" data-sl="bonusMode">-</div></div>
+          <div class="agent-stat"><div class="l">Bankroll</div><div class="v" data-sl="bankroll">-</div></div>
         </div>
         <div class="agent-bar" style="color: var(--red)"></div>
       </div>
@@ -578,7 +579,7 @@
   </div>
 </section>
 
-<!-- Legacy inline Provably-Fair section removed — see fair.html for the
+<!-- Legacy inline Provably-Fair section removed - see fair.html for the
      full live receipt + browser-side verifier. -->
 
 </div> <!-- end data-page-shell -->

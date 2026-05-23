@@ -1,4 +1,4 @@
-// account.html — supports two modes:
+// account.html - supports two modes:
 //   - owner mode  (no ?address param, or ?address matches connected wallet)
 //                  → full UI: claim button, deposits/withdrawals from own events,
 //                    write-capable actions
@@ -12,7 +12,7 @@
 // with early-exit at the requested row count; cold start is < 3s on a fresh
 // page load when the cache is warm.
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect, shortAddr } from "./wallet.js";
 import { CONFIG } from "./config.js";
 import { provider, fetchLogs, fetchRecentLogs, fetchDeploymentBlock } from "./rpc.js";
@@ -21,7 +21,13 @@ import "./ui.js"; // side-effect: injects `.sl-styled-input` + toast/modal CSS
 const GAME_NAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.LAB"];
 const ZERO = "0x0000000000000000000000000000000000000000";
 // 20k blocks ≈ 7 hours on Somnia. Was 200k → cold-start scan took 30s+.
-const LOOKBACK = 20_000;
+// Scan the FULL history since deployment. With fetchLogs now doing 8
+// parallel chunk fetches, even 700K+ blocks complete in 3-5s. Account
+// page shows the user's entire on-chain footprint, not just a window.
+// (account.js's refresh clamps to max(deploymentBlock, head-LOOKBACK),
+// so we set the lookback above any realistic deploy age; clamp picks
+// deploymentBlock and scans from there.)
+const LOOKBACK = 10_000_000;
 const EXPLORER = "https://shannon-explorer.somnia.network";
 
 let viewAddress = null;          // address being viewed (may differ from SL.address)
@@ -146,12 +152,12 @@ function bindMode() {
     if (share) share.href = `${location.origin}/u/${viewAddress}`;
     const crumb = $("[data-sl-acc-crumb]");
     if (crumb) crumb.textContent = isReadOnly ? `Profile · ${viewAddress.slice(0,6)}…${viewAddress.slice(-4)}` : "Account";
-    // (pretty /u/<addr> URLs require server-side rewrite — temporarily off
+    // (pretty /u/<addr> URLs require server-side rewrite - temporarily off
     // until we self-host with nginx or run a small router; keep the
     // canonical /account.html?address=… form for now.)
   } else {
     $("[data-sl-acc-addr-short]").textContent = "connect wallet";
-    $("[data-sl-acc-addr-full]").textContent = "—";
+    $("[data-sl-acc-addr-full]").textContent = "-";
   }
 }
 
@@ -159,21 +165,70 @@ function bindMode() {
 // Contract handle
 // ---------------------------------------------------------------------------
 
+const CASINO_ABI = [
+  "function pendingWithdrawals(address) view returns (uint256)",
+  "function getPlayerBets(address) view returns (uint256[])",
+  "function getBet(uint256) view returns (tuple(address player,uint96 amount,uint8 game,uint8 status,uint64 commitBlock,uint64 nonce,uint256 seedIdx,bytes32 clientSeed,bytes params,bytes32 randomness,uint128 payout,bool won))",
+  "event BetPlaced(uint256 indexed betId,address indexed player,uint8 indexed game,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
+  "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
+  "event WithdrawalClaimed(address indexed player,uint256 amount)",
+  "event WithdrawalCredited(address indexed player,uint256 amount)",
+  "event BankrollDeposited(address indexed from,uint256 amount)",
+];
+
 let _casino = null;
 function casinoRO() {
   if (!_casino) {
-    _casino = new ethers.Contract(CONFIG.casino, [
-      "function pendingWithdrawals(address) view returns (uint256)",
-      "function getPlayerBets(address) view returns (uint256[])",
-      "function getBet(uint256) view returns (tuple(address player,uint96 amount,uint8 game,uint8 status,uint64 commitBlock,uint64 nonce,uint256 seedIdx,bytes32 clientSeed,bytes params,bytes32 randomness,uint128 payout,bool won))",
-      "event BetPlaced(uint256 indexed betId,address indexed player,uint8 indexed game,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
-      "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
-      "event WithdrawalClaimed(address indexed player,uint256 amount)",
-      "event WithdrawalCredited(address indexed player,uint256 amount)",
-      "event BankrollDeposited(address indexed from,uint256 amount)",
-    ], provider());
+    _casino = new ethers.Contract(CONFIG.casino, CASINO_ABI, provider());
   }
   return _casino;
+}
+
+let _historicalCasinos = null;
+
+// In-memory cache for historical-event reads. Keyed by `${address}::${event}`.
+// Frozen casino events (any contract that is NOT the current one) get cached
+// for the whole session - they can't change. The current casino's events
+// always refetch so new bets appear on the next 15 s tick.
+const _historyCache = new Map();
+function _historyFetch(entry, eventName, from, to) {
+  if (!entry.isCurrent) {
+    const key = `${entry.contract.target}::${eventName}`;
+    const cached = _historyCache.get(key);
+    if (cached) return cached;
+    const p = fetchLogs(entry.contract, eventName, from, to);
+    _historyCache.set(key, p);
+    // If the fetch rejects, drop the cached promise so a later refresh can retry.
+    p.catch(() => _historyCache.delete(key));
+    return p;
+  }
+  return fetchLogs(entry.contract, eventName, from, to);
+}
+/// Build read-only Contract handles for every historical casino deployment,
+/// sorted oldest → newest. Account aggregates events across all of them so
+/// users see their full lifetime history (not just since the latest redeploy).
+function historicalCasinos() {
+  if (_historicalCasinos) return _historicalCasinos;
+  const list = Array.isArray(CONFIG.historicalCasinos) ? CONFIG.historicalCasinos : [];
+  const seen = new Set();
+  const withCurrent = [...list];
+  if (CONFIG.casino && !list.some((e) => e.address.toLowerCase() === CONFIG.casino.toLowerCase())) {
+    withCurrent.push({ address: CONFIG.casino, deploymentBlock: 0 });
+  }
+  const out = [];
+  for (const entry of withCurrent) {
+    const lower = entry.address.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    out.push({
+      contract: new ethers.Contract(entry.address, CASINO_ABI, provider()),
+      deploymentBlock: entry.deploymentBlock || 0,
+      isCurrent: lower === (CONFIG.casino || "").toLowerCase(),
+    });
+  }
+  out.sort((a, b) => a.deploymentBlock - b.deploymentBlock);
+  _historicalCasinos = out;
+  return _historicalCasinos;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +241,7 @@ function renderTopline(nativeBal, pending, pnl, betCount) {
   const pnlEl = $("[data-sl-acc-pnl]");
   pnlEl.textContent = (pnl >= 0n ? "+ " : "− ") + fmtSTT(pnl < 0n ? -pnl : pnl) + " STT";
   pnlEl.style.color = pnl >= 0n ? "var(--green)" : "var(--red)";
-  $("[data-sl-acc-bets]").textContent = `${betCount} bets · last ${LOOKBACK} blocks`;
+  $("[data-sl-acc-bets]").textContent = `${betCount} bets · all-time`;
 }
 
 async function buildPnLChart(settled, stakeByBet) {
@@ -196,7 +251,7 @@ async function buildPnLChart(settled, stakeByBet) {
   const nowSec = Math.floor(Date.now() / 1000);
   const cutoff = nowSec - 30 * 86400;
   const byDay = new Map();
-  // bulk-fetch block timestamps via batch (sequential — provider doesn't
+  // bulk-fetch block timestamps via batch (sequential - provider doesn't
   // expose a true batch API, but the events are usually < 100)
   const uniqueBlocks = [...new Set(settled.map((ev) => ev.blockNumber))];
   const tsByBlock = new Map();
@@ -209,7 +264,8 @@ async function buildPnLChart(settled, stakeByBet) {
   for (const ev of settled) {
     const ts = tsByBlock.get(ev.blockNumber);
     if (!ts || ts < cutoff) continue;
-    const stake = BigInt(stakeByBet.get(ev.args.betId.toString()) || 0n);
+    // Same `${addr}::${betId}` key as the refresh() builder uses.
+    const stake = BigInt(stakeByBet.get(`${ev.__addr || ""}::${ev.args.betId.toString()}`) || 0n);
     const delta = ev.args.won ? (BigInt(ev.args.payout) - stake) : -stake;
     const key = dayKey(ts);
     byDay.set(key, (byDay.get(key) || 0n) + delta);
@@ -271,25 +327,32 @@ function renderBetsTab(settled, stakeByBet) {
     if (panel) mountPager(panel, 0, 0, () => {});
     return;
   }
-  // Clamp page to the available range — defensive against stale state.
+  // Clamp page to the available range - defensive against stale state.
   const totalPages = Math.max(1, Math.ceil(settled.length / PAGE_SIZE));
   if (_page.bets >= totalPages) _page.bets = 0;
   const start = _page.bets * PAGE_SIZE;
   const slice = settled.slice(start, start + PAGE_SIZE);
   for (const ev of slice) {
     const game = GAME_NAMES[Number(ev.args.game)] || "?";
-    const stakeWei = BigInt(stakeByBet.get(ev.args.betId.toString()) || 0n);
-    const stake = stakeWei > 0n ? fmtSTT(stakeWei) : "—";
+    const stakeWei = BigInt(stakeByBet.get(`${ev.__addr || ""}::${ev.args.betId.toString()}`) || 0n);
+    const stake = stakeWei > 0n ? fmtSTT(stakeWei) : "-";
     const won = ev.args.won;
     const payout = BigInt(ev.args.payout);
-    let mult = "—";
+    let mult = "-";
     if (stakeWei > 0n && payout > 0n) {
       const x100 = (payout * 100n) / stakeWei;
       mult = (Number(x100) / 100).toFixed(2) + "×";
     }
+    // Net P&L = payout - stake. The contract sets `won=true` whenever
+    // payout > 0, but in cluster/slot games a "win" can still be smaller
+    // than the stake (partial-payout cascade) - that's a net loss for the
+    // player. Show the actual delta + sign instead of a hardcoded
+    // ± stake. Zero-payout (won=false) collapses naturally to −stake.
+    const net = payout - stakeWei;
     let pnlText, pnlColor;
-    if (won) { pnlText = "+ " + fmtSTT(payout - stakeWei); pnlColor = "var(--green)"; }
-    else     { pnlText = "− " + fmtSTT(stakeWei);          pnlColor = "var(--red)"; }
+    if (net > 0n)      { pnlText = "+ " + fmtSTT(net);  pnlColor = "var(--green)"; }
+    else if (net < 0n) { pnlText = "− " + fmtSTT(-net); pnlColor = "var(--red)"; }
+    else               { pnlText = "0";                  pnlColor = "var(--fg-mute)"; }
     const gId = Number(ev.args.game);
     const tr = document.createElement("tr");
     tr.innerHTML =
@@ -312,7 +375,15 @@ function renderEventTable(bodySel, events, valueExtract, pageKey) {
   const panel = body?.closest("[data-sl-acc-tab-panel]");
   body.innerHTML = "";
   if (events.length === 0) {
-    body.innerHTML = `<tr><td class="dim" colspan="3">no events in window</td></tr>`;
+    // Explain what would land here so the user doesn't think the page is
+    // broken. "Deposits" = bankroll contributions (rare); "Withdrawals" =
+    // user-initiated claim() calls on the casino's pending balance.
+    const hint = pageKey === "withdrawals"
+      ? "no withdrawals yet - press <b>Claim</b> on top of this page to withdraw your pending winnings"
+      : pageKey === "deposits"
+      ? "no bankroll contributions from this wallet - this tab shows when you fund the casino bankroll via depositBankroll()"
+      : "no events in window";
+    body.innerHTML = `<tr><td class="dim" colspan="3" style="padding: 18px;">${hint}</td></tr>`;
     if (panel && pageKey) mountPager(panel, 0, 0, () => {});
     return;
   }
@@ -388,32 +459,73 @@ async function refresh() {
   if (CONFIG.casino === ZERO) return;
   const c = casinoRO();
 
-  const dep = await fetchDeploymentBlock();
-  const head = await provider().getBlockNumber();
-  // Clamp to contract age — never scan blocks before deploy.
-  const fromBlock = dep > 0 ? Math.max(dep, head - LOOKBACK) : (head - LOOKBACK);
+  // STEP 1 - instant render of balance + pending (2 RPCs, <300ms).
+  // These are the numbers the user looks at first; everything else
+  // (P&L, bet history) can fill in once the log scan finishes.
+  try {
+    const [nativeBal0, pending0] = await Promise.all([
+      provider().getBalance(viewAddress),
+      c.pendingWithdrawals(viewAddress),
+    ]);
+    $("[data-sl-acc-balance]").textContent = fmtSTT(nativeBal0);
+    $("[data-sl-acc-pending]").textContent = fmtSTT(pending0);
+  } catch (e) { console.warn("[acc] quick-render failed:", e.message); }
 
-  // All reads in parallel.
-  const [nativeBal, pending, placed, settled, claims, deposits] = await Promise.all([
+  const head = await provider().getBlockNumber();
+
+  // STEP 2 - aggregate full history across every historical casino. Each
+  // contract gets one Shannon Explorer call per event-type, scoped to the
+  // (deploymentBlock, next-deploy - 1) range so explorer responses stay
+  // under the 1000-log/page limit and we don't waste calls on empty ranges.
+  //
+  // Why aggregate: 'за всё время' means lifetime, including bets placed on
+  // older deployments. The current-only path showed empty history right
+  // after each redeploy until a new bet landed.
+  const contracts = historicalCasinos();
+  const nextDeployBlock = (i) => (i + 1 < contracts.length ? contracts[i + 1].deploymentBlock - 1 : head);
+
+  const allPlaced = [], allSettled = [], allClaims = [], allDeposits = [];
+  const perContractFetches = [];
+  // Tag fetched events with their source contract address so the BetPlaced →
+  // BetSettled stake lookup can use a `${addr}::${betId}` key (betId space
+  // is per-contract, so cross-contract aggregation collides without this).
+  const tag = (addr) => (evs) => { for (const ev of evs) ev.__addr = addr.toLowerCase(); return evs; };
+  contracts.forEach((entry, i) => {
+    const from = entry.deploymentBlock || 0;
+    const to = nextDeployBlock(i);
+    const addr = entry.contract.target;
+    // Old casinos are frozen - their event lists never change. Cache them
+    // in-memory for the whole session so the 15 s account refresh tick
+    // only re-hits the explorer for the CURRENT contract. Saves ~8 HTTP
+    // requests per refresh on a 3-deployment history.
+    perContractFetches.push(
+      _historyFetch(entry, "BetPlaced",        from, to).then(tag(addr)).then((evs) => allPlaced.push(...evs)).catch(() => {}),
+      _historyFetch(entry, "BetSettled",       from, to).then(tag(addr)).then((evs) => allSettled.push(...evs)).catch(() => {}),
+      _historyFetch(entry, "WithdrawalClaimed",from, to).then(tag(addr)).then((evs) => allClaims.push(...evs)).catch(() => {}),
+      // BankrollDeposited may not exist on the deployed casino (old ABI) -
+      // swallowed by .catch so the panel still renders the rest.
+      _historyFetch(entry, "BankrollDeposited",from, to).then(tag(addr)).then((evs) => allDeposits.push(...evs)).catch(() => {}),
+    );
+  });
+
+  const [nativeBal, pending] = await Promise.all([
     provider().getBalance(viewAddress),
     c.pendingWithdrawals(viewAddress),
-    fetchLogs(c, "BetPlaced",        fromBlock, head),
-    fetchLogs(c, "BetSettled",       fromBlock, head),
-    fetchLogs(c, "WithdrawalClaimed",fromBlock, head),
-    // BankrollDeposited may not exist on the deployed casino (old ABI) —
-    // fetchLogs swallows the topic-mismatch case via its inner try/catch,
-    // so we just get [] in that case rather than throwing.
-    fetchLogs(c, "BankrollDeposited",fromBlock, head).catch(() => []),
+    ...perContractFetches,
   ]);
 
-  const myPlaced = placed.filter((ev) => ev.args.player.toLowerCase() === viewAddress);
-  const mySettled = settled.filter((ev) => ev.args.player.toLowerCase() === viewAddress);
-  const myClaims = claims.filter((ev) => ev.args.player.toLowerCase() === viewAddress);
-  const myDeposits = deposits.filter((ev) => ev.args.from.toLowerCase() === viewAddress);
+  const myPlaced = allPlaced.filter((ev) => ev.args.player.toLowerCase() === viewAddress);
+  const mySettled = allSettled.filter((ev) => ev.args.player.toLowerCase() === viewAddress);
+  const myClaims = allClaims.filter((ev) => ev.args.player.toLowerCase() === viewAddress);
+  const myDeposits = allDeposits.filter((ev) => ev.args.from.toLowerCase() === viewAddress);
   mySettled.sort((a, b) => b.blockNumber - a.blockNumber || b.logIndex - a.logIndex);
 
+  // Stake map keyed by `${contractAddress}::${betId}` - betId space is
+  // per-contract, so without the address prefix bet #100 on the old casino
+  // would silently borrow bet #100's stake from a newer casino.
   const stakeByBet = new Map();
-  for (const ev of myPlaced) stakeByBet.set(ev.args.betId.toString(), ev.args.amount);
+  const stakeKey = (ev) => `${ev.__addr || ""}::${ev.args.betId.toString()}`;
+  for (const ev of myPlaced) stakeByBet.set(stakeKey(ev), ev.args.amount);
 
   // P&L aggregate
   let bets = 0, wins = 0, wagered = 0n, returned = 0n, biggestWin = 0n, streak = 0, longest = 0;
@@ -422,7 +534,7 @@ async function refresh() {
   const chrono = [...mySettled].reverse();
   for (const ev of chrono) {
     bets++;
-    const stake = BigInt(stakeByBet.get(ev.args.betId.toString()) || 0n);
+    const stake = BigInt(stakeByBet.get(stakeKey(ev)) || 0n);
     wagered += stake;
     returned += BigInt(ev.args.payout);
     if (ev.args.won) {
@@ -442,7 +554,7 @@ async function refresh() {
 
   $("[data-sl-acc-stat-bets]").textContent = bets;
   $("[data-sl-acc-stat-wins]").textContent = wins;
-  $("[data-sl-acc-stat-winrate]").textContent = bets > 0 ? ((wins / bets) * 100).toFixed(1) + "%" : "—";
+  $("[data-sl-acc-stat-winrate]").textContent = bets > 0 ? ((wins / bets) * 100).toFixed(1) + "%" : "-";
   $("[data-sl-acc-stat-wagered]").textContent = fmtSTT(wagered) + " STT";
   $("[data-sl-acc-stat-returned]").textContent = fmtSTT(returned) + " STT";
   $("[data-sl-acc-stat-biggestwin]").textContent = "+ " + fmtSTT(biggestWin) + " STT";
@@ -488,8 +600,8 @@ async function refresh() {
         $("[data-sl-acc-agent-daily]").textContent = fmtSTT(perm.spentToday) + " / " + fmtSTT(perm.dailyLimit) + " STT";
       } else {
         $("[data-sl-acc-agent-status]").textContent = "NOT REGISTERED";
-        $("[data-sl-acc-agent-vault]").textContent = "—";
-        $("[data-sl-acc-agent-daily]").textContent = "—";
+        $("[data-sl-acc-agent-vault]").textContent = "-";
+        $("[data-sl-acc-agent-daily]").textContent = "-";
       }
     } catch (e) {
       console.warn("[acc] permission read failed:", e.message);
@@ -500,14 +612,43 @@ async function refresh() {
 document.addEventListener("DOMContentLoaded", () => {
   bindTabs();
   bindMode();
-  // Loading gate: hide page-shell + splash holds until refresh() lands once.
-  document.body.dataset.loading = "1";
-  refresh()
-    .catch((e) => console.warn("[acc] initial refresh:", e.message))
-    .finally(() => {
-      delete document.body.dataset.loading;
-      document.dispatchEvent(new CustomEvent("shinyluck:ready"));
-    });
+  // Page shell is always visible now - refresh() does a quick balance
+  // render in <300ms and the full history fills in progressively.
+
+  // The splash loader should stay visible until ALL the data is in. The
+  // previous version dispatched `shinyluck:ready` from refresh().finally
+  // - but if the user wasn't connected yet, refresh() early-returns
+  // (viewAddress is null) and dashed placeholders flash before the
+  // `shinyluck:connected` event fires + a second refresh() actually
+  // loads the data. Result: splash → dashes → numbers appear ~1-2s later.
+  // Sequence we want instead:
+  //   1. Splash on.
+  //   2. Wait for Privy ready.
+  //   3. If authenticated → run refresh() → dispatch ready when DONE.
+  //   4. If NOT authenticated → dispatch ready immediately (page shows
+  //      "connect wallet" state, no dashes).
+  // Safety timeout 10 s either way so the loader never traps the page.
+  let readyFired = false;
+  const fireReady = () => {
+    if (readyFired) return;
+    readyFired = true;
+    delete document.body.dataset.loading;
+    document.dispatchEvent(new CustomEvent("shinyluck:ready"));
+  };
+  const startInitialLoad = async () => {
+    const auth = window.ShinyLuckAuth;
+    // Address may need a beat to populate after Privy reports ready.
+    let tries = 30; // ~3s
+    while (tries-- > 0 && (!auth || !auth.address)) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (window.ShinyLuckAuth?.address) {
+      try { await refresh(); } catch (e) { console.warn("[acc] initial refresh:", e.message); }
+    }
+    fireReady();
+  };
+  startInitialLoad();
+  setTimeout(fireReady, 10_000); // safety net
   document.addEventListener("shinyluck:connected", () => refresh().catch(() => {}));
 
   $("[data-sl-acc-copy]")?.addEventListener("click", async () => {
@@ -515,7 +656,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const btn = $("[data-sl-acc-copy]");
     if (!text) {
       const { toast } = await import("./ui.js");
-      toast("no address yet — connect a wallet first", { kind: "warn" });
+      toast("no address yet - connect a wallet first", { kind: "warn" });
       return;
     }
     const ok = await copyToClipboard(text);
@@ -525,7 +666,7 @@ document.addEventListener("DOMContentLoaded", () => {
       setTimeout(() => { btn.textContent = old; }, 1500);
     } else {
       const { toast } = await import("./ui.js");
-      toast("Couldn't copy — copy manually: " + text, { kind: "error", ttl: 8000 });
+      toast("Couldn't copy - copy manually: " + text, { kind: "error", ttl: 8000 });
     }
   });
   $("[data-sl-acc-share]")?.addEventListener("click", async (e) => {
@@ -559,7 +700,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Receive / send (only meaningful for your own profile).
   $("[data-sl-acc-copy-receive]")?.addEventListener("click", async () => {
     const addr = $("[data-sl-acc-receive-addr]").textContent;
-    if (!addr || addr === "—") return;
+    if (!addr || addr === "-") return;
     const ok = await copyToClipboard(addr);
     const b = $("[data-sl-acc-copy-receive]");
     if (ok && b) {
@@ -568,7 +709,7 @@ document.addEventListener("DOMContentLoaded", () => {
       setTimeout(() => { b.textContent = old; }, 1500);
     } else if (!ok) {
       const { toast } = await import("./ui.js");
-      toast("Couldn't copy — copy manually: " + addr, { kind: "error", ttl: 8000 });
+      toast("Couldn't copy - copy manually: " + addr, { kind: "error", ttl: 8000 });
     }
   });
 
@@ -598,4 +739,45 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   setInterval(() => { if (viewAddress) refresh().catch(() => {}); }, 15_000);
+
+  // Real-time WS refresh - subscribe to the CURRENT casino's BetSettled +
+  // WithdrawalClaimed + BankrollDeposited events filtered by the viewed
+  // address. Any hit → debounced refresh() so the page updates the moment
+  // the chain confirms, not on the 15s tick.
+  import("./rpc.js").then(({ wsProvider }) => {
+    const ws = wsProvider && wsProvider();
+    if (!ws || !CONFIG.casino || CONFIG.casino === ZERO) return;
+    const c = casinoRO();
+    let debounce = null;
+    const triggerRefresh = () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        debounce = null;
+        if (viewAddress) refresh().catch(() => {});
+      }, 350); // bundle multiple events from the same block
+    };
+    // BetSettled - topic[2] is `player` (indexed). Padded to 32-byte hex.
+    const padAddr = (a) => "0x" + a.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+    const subscribe = (eventName, topicIdx) => {
+      try {
+        const topic0 = c.interface.getEvent(eventName).topicHash;
+        const filter = { address: CONFIG.casino, topics: [topic0] };
+        // We can't pre-bind to viewAddress here because it can change after
+        // mount (user switches wallet) - match in the handler instead.
+        ws.on(filter, (log) => {
+          try {
+            const parsed = c.interface.parseLog(log);
+            const cand = parsed.args.player || parsed.args.from;
+            if (!cand || !viewAddress) return;
+            if (String(cand).toLowerCase() !== viewAddress) return;
+            triggerRefresh();
+          } catch (_) {}
+        });
+      } catch (_) { /* event may not exist on legacy ABI */ }
+    };
+    subscribe("BetSettled");
+    subscribe("WithdrawalClaimed");
+    subscribe("BankrollDeposited");
+    console.log("[acc] WS subs active for", CONFIG.casino);
+  }).catch(() => {});
 });

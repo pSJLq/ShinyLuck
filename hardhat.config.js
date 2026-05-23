@@ -2,7 +2,9 @@ require("@nomicfoundation/hardhat-toolbox");
 require("dotenv").config();
 
 const PRIVATE_KEY = process.env.PRIVATE_KEY || "";
-const RPC_TESTNET = process.env.RPC_TESTNET || "https://dream-rpc.somnia.network";
+// Canonical Somnia infra RPC per emrestay's official examples + somnia-devrel
+// SKILL. The dream-rpc.somnia.network mirror is the public fallback.
+const RPC_TESTNET = process.env.RPC_TESTNET || "https://api.infra.testnet.somnia.network";
 const RPC_MAINNET = process.env.RPC_MAINNET || "";
 
 const accounts = PRIVATE_KEY ? [PRIVATE_KEY] : [];
@@ -22,7 +24,7 @@ module.exports = {
         // SomniaEventHandler from @somnia-chain/reactivity-contracts pins
         // pragma solidity 0.8.30 exactly. HouseManager extends it, so it and
         // the vendored helpers compile with 0.8.30 via the overrides below.
-        // Casino + the rest stay on 0.8.24 — bumping the whole tree to 0.8.30
+        // Casino + the rest stay on 0.8.24 - bumping the whole tree to 0.8.30
         // would shift gas costs across all 125 existing tests.
         version: "0.8.30",
         settings: {
@@ -55,7 +57,7 @@ module.exports = {
       accounts,
       allowUnlimitedContractSize: true,
     },
-    // Somnia Mainnet — раскомментировать перед шагом 19 (final deploy).
+    // Somnia Mainnet - раскомментировать перед шагом 19 (final deploy).
     // somniaMainnet: {
     //   url: process.env.RPC_MAINNET || "https://api.infra.mainnet.somnia.network/",
     //   chainId: 5031,

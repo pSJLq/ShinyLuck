@@ -1,4 +1,4 @@
-// Autonomous House Manager cron — runs alongside the API service. Owns a
+// Autonomous House Manager cron - runs alongside the API service. Owns a
 // distinct hot key (HM_PRIVATE_KEY) registered as the casino's hmAgent so it
 // can call setGameMaxBet, activateBonusMode, pauseGame, recordReasoning,
 // triggerThemeRotation, and provisionSeedHashes.
@@ -11,22 +11,26 @@
 // All decisions are recorded on-chain via recordReasoning(...) for auditability.
 // The reasoning text is a one-line summary; when SOMNIA_LLM_URL is set we POST
 // a prompt to the Somnia LLM Inference Agent for richer narration (free-text
-// from the agent layer is *cosmetic only* — the action itself is deterministic).
+// from the agent layer is *cosmetic only* - the action itself is deterministic).
 //
 // Run:   node hm-cron.js
 //   or:  pm2 start hm-cron.js --name hm-agent
 
-require("dotenv").config();
+const path = require("path");
+// Load .env from this script's directory, not cwd - dev:play runs us from
+// repo root where there's a different .env that doesn't have our keys.
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 const { ethers } = require("ethers");
 const fs = require("fs");
-const path = require("path");
 const crypto = require("crypto");
 
-const RPC = process.env.RPC_URL || "https://dream-rpc.somnia.network";
+// Canonical Somnia infra HTTP endpoint per emrestay's examples - more
+// reliable than the public dream-rpc.somnia.network mirror.
+const RPC = process.env.RPC_URL || "https://api.infra.testnet.somnia.network";
 const HM_KEY = process.env.HM_PRIVATE_KEY || process.env.RELAYER_KEY;
 const HM_ADDR = process.env.HM_ADDRESS;
 const CASINO_ADDR = process.env.CASINO_ADDRESS;
-const LLM_URL = process.env.SOMNIA_LLM_URL; // optional — POST {prompt} → {text}
+const LLM_URL = process.env.SOMNIA_LLM_URL; // optional - POST {prompt} → {text}
 const NETWORK = process.env.NETWORK_NAME || "somniaTestnet";
 
 const TICK_MS = parseInt(process.env.HM_TICK_INTERVAL_MS, 10) || 60 * 1000;
@@ -147,7 +151,7 @@ async function bankrollSwingCheck(state) {
     try {
       const tx = await hm.activateBonusMode(60, reason);
       await tx.wait();
-      console.log(`[hm-cron] activateBonusMode 60 min — reason: ${reason}`);
+      console.log(`[hm-cron] activateBonusMode 60 min - reason: ${reason}`);
     } catch (e) {
       console.warn("[hm-cron] activateBonusMode failed:", e.shortMessage || e.message);
     }
@@ -164,7 +168,7 @@ async function bankrollSwingCheck(state) {
       catch (e) { console.warn(`[hm-cron] pauseGame(${GAMES[g]})`, e.shortMessage || e.message); }
     }
     try { await (await hm.recordReasoning(reason)).wait(); } catch (_) {}
-    console.log(`[hm-cron] paused all games — reason: ${reason}`);
+    console.log(`[hm-cron] paused all games - reason: ${reason}`);
     state.hourStartBankroll = bankroll.toString();
     state.hourStartTs = Date.now();
     saveState(state);
@@ -172,14 +176,14 @@ async function bankrollSwingCheck(state) {
 }
 
 // ---------------------------------------------------------------------------
-// Seed pool refill — most critical job. Casino consumes one hash per bet AND
+// Seed pool refill - most critical job. Casino consumes one hash per bet AND
 // one per round (Crash/Roulette), so a 200-batch evaporates in <1 hour of
 // real play. Without refill, every game starts reverting `NoSeedAvailable`
 // and reveal-bot's "start crash/roulette" calls fail.
 //
 // Layout: we maintain a shared `<network>-pool.json` { idx: seed } so the
 // reveal-bot can hot-read new seeds without restart. The contract's
-// `nextHashIndex` is our cursor — we generate batches and append to the file.
+// `nextHashIndex` is our cursor - we generate batches and append to the file.
 // ---------------------------------------------------------------------------
 
 function genSeed() { return "0x" + crypto.randomBytes(32).toString("hex"); }
@@ -211,7 +215,7 @@ async function refillSeedsIfLow(state) {
     newSeeds.push(s);
     hashes.push(hashSeed(s));
   }
-  // Save seeds to shared pool BEFORE the tx — if the chain accepts but our
+  // Save seeds to shared pool BEFORE the tx - if the chain accepts but our
   // disk write fails, reveal-bot would otherwise reveal with the wrong seed.
   // The contract has 256-block reveal window so we get to retry safely.
   const pool = loadPool();
@@ -263,7 +267,7 @@ async function themeRotation(state) {
 
 async function tick() {
   const state = loadState();
-  // Seed refill is the most important — run it on every tick (every 60s) so
+  // Seed refill is the most important - run it on every tick (every 60s) so
   // the pool never drops below SEED_REFILL_THRESHOLD. The rest only fire on
   // their own cadence.
   await refillSeedsIfLow(state).catch((e) => console.warn("[hm-cron] seed refill:", e.message));
@@ -277,7 +281,7 @@ async function tick() {
 }
 
 (async () => {
-  console.log("[hm-cron] starting — wallet:", await wallet.getAddress());
+  console.log("[hm-cron] starting - wallet:", await wallet.getAddress());
   console.log("[hm-cron] HM contract:", HM_ADDR, "Casino:", CASINO_ADDR);
   // Best-effort initial tick to surface any config issues immediately.
   try { await tick(); } catch (e) { console.error("[hm-cron] initial tick:", e.message); }

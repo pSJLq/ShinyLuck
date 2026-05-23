@@ -10,7 +10,7 @@
 //
 // All round state lives on-chain; this file just polls/subscribes.
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect } from "../wallet.js";
 import { CONFIG } from "../config.js";
 import { provider, fetchRecentLogs } from "../rpc.js";

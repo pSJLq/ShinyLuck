@@ -1,5 +1,5 @@
 /* ============================================================================
- * sugar/engine.js — pure math + ResultData generator (demo mode RNG)
+ * sugar/engine.js - pure math + ResultData generator (demo mode RNG)
  * No DOM. Deterministic from seed string. Wei (bigint) for all amounts.
  * ============================================================================
  *
@@ -11,7 +11,7 @@
  *   { charge, chargeThreshold, chargeCycle, pendingWildStorm }
  *
  * When the contract takes over (production mode), this file is unused.
- * The contract must emit ResultData with the same shape — see types in api.js.
+ * The contract must emit ResultData with the same shape - see types in api.js.
  * ============================================================================ */
 
 // ---------- symbol indices (numeric for compact ResultData) ----------
@@ -22,7 +22,7 @@ export const SYMBOL_INDEX = {
 };
 export const SYMBOL_BY_INDEX = ['WILD','H1','H2','H3','M1','M2','M3','L1','L2','SCAT'];
 
-// pay table — per cluster size 5 and 15 (linear interp; +0.25 per symbol >19)
+// pay table - per cluster size 5 and 15 (linear interp; +0.25 per symbol >19)
 export const SYMBOL_PAY = {
   WILD: { pay5: 0.40, pay15: 18.00 },
   H1:   { pay5: 0.50, pay15: 14.00 },
@@ -35,7 +35,7 @@ export const SYMBOL_PAY = {
   L2:   { pay5: 0.10, pay15:  1.50 },
 };
 
-// RTP boost — the STATS.md pay tables alone deliver only ~40% RTP (see
+// RTP boost - the STATS.md pay tables alone deliver only ~40% RTP (see
 // `scripts/validate-rtp.js`). This multiplier scales every cluster payout
 // uniformly so empirical RTP (base game + charge meter) lands at ~91-92%.
 // MUST stay in sync with `contracts/Casino.sol::CLUSTER_PAY_BOOST_X100`
@@ -204,7 +204,7 @@ function runCascades(grid, stakeWei, rng, opts = {}) {
 
     tumble(grid, removedSet, rng);
 
-    // new sticky orbs in FS — probability rises with chain
+    // new sticky orbs in FS - probability rises with chain
     const newStickyOrbs = [];
     if (isFreeSpin) {
       const p = Math.min(0.55, 0.18 + chainIdx * 0.07);

@@ -18,7 +18,7 @@ const fs = require("fs");
 const path = require("path");
 const { ethers } = require("ethers");
 
-const RPC_URL = process.env.RPC_URL || process.env.RPC_TESTNET || "https://dream-rpc.somnia.network";
+const RPC_URL = process.env.RPC_URL || process.env.RPC_TESTNET || "https://api.infra.testnet.somnia.network";
 
 // Auto-resolve CASINO_ADDRESS from the deployments manifest if not given via env.
 let CASINO_ADDRESS = process.env.CASINO_ADDRESS;

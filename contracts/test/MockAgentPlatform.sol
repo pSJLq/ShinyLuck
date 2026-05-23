@@ -2,29 +2,32 @@
 pragma solidity ^0.8.24;
 
 import {
-    ISomniaAgentPlatform,
-    IAgentRequesterHandler,
+    IAgentRequester,
     Response,
     Request,
     ResponseStatus,
     ConsensusType
 } from "../interfaces/ISomniaAgent.sol";
 
-/// @notice Test-only mock that defers the requester callback to a separate
-///         tx (`triggerCallback`). This mirrors Somnia's async consensus model
-///         and avoids the race where the requester hasn't yet stored its
-///         pending-state when a synchronous callback fires.
-contract MockAgentPlatform is ISomniaAgentPlatform {
+/// @notice Test-only mock matching the corrected canonical IAgentRequester
+///         interface. Unit tests trigger callbacks manually via
+///         `triggerCallback`. Re-aligned to the real Request/Response struct
+///         shapes (`validator`/`status`/`receipt`/`timestamp`/`executionCost`
+///         on Response; the full Request struct with `subcommittee` array,
+///         `responseCount`, etc.) so tests catch interface drift early.
+contract MockAgentPlatform is IAgentRequester {
     uint256 public nextRequestId = 1;
     string public nextResponseText;
-    ResponseStatus public nextStatus = ResponseStatus.SUCCESS;
+    ResponseStatus public nextStatus = ResponseStatus.Success;
     uint256 public nextWorkers = 4;
     uint256 public deposit = 0.01 ether;
 
     struct Stored {
         address callbackAddress;
         bytes4 callbackSelector;
-        Request req;
+        uint256 agentId;
+        uint256 threshold;
+        ConsensusType consensusType;
         string responseText;
         ResponseStatus status;
         uint256 workers;
@@ -37,54 +40,44 @@ contract MockAgentPlatform is ISomniaAgentPlatform {
     function setDeposit(uint256 v) external { deposit = v; }
 
     function getRequestDeposit() external view returns (uint256) { return deposit; }
+    function getAdvancedRequestDeposit(uint256 /*subSize*/) external view returns (uint256) { return deposit; }
 
     function createRequest(
         uint256 agentId,
         address callbackAddress,
         bytes4 callbackSelector,
-        bytes calldata payload
+        bytes calldata /* payload */
     ) external payable returns (uint256 requestId) {
-        return _store(agentId, callbackAddress, callbackSelector, payload, 1, 1, ConsensusType.EXACT, 0);
+        return _store(agentId, callbackAddress, callbackSelector, 1, ConsensusType.Majority);
     }
 
     function createAdvancedRequest(
         uint256 agentId,
         address callbackAddress,
         bytes4 callbackSelector,
-        bytes calldata payload,
-        uint256 subcommitteeSize,
+        bytes calldata /* payload */,
+        uint256 /* subcommitteeSize */,
         uint256 threshold,
         ConsensusType consensusType,
-        uint256 timeout
+        uint256 /* timeout */
     ) external payable returns (uint256 requestId) {
-        return _store(agentId, callbackAddress, callbackSelector, payload, subcommitteeSize, threshold, consensusType, timeout);
+        return _store(agentId, callbackAddress, callbackSelector, threshold, consensusType);
     }
 
     function _store(
         uint256 agentId,
         address callbackAddress,
         bytes4 callbackSelector,
-        bytes calldata payload,
-        uint256 subcommitteeSize,
         uint256 threshold,
-        ConsensusType consensusType,
-        uint256 timeout
+        ConsensusType consensusType
     ) internal returns (uint256 requestId) {
         requestId = nextRequestId++;
         stored[requestId] = Stored({
             callbackAddress: callbackAddress,
             callbackSelector: callbackSelector,
-            req: Request({
-                agentId: agentId,
-                callbackAddress: callbackAddress,
-                callbackSelector: callbackSelector,
-                payload: payload,
-                subcommitteeSize: subcommitteeSize,
-                threshold: threshold,
-                consensusType: consensusType,
-                timeout: timeout,
-                deposit: msg.value
-            }),
+            agentId: agentId,
+            threshold: threshold,
+            consensusType: consensusType,
             responseText: nextResponseText,
             status: nextStatus,
             workers: nextWorkers,
@@ -102,11 +95,38 @@ contract MockAgentPlatform is ISomniaAgentPlatform {
         Response[] memory responses = new Response[](s.workers);
         bytes memory result = abi.encode(s.responseText);
         for (uint256 i; i < s.workers; i++) {
-            responses[i] = Response({worker: address(uint160(i + 1)), result: result});
+            responses[i] = Response({
+                validator: address(uint160(i + 1)),
+                result: result,
+                status: s.status,
+                receipt: 0,
+                timestamp: block.timestamp,
+                executionCost: 0
+            });
         }
 
+        address[] memory subcommittee = new address[](s.workers);
+        for (uint256 i; i < s.workers; i++) subcommittee[i] = address(uint160(i + 1));
+        Request memory details = Request({
+            id: requestId,
+            requester: address(this),
+            callbackAddress: s.callbackAddress,
+            callbackSelector: s.callbackSelector,
+            subcommittee: subcommittee,
+            responses: responses,
+            responseCount: s.workers,
+            failureCount: 0,
+            threshold: s.threshold,
+            createdAt: block.timestamp,
+            deadline: block.timestamp + 900,
+            status: s.status,
+            consensusType: s.consensusType,
+            remainingBudget: 0,
+            perAgentBudget: 0
+        });
+
         (bool ok, bytes memory data) = s.callbackAddress.call(
-            abi.encodeWithSelector(s.callbackSelector, requestId, responses, s.status, s.req)
+            abi.encodeWithSelector(s.callbackSelector, requestId, responses, s.status, details)
         );
         if (!ok) {
             assembly { revert(add(data, 32), mload(data)) }

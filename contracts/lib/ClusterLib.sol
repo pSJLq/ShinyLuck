@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 /// @title ClusterLib
-/// @notice On-chain resolver for SUGAR.LAB — the 7×7 cluster-pays slot with
+/// @notice On-chain resolver for SUGAR.LAB - the 7×7 cluster-pays slot with
 ///         tumble cascades. Mirrors `slots/cluster-engine.js`:
 ///           • 7×7 grid of symbols (8 concrete + WILD + SCATTER)
 ///           • Cluster = 5+ orthogonally-connected same-symbol cells (WILD
@@ -10,15 +10,15 @@ pragma solidity ^0.8.24;
 ///           • Pay each cluster, remove its cells, gravity-drop the column,
 ///             refill from a deterministic PRNG, repeat until no clusters
 ///           • 3+ scatters in the INITIAL grid → free-spin trigger
-///             (10 / 15 / 20 free spins for 4 / 5 / 6+ scatters — same as
+///             (10 / 15 / 20 free spins for 4 / 5 / 6+ scatters - same as
 ///             engine.js: scatters >= 4 base, scatters >= 3 retrigger)
 ///
-///         Free-spin sticky multipliers are tracked outside this library —
+///         Free-spin sticky multipliers are tracked outside this library -
 ///         the Casino contract stores them per-player + applies them as a
 ///         second-pass multiplier on each cascade step.
 ///
 /// @dev   The resolver is `internal` so Solidity inlines the bytecode into
-///        Casino — no separate library deployment + linking step required.
+///        Casino - no separate library deployment + linking step required.
 ///        Trade-off: ~3 KB of code-size growth on Casino. Acceptable for
 ///        Somnia testnet (allowUnlimitedContractSize: true).
 library ClusterLib {
@@ -31,7 +31,7 @@ library ClusterLib {
     //   0 = L2, 1 = L1, 2 = M3, 3 = M2, 4 = M1
     //   5 = H3, 6 = H2, 7 = H1, 8 = WILD, 9 = SCAT
 
-    /// @notice Symbol distribution — exact match to megaprompt / cluster-engine.js
+    /// @notice Symbol distribution - exact match to megaprompt / cluster-engine.js
     ///         C_WEIGHTS: { WILD:1, H1:5, H2:6, H3:7, M1:11, M2:11, M3:11,
     ///                      L1:22, L2:22, SCAT:1 }. Total weight = 97.
     function _pickSymbol(uint256 r) internal pure returns (uint8) {
@@ -91,7 +91,7 @@ library ClusterLib {
     /// @notice Resolves a full SUGAR.LAB spin. Returns the total payout factor
     ///         (basis-100 of stake) plus the scatter count and final grid.
     ///
-    /// @dev    The resolver does NOT apply sticky multipliers — those live
+    /// @dev    The resolver does NOT apply sticky multipliers - those live
     ///         in Casino because they're per-player free-spin state.
     function resolve(bytes32 randomness)
         internal pure
@@ -100,7 +100,7 @@ library ClusterLib {
         bytes32 r = randomness;
         uint8[49] memory g;
         // Initial fill: one PRNG read per cell from 8 bits each.
-        // 49 × 8 = 392 bits — we re-hash to get more entropy if needed.
+        // 49 × 8 = 392 bits - we re-hash to get more entropy if needed.
         bytes32 rr = r;
         uint8 rByte = 0;
         for (uint8 i = 0; i < 49; i++) {
@@ -190,12 +190,12 @@ library ClusterLib {
         for (uint8 col = 0; col < 7; col++) {
             uint8[7] memory keep;
             uint8 klen = 0;
-            // Bottom-up sweep — keeps relative order for falling cells.
+            // Bottom-up sweep - keeps relative order for falling cells.
             for (int8 row = 6; row >= 0; row--) {
                 uint8 idx = uint8(row) * 7 + col;
                 if (toRemove[idx] == 0) keep[klen++] = g[idx];
             }
-            // klen cells survive — they occupy rows [7-klen .. 6].
+            // klen cells survive - they occupy rows [7-klen .. 6].
             // The top (7-klen) rows need fresh symbols.
             for (uint8 k = 0; k < klen; k++) {
                 uint8 destRow = 6 - k;

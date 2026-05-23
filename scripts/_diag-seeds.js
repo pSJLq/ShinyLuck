@@ -1,5 +1,5 @@
 // Quick visibility into seed-pool state and outstanding pending bets.
-// Helps debug "STT stuck in locked reserve" — usually that means either
+// Helps debug "STT stuck in locked reserve" - usually that means either
 //   (a) reveal-bot is dead/paused, or
 //   (b) seeds were exhausted (nextHashIndex >= seedHashes.length) and the
 //       bets that DID get placed before exhaustion are now waiting for an
@@ -41,7 +41,7 @@ async function main() {
   console.log(`[bank] lockedReserve       ${ethers.formatEther(lr)} STT`);
 
   // Count outstanding pending bets by walking BetPlaced minus BetSettled events.
-  // 1000 blocks ≈ 20 min — long enough to see active demo-bot betting if any.
+  // 1000 blocks ≈ 20 min - long enough to see active demo-bot betting if any.
   const blocksBack = 1000;
   const cur = await ethers.provider.getBlockNumber();
   const from = Math.max(0, cur - blocksBack);

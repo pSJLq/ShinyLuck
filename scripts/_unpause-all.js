@@ -20,7 +20,7 @@ async function main() {
       await tx.wait();
       console.log(`  ${NAMES[i]}: UNPAUSED  tx=${tx.hash}`);
     } catch (e) {
-      console.error(`  ${NAMES[i]}: failed — ${e.shortMessage || e.message}`);
+      console.error(`  ${NAMES[i]}: failed - ${e.shortMessage || e.message}`);
     }
   }
 }

@@ -1,11 +1,11 @@
-// fair.html — latest receipt, live flow-step previews, browser-side
+// fair.html - latest receipt, live flow-step previews, browser-side
 // keccak256 verifier modal. All log reads go through lib/rpc.js.
 //
-// Public URL contract: /fair.html?betId=N — focuses on a specific bet
+// Public URL contract: /fair.html?betId=N - focuses on a specific bet
 // (used by account.html → "open receipt →" link). Without the param, we
 // render the most-recent BetSettled in the window.
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { CONFIG } from "./config.js";
 import { provider, wsProvider, fetchLogs, fetchDeploymentBlock } from "./rpc.js";
 
@@ -82,7 +82,7 @@ function setReceipt(settledEv) {
   const tgt = $("[data-sl-receipt]");
   if (!tgt) return;
   if (!settledEv) {
-    tgt.innerHTML = '<span class="dim">no settled bets in window yet — place one and come back.</span>';
+    tgt.innerHTML = '<span class="dim">no settled bets in window yet - place one and come back.</span>';
     return;
   }
   const a = settledEv.args;
@@ -150,8 +150,8 @@ nonce:      ${a.nonce.toString()}`;
   $("[data-sl-verify-onchain]").textContent = a.randomness;
   const m = $("[data-sl-verify-match]");
   m.innerHTML = match
-    ? `<span style="color:var(--green); font-weight:600;">✓ MATCH — locally derived randomness equals the on-chain value byte-for-byte.</span>`
-    : `<span style="color:var(--red); font-weight:600;">✗ MISMATCH — file a bug, this should never happen.</span>`;
+    ? `<span style="color:var(--green); font-weight:600;">✓ MATCH - locally derived randomness equals the on-chain value byte-for-byte.</span>`
+    : `<span style="color:var(--red); font-weight:600;">✗ MISMATCH - file a bug, this should never happen.</span>`;
   $("[data-sl-verify-modal]").style.display = "flex";
 }
 
@@ -159,7 +159,7 @@ async function refresh() {
   if (!CONFIG.casino || CONFIG.casino === ZERO) return;
   const dep = await fetchDeploymentBlock();
   const head = await provider().getBlockNumber();
-  // Clamp to contract age — never scan blocks before deploy.
+  // Clamp to contract age - never scan blocks before deploy.
   const fromBlock = dep > 0 ? Math.max(dep, head - LOOKBACK) : (head - LOOKBACK);
 
   const casino = new ethers.Contract(CONFIG.casino, casinoAbi, provider());
@@ -167,7 +167,7 @@ async function refresh() {
 
   let target = null;
   // Parallel: fetch settled (always) + quorums (if verifier present) in one shot
-  // — was sequential below; halves cold-start time.
+  // - was sequential below; halves cold-start time.
   const settledPromise = fetchLogs(casino, "BetSettled", fromBlock, head);
   const quorumsPromise = (CONFIG.agentVerifier && CONFIG.agentVerifier !== ZERO)
     ? fetchLogs(new ethers.Contract(CONFIG.agentVerifier, verifAbi, provider()), "QuorumResult", fromBlock, head).catch(() => [])
@@ -185,7 +185,7 @@ async function refresh() {
   setReceipt(target);
   if (target) setFlowPreviews(target);
 
-  // QuorumResult — already fetched above in parallel
+  // QuorumResult - already fetched above in parallel
   if (CONFIG.agentVerifier && CONFIG.agentVerifier !== ZERO) {
     if (quorums.length > 0) {
       quorums.sort((a, b) => b.blockNumber - a.blockNumber);
@@ -212,7 +212,7 @@ async function refresh() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Loading gate — hide page-shell until the first refresh resolves so the
+  // Loading gate - hide page-shell until the first refresh resolves so the
   // user never sees "loading latest receipt…" before real data lands.
   document.body.dataset.loading = "1";
   refresh()
@@ -222,12 +222,12 @@ document.addEventListener("DOMContentLoaded", () => {
       document.dispatchEvent(new CustomEvent("shinyluck:ready"));
     });
   // Slow safety poll (every 30s) as a fallback. The WS subscription below
-  // delivers new receipts within ~1s of each settle — no need to spam.
+  // delivers new receipts within ~1s of each settle - no need to spam.
   setInterval(() => refresh().catch(() => {}), 30_000);
 
   // Real-time receipt updates: subscribe to BetSettled events via WS so the
   // page shows the freshest settled bet within ~1s of it landing on chain.
-  // Skipped when the URL pins a specific bet (?betId=…) — that mode shows
+  // Skipped when the URL pins a specific bet (?betId=…) - that mode shows
   // exactly one historical receipt.
   if (!readQueryBetId()) {
     const ws = wsProvider();

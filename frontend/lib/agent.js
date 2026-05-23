@@ -14,7 +14,7 @@
 //   - cumulative P&L across the vault's BetSettled events
 //   - controls: pause / resume / fund vault / withdraw vault
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect, shortAddr } from "./wallet.js";
 import { CONFIG } from "./config.js";
 import { provider, fetchRecentLogs } from "./rpc.js";
@@ -83,10 +83,18 @@ async function refreshAgentState() {
     const perm = await SL.registry.getPermission(SL.address);
     if (perm.player === "0x0000000000000000000000000000000000000000") {
       statusEl.textContent = "NOT REGISTERED";
-      $("[data-sl-agent-vault]").textContent = "—";
-      $("[data-sl-agent-today]").textContent = "—";
-      $("[data-sl-agent-total]").textContent = "—";
-      if (summaryEl) summaryEl.textContent = `Connected as ${SL.address.slice(0,6)}…${SL.address.slice(-4)} — register an agent to begin`;
+      $("[data-sl-agent-vault]").textContent = "-";
+      $("[data-sl-agent-today]").textContent = "-";
+      $("[data-sl-agent-total]").textContent = "-";
+      // Make the "-" placeholder for P&L semantically honest - it's a
+      // dash because there's no agent yet, not because the page is broken.
+      const pnlEl = $("[data-sl-agent-pnl]");
+      if (pnlEl) {
+        pnlEl.textContent = "-";
+        pnlEl.style.color = "var(--fg-mute)";
+        pnlEl.title = "Register an agent below to start tracking P&L";
+      }
+      if (summaryEl) summaryEl.textContent = `Connected as ${SL.address.slice(0,6)}…${SL.address.slice(-4)} - register an agent to begin`;
       return;
     }
     vaultAddr = perm.vault;
@@ -155,7 +163,7 @@ async function fetchLogs() {
   const root = $("[data-sl-agent-log]");
   if (!root) return;
   if (!r) {
-    root.innerHTML = '<div style="opacity:.4;">// agent service offline — start it locally: <code>cd agent-service && npm run api</code></div>';
+    root.innerHTML = '<div style="opacity:.4;">// agent service offline - start it locally: <code>cd agent-service && npm run api</code></div>';
     return;
   }
   if (!r.ok) return;
@@ -252,7 +260,7 @@ async function onRegister() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Initial paint — refreshAgentState renders the "connect wallet" state if
+  // Initial paint - refreshAgentState renders the "connect wallet" state if
   // not yet connected, and the real dashboard if we already got an auto-connect
   // from wallet.js (whose event we might miss due to listener-ordering).
   refreshAgentState().catch(() => {});
@@ -279,7 +287,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const { promptDialog, toast } = await import("./ui.js");
     await connect();
     if (!vaultAddr) { toast("Register your agent first", { kind: "warn" }); return; }
-    const amt = await promptDialog("Send STT into your agent's vault — the agent can spend up to your daily limit.", {
+    const amt = await promptDialog("Send STT into your agent's vault - the agent can spend up to your daily limit.", {
       title: "Fund vault", initial: "0.5", placeholder: "0.0",
     });
     if (!amt) return;

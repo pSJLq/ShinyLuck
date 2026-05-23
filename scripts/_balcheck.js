@@ -1,4 +1,4 @@
-// Quick balance snapshot — deployer + every contract address we know about.
+// Quick balance snapshot - deployer + every contract address we know about.
 // Run: npx hardhat run scripts/_balcheck.js --network somniaTestnet
 const { ethers } = require("hardhat");
 const dep = require("../deployments/somniaTestnet.json");

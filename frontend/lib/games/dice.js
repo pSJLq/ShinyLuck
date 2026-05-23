@@ -1,6 +1,6 @@
 // Dice integration on top of _base.js.
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect } from "../wallet.js";
 import {
   $, $$, setText, fmtSTTfromString, readStakeStr, injectKeyframes,

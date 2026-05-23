@@ -6,7 +6,7 @@
 // `value.removed must be boolean` and throw `BAD_DATA` on undefined.
 // Raw eth_getLogs + manual `interface.parseLog(...)` is unaffected.
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { CHAINS } from "./shinyluck-sdk.js";
 import { CONFIG } from "./config.js";
 
@@ -39,7 +39,7 @@ export function wsProvider() {
 }
 
 // ---------------------------------------------------------------------------
-// retry wrapper — exponential backoff on transient RPC failures
+// retry wrapper - exponential backoff on transient RPC failures
 // ---------------------------------------------------------------------------
 
 function isRetryable(err) {
@@ -99,21 +99,55 @@ async function getLogsRange(address, topic0, start, end) {
   }
 }
 
-/// Returns parsed events from a contract over [fromBlock, toBlock]. Chunked
-/// to keep individual eth_getLogs calls inside the RPC's range cap.
+/// Shannon Explorer indexer endpoint. It's an Etherscan-compatible REST API
+/// that pre-indexes every log on Somnia, so one HTTP call returns thousands
+/// of events in ~200-500ms - versus 700+ chunked eth_getLogs RPC calls.
+/// This is the Somnia "data streams" path; we fall back to chunked RPC if
+/// the explorer rate-limits or returns an error shape.
+const EXPLORER_BASE = "https://shannon-explorer.somnia.network/api";
+
+async function explorerLogs(address, topic0, fromBlock, toBlock) {
+  // Etherscan-style getLogs. Supports up to 1000 logs per page - for the
+  // common case (a single user's events over a few days) one page is enough.
+  // For >1000 we'd need to paginate; not needed for current UI scale.
+  const url = `${EXPLORER_BASE}?module=logs&action=getLogs`
+    + `&address=${address}`
+    + `&fromBlock=${fromBlock}&toBlock=${toBlock}`
+    + `&topic0=${topic0}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`explorer HTTP ${resp.status}`);
+  const j = await resp.json();
+  // Shannon Explorer responses:
+  //   success:    { status: "1", message: "OK",            result: [...] }
+  //   empty:      { status: "0", message: "No logs found", result: [] }
+  //   also empty: { status: "0", message: "No records found", result: [] }
+  //   error:      { status: "0", message: "<rate-limit / param error / ...>" }
+  // Treat any "no <X> found" message as a legitimately-empty response, not
+  // an error to fall back from. Otherwise event-types with zero logs (e.g.
+  // QuorumResult on a brand-new deploy) spam fallback warnings + force the
+  // slow RPC path even though the explorer answered correctly in 200ms.
+  const emptyMessage = /^No\s+(logs|records)\s+found$/i;
+  if (j.status !== "1" && !(j.message && emptyMessage.test(j.message))) {
+    throw new Error(`explorer: ${j.message || "unknown"}`);
+  }
+  // Each entry: { address, topics: [...], data, blockNumber: "0x...", ... }
+  return Array.isArray(j.result) ? j.result : [];
+}
+
+/// Returns parsed events from a contract over [fromBlock, toBlock].
+/// PRIMARY path: Shannon Explorer REST indexer (one HTTP call, ~300ms).
+/// FALLBACK: chunked + parallel eth_getLogs via the RPC provider.
+const PARALLEL_CHUNKS = 24;
 export async function fetchLogs(contract, eventName, fromBlock, toBlock, chunkSize = DEFAULT_CHUNK_SIZE) {
   const topic0 = contract.interface.getEvent(eventName).topicHash;
-  const out = [];
-  for (let start = fromBlock; start <= toBlock; start += chunkSize) {
-    const end = Math.min(start + chunkSize - 1, toBlock);
-    let raw;
-    try {
-      raw = await getLogsRange(contract.target, topic0, start, end);
-    } catch (e) {
-      console.warn(`[rpc] eth_getLogs ${eventName} ${start}..${end}: ${e.message || e.shortMessage}`);
-      continue;
-    }
-    for (const r of raw) {
+  // ── PRIMARY: Shannon Explorer ──
+  try {
+    const raws = await withRetry(
+      () => explorerLogs(contract.target, topic0, fromBlock, toBlock),
+      { attempts: 2, baseDelayMs: 400 },
+    );
+    const out = [];
+    for (const r of raws) {
       try {
         const parsed = contract.interface.parseLog({ topics: r.topics, data: r.data });
         out.push({
@@ -123,16 +157,52 @@ export async function fetchLogs(contract, eventName, fromBlock, toBlock, chunkSi
           transactionHash: r.transactionHash,
           logIndex: parseInt(r.logIndex, 16),
         });
-      } catch (e) {
-        // skip unparseable logs (e.g. reorg artefact, mismatched ABI)
+      } catch (_) { /* unparseable log; skip */ }
+    }
+    out.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex);
+    return out;
+  } catch (e) {
+    console.warn(`[rpc] explorer fetch ${eventName} failed (${e.message}), falling back to RPC chunks`);
+  }
+
+  // ── FALLBACK: chunked eth_getLogs in parallel ──
+  const ranges = [];
+  for (let start = fromBlock; start <= toBlock; start += chunkSize) {
+    const end = Math.min(start + chunkSize - 1, toBlock);
+    ranges.push([start, end]);
+  }
+  const collected = [];
+  for (let i = 0; i < ranges.length; i += PARALLEL_CHUNKS) {
+    const batch = ranges.slice(i, i + PARALLEL_CHUNKS);
+    const results = await Promise.all(batch.map(async ([s, e]) => {
+      try {
+        return await getLogsRange(contract.target, topic0, s, e);
+      } catch (err) {
+        console.warn(`[rpc] eth_getLogs ${eventName} ${s}..${e}: ${err.message || err.shortMessage}`);
+        return [];
+      }
+    }));
+    for (const raw of results) {
+      for (const r of raw) {
+        try {
+          const parsed = contract.interface.parseLog({ topics: r.topics, data: r.data });
+          collected.push({
+            name: parsed.name,
+            args: parsed.args,
+            blockNumber: parseInt(r.blockNumber, 16),
+            transactionHash: r.transactionHash,
+            logIndex: parseInt(r.logIndex, 16),
+          });
+        } catch (_) {}
       }
     }
   }
-  return out;
+  collected.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex);
+  return collected;
 }
 
 /// Convenience: latest N parsed events ending at the current head, with a
-/// configurable lookback (in blocks). Forward scan — used for full-window
+/// configurable lookback (in blocks). Forward scan - used for full-window
 /// aggregations (leaderboard, account P&L) where we need every event.
 export async function recentLogs(contract, eventName, lookbackBlocks = 100_000, chunkSize = DEFAULT_CHUNK_SIZE) {
   const head = await provider().getBlockNumber();
@@ -140,7 +210,7 @@ export async function recentLogs(contract, eventName, lookbackBlocks = 100_000, 
   return fetchLogs(contract, eventName, from, head, chunkSize);
 }
 
-/// Backwards-scan with early exit — for "give me the last N events" cases
+/// Backwards-scan with early exit - for "give me the last N events" cases
 /// (live feed, recent rolls per game, last-settled per player). Walks
 /// chunks from `head` toward `head - maxLookback`, stopping as soon as
 /// `predicate(events)` is satisfied (default: collected ≥ minCount events).
@@ -196,7 +266,7 @@ export async function fetchRecentLogs(contract, eventName, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// localStorage event cache — TTL-bounded, used by livedata.js for cold-start.
+// localStorage event cache - TTL-bounded, used by livedata.js for cold-start.
 // ---------------------------------------------------------------------------
 
 const CACHE_PREFIX = "shinyluck.cache.v1.";

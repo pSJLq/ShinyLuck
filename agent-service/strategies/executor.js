@@ -2,8 +2,8 @@
 // and reconciles outcomes from BetSettled events into per-strategy P&L state.
 //
 // Game support:
-//   - DICE  / SLOTS / PLINKO  — per-bet placeXBet(...).
-//   - CRASH / ROULETTE        — round-based; the executor first checks that
+//   - DICE  / SLOTS / PLINKO  - per-bet placeXBet(...).
+//   - CRASH / ROULETTE        - round-based; the executor first checks that
 //                                a round is open + within the betting window
 //                                before attempting placement.
 // Mines is excluded (requires multi-step interactive flow).
@@ -33,14 +33,14 @@ async function buildCall(strategy, ctx) {
       ]);
       return { data, value: valueWei };
     }
-    case 2: { // SLOTS — VAULT.7
+    case 2: { // SLOTS - VAULT.7
       const cs = clientSeed();
       // useFreeSpin = false; agents don't try to redeem loyalty free spins
       // because doing so would require msg.value=0 (no relayer cost) and
       // some out-of-band coordination. v1: paid spins only.
       return { data: iface.encodeFunctionData("placeSlotsBet", [cs, false]), value: valueWei };
     }
-    case 6: { // CLUSTER — SUGAR.LAB
+    case 6: { // CLUSTER - SUGAR.LAB
       const cs = clientSeed();
       return { data: iface.encodeFunctionData("placeClusterBet", [cs, false]), value: valueWei };
     }
@@ -149,7 +149,7 @@ async function reconcileSettlements(ctx) {
     events = await casino.queryFilter(filter, fromBlock);
   } catch (e) {
     // Somnia logs lack `removed`; ethers v6 throws BAD_DATA on queryFilter.
-    // We fall through quietly — the on-chain BetSettled events still drive
+    // We fall through quietly - the on-chain BetSettled events still drive
     // the frontend P&L; executor reconcile is best-effort.
     return;
   }

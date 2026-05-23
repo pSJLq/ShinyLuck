@@ -5,16 +5,16 @@
 //   - On boot:  one parallel pass with Promise.all (stats, feed, agents, quorum)
 //               populates the page within the cold-start budget (~3s).
 //   - WS path:  if the gateway accepts the upgrade, subscribe to `newHeads`
-//               (block ticker) and to BetSettled/BetRefunded logs (feed) —
+//               (block ticker) and to BetSettled/BetRefunded logs (feed) -
 //               new rows slide in immediately.
-//   - Polling:  fallback when WS isn't available — block ticker @ 1s, feed
+//   - Polling:  fallback when WS isn't available - block ticker @ 1s, feed
 //               @ 1.5s, stats @ 12s. Each fetch is incremental: livedata
 //               tracks the last-seen block per stream so we only scan new
 //               ranges, not the full 200k window on every tick.
 //
 // DOM hooks the static HTML uses are documented inline next to each renderer.
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { CONFIG } from "./config.js";
 import {
   provider, wsProvider, fetchLogs, fetchRecentLogs, fetchDeploymentBlock,
@@ -32,10 +32,12 @@ const AGENT_IDS = {
   hm: "119284756103948572617",
 };
 
-// 20_000 blocks ≈ 7 hours on Somnia (1.2s/block). Old enough to catch a
-// fresh deploy's history without scanning a 67-hour window every cold-start.
-// effectiveLookback() further clamps this to the contract's age.
-const FEED_LOOKBACK_BLOCKS = 20_000;
+// 100 000 blocks ≈ 11 hours on Somnia (0.4 s/block). Was 20 000 - comment
+// said 7 h based on old 1.2 s/block estimate, but Somnia's actual ~0.4 s
+// block time made that only ~2 h. Live feed lost yesterday's activity
+// after the deploy aged past that. Chunked at 900 blocks in rpc.js,
+// the larger window is still ~3-4 s on cold start.
+const FEED_LOOKBACK_BLOCKS = 100_000;
 const FEED_ROW_CAP = 30;
 
 function effectiveLookback(maxLookback) {
@@ -51,30 +53,67 @@ let _lastFeedBlock = 0;
 let _feedRows = [];                  // most-recent-first; capped to FEED_ROW_CAP
 let _stakeByBet = new Map();         // betId(string) → wei BigInt
 let _blockTimestamps = [];           // [{n, t}] rolling window for finality calc
+let _historicalContracts = null;     // [{ contract, deploymentBlock, isCurrent }]
+// Aggregate counters across ALL historical bets, separate from _feedRows
+// (which is capped at FEED_ROW_CAP×2 for display efficiency). These are
+// what BETS SETTLED / PLAYERS labels read from - they must reflect lifetime
+// totals, not just the recent display window.
+let _totalSettled = 0;
+let _allPlayers = new Set();
 
 function deployed() { return CONFIG.casino && CONFIG.casino !== ZERO; }
 
+const CASINO_ABI = [
+  "function freeBankroll() view returns (uint256)",
+  "function gameMaxBet(uint8) view returns (uint256)",
+  "function gamePaused(uint8) view returns (bool)",
+  "function houseEdgeBps(uint8) view returns (uint256)",
+  "function getReportedRTP(uint8) view returns (uint16)",
+  "function bonusModeActive() view returns (bool)",
+  "function bonusModeUntil() view returns (uint256)",
+  "function totalBets() view returns (uint256)",
+  "function totalPendingWithdrawals() view returns (uint256)",
+  "event BetPlaced(uint256 indexed betId,address indexed player,uint8 indexed game,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
+  "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
+  "event BetRefunded(uint256 indexed betId,address indexed player,uint256 amount,string reason)",
+  "event ReasoningLog(string thought,uint256 timestamp)",
+  "event BonusModeActivated(uint256 until,string reasoning)",
+  "event GameMaxBetSet(uint8 indexed game,uint256 amount)",
+];
+
 function casino() {
   if (!_casino) {
-    const abi = [
-      "function freeBankroll() view returns (uint256)",
-      "function gameMaxBet(uint8) view returns (uint256)",
-      "function gamePaused(uint8) view returns (bool)",
-      "function houseEdgeBps(uint8) view returns (uint256)",
-      "function bonusModeActive() view returns (bool)",
-      "function bonusModeUntil() view returns (uint256)",
-      "function totalBets() view returns (uint256)",
-      "function totalPendingWithdrawals() view returns (uint256)",
-      "event BetPlaced(uint256 indexed betId,address indexed player,uint8 indexed game,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
-      "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
-      "event BetRefunded(uint256 indexed betId,address indexed player,uint256 amount,string reason)",
-      "event ReasoningLog(string thought,uint256 timestamp)",
-      "event BonusModeActivated(uint256 until,string reasoning)",
-      "event GameMaxBetSet(uint8 indexed game,uint256 amount)",
-    ];
-    _casino = new ethers.Contract(CONFIG.casino, abi, provider());
+    _casino = new ethers.Contract(CONFIG.casino, CASINO_ABI, provider());
   }
   return _casino;
+}
+
+/// Returns [{ contract, deploymentBlock, isCurrent }] for every historical
+/// casino, sorted oldest → newest. Falls back to just the current casino if
+/// the historicalCasinos config is missing or empty (single-deploy mode).
+function historicalContracts() {
+  if (_historicalContracts) return _historicalContracts;
+  const list = Array.isArray(CONFIG.historicalCasinos) ? CONFIG.historicalCasinos : [];
+  const seen = new Set();
+  const out = [];
+  // De-dup by lowercase address, current first so it wins the .isCurrent flag.
+  const withCurrent = [...list];
+  if (CONFIG.casino && !list.some((e) => e.address.toLowerCase() === CONFIG.casino.toLowerCase())) {
+    withCurrent.push({ address: CONFIG.casino, deploymentBlock: 0 });
+  }
+  for (const entry of withCurrent) {
+    const lower = entry.address.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    out.push({
+      contract: new ethers.Contract(entry.address, CASINO_ABI, provider()),
+      deploymentBlock: entry.deploymentBlock || 0,
+      isCurrent: lower === (CONFIG.casino || "").toLowerCase(),
+    });
+  }
+  out.sort((a, b) => a.deploymentBlock - b.deploymentBlock);
+  _historicalContracts = out;
+  return _historicalContracts;
 }
 
 function verifier() {
@@ -108,14 +147,14 @@ function setText(el, v) {
 }
 
 // ---------------------------------------------------------------------------
-// initial reset — wipe every hardcoded value to "—" before any network I/O
+// initial reset - wipe every hardcoded value to "-" before any network I/O
 // ---------------------------------------------------------------------------
 
 function resetPlaceholders() {
-  document.querySelectorAll('[data-sl]').forEach((el) => setText(el, "—"));
+  document.querySelectorAll('[data-sl]').forEach((el) => setText(el, "-"));
   document.querySelectorAll('[data-count]').forEach((el) => {
     const role = el.dataset.slRole;
-    if (role) el.textContent = "—";
+    if (role) el.textContent = "-";
   });
   const fb = document.querySelector("#feed-body");
   if (fb) fb.innerHTML = `<tr><td class="dim" colspan="5">loading on-chain feed…</td></tr>`;
@@ -123,10 +162,10 @@ function resetPlaceholders() {
     el.innerHTML = '<div class="feed-row" style="opacity:.4;">loading on-chain feed…</div>';
   });
   document.querySelectorAll("[data-sl-recent-mults]").forEach((el) => {
-    el.innerHTML = '<span class="m" style="opacity:.4;">—</span>';
+    el.innerHTML = '<span class="m" style="opacity:.4;">-</span>';
   });
   const fc = document.querySelector("#feed-count");
-  if (fc) fc.textContent = "—";
+  if (fc) fc.textContent = "-";
   // Inject slide-in keyframes once.
   if (!document.getElementById("sl-feed-kf")) {
     const s = document.createElement("style");
@@ -157,13 +196,13 @@ export async function refreshLiveStats() {
       provider().getBlockNumber(),
     ]);
 
-    // NOTE: `totalBets` (settled count) is owned by the feed-events path now —
+    // NOTE: `totalBets` (settled count) is owned by the feed-events path now -
     // see renderFeed(). We removed the c.totalBets() poll so the two paths
     // don't fight (and so the "BETS SETTLED" label is honestly derived from
     // BetSettled events, not from c.totalBets() which includes unsettled bets).
     document.querySelectorAll('[data-sl="bankroll"]').forEach((el) => setText(el, fmtSTT(bankroll) + " STT"));
     document.querySelectorAll('[data-sl="bonusMode"]').forEach((el) =>
-      setText(el, bonusActive ? "ACTIVE" : "—")
+      setText(el, bonusActive ? "ACTIVE" : "-")
     );
     document.querySelectorAll('[data-sl="blockNumber"]').forEach((el) => setText(el, fmtNum(blockNumber)));
 
@@ -174,10 +213,11 @@ export async function refreshLiveStats() {
 
     for (const [name, id] of Object.entries(GAME_BY_NAME)) {
       try {
-        const [maxBet, edge, paused] = await Promise.all([
+        const [maxBet, edge, paused, rtp] = await Promise.all([
           c.gameMaxBet(id),
           c.houseEdgeBps(id),
           c.gamePaused(id),
+          c.getReportedRTP(id).catch(() => 0),
         ]);
         document.querySelectorAll(`[data-sl="maxBet"][data-game="${name}"]`)
           .forEach((el) => setText(el, fmtSTT(maxBet) + " STT"));
@@ -185,6 +225,15 @@ export async function refreshLiveStats() {
           .forEach((el) => setText(el, (Number(edge) / 100).toFixed(2) + "%"));
         document.querySelectorAll(`[data-sl="status"][data-game="${name}"]`)
           .forEach((el) => setText(el, paused ? "PAUSED" : "LIVE"));
+        // Live RTP from `getReportedRTP(gameId)` - reflects autonomous LLM
+        // agent adjustments (RtpAdjusted events). Append " ⤴" or " ⤵" if the
+        // value differs from the published default so judges can see the
+        // agent's influence at a glance.
+        if (Number(rtp) > 0) {
+          const pct = (Number(rtp) / 100).toFixed(2) + "%";
+          document.querySelectorAll(`[data-sl="rtp"][data-game="${name}"]`)
+            .forEach((el) => setText(el, pct));
+        }
       } catch (e) {
         // Game ID may not exist on the deployed contract (e.g. CLUSTER on an
         // old deployment). Skip quietly.
@@ -209,15 +258,17 @@ function renderFeed() {
   // labels REGARDLESS of whether the feed body element exists on this page
   // (sugar/vault7/dice game pages don't render the feed table but still show
   // these counters in their header / footer).
-  const settledCount = _feedRows.length;
-  document.querySelectorAll('[data-sl="totalBets"]').forEach((el) => setText(el, fmtNum(settledCount)));
+  //
+  // These read from lifetime aggregates (_totalSettled / _allPlayers), not
+  // from _feedRows - the row buffer is capped to FEED_ROW_CAP×2 for display
+  // performance, but counters need the all-time number.
+  document.querySelectorAll('[data-sl="totalBets"]').forEach((el) => setText(el, fmtNum(_totalSettled)));
   document.querySelectorAll('[data-count][data-sl-role="totalBets"]').forEach((el) => {
-    el.textContent = fmtNum(settledCount);
+    el.textContent = fmtNum(_totalSettled);
   });
-  const players = new Set(_feedRows.map((r) => r.player.toLowerCase()));
-  document.querySelectorAll('[data-sl="playersOnline"]').forEach((el) => setText(el, fmtNum(players.size)));
+  document.querySelectorAll('[data-sl="playersOnline"]').forEach((el) => setText(el, fmtNum(_allPlayers.size)));
   document.querySelectorAll('[data-count][data-sl-role="playersOnline"]').forEach((el) => {
-    el.textContent = fmtNum(players.size);
+    el.textContent = fmtNum(_allPlayers.size);
   });
 
   const body = document.querySelector("#feed-body");
@@ -233,21 +284,34 @@ function renderFeed() {
 function appendFeedRow(body, ev, animate) {
   const gameName = GAME_NAMES[ev.game] || "?";
   const stakeWei = ev.stake || 0n;
-  const stakeText = stakeWei > 0n ? fmtSTT(stakeWei) + " STT" : "—";
-  let multText = "—";
+  const stakeText = stakeWei > 0n ? fmtSTT(stakeWei) + " STT" : "-";
+  let multText = "-";
   if (stakeWei > 0n && ev.payout > 0n) {
     const x100 = (ev.payout * 100n) / stakeWei;
     multText = (Number(x100) / 100).toFixed(2) + "×";
   }
+  // P&L = payout - stake. Cluster/slot games can fire `won=true` with a
+  // payout SMALLER than stake (partial cascade payout) - that's still a
+  // net loss for the player, so derive the sign from the actual delta,
+  // not from the `won` flag. Matches account.js renderBetsTab logic.
   let pnlText, pnlCls;
-  if (ev.won) {
-    const pnl = stakeWei > 0n ? ev.payout - stakeWei : ev.payout;
-    pnlText = "+ " + fmtSTT(pnl) + " STT";
+  if (stakeWei > 0n) {
+    const net = ev.payout - stakeWei;
+    if (net > 0n) {
+      pnlText = "+ " + fmtSTT(net) + " STT";
+      pnlCls = "pnl pnl-win";
+    } else if (net < 0n) {
+      pnlText = "− " + fmtSTT(-net) + " STT";
+      pnlCls = "pnl pnl-loss";
+    } else {
+      pnlText = "0";
+      pnlCls = "pnl dim";
+    }
+  } else if (ev.won) {
+    // Free-spin or zero-stake "win" - just display the payout.
+    pnlText = "+ " + fmtSTT(ev.payout) + " STT";
     pnlCls = "pnl pnl-win";
-  } else if (stakeWei > 0n) {
-    pnlText = "− " + fmtSTT(stakeWei) + " STT";
-    pnlCls = "pnl pnl-loss";
-  } else { pnlText = "—"; pnlCls = "pnl dim"; }
+  } else { pnlText = "-"; pnlCls = "pnl dim"; }
   const tr = document.createElement("tr");
   if (animate) tr.className = "sl-feed-new";
   // Game tag gets per-game color (g-0..g-6); player / stake / mult are
@@ -267,26 +331,44 @@ function accountUrlFor(addr) {
   return `${prefix}account.html?address=${addr.toLowerCase()}`;
 }
 
-function eventsToRows(settled, stakeMap) {
-  return settled.map((ev) => ({
-    betId: ev.args.betId.toString(),
-    player: ev.args.player,
-    game: Number(ev.args.game),
-    won: ev.args.won,
-    payout: BigInt(ev.args.payout),
-    stake: BigInt(stakeMap.get(ev.args.betId.toString()) || 0n),
-    blockNumber: ev.blockNumber,
-    logIndex: ev.logIndex,
-    transactionHash: ev.transactionHash,
-  }));
+/// Convert raw BetSettled events into renderable feed rows. `stakeMap` is
+/// keyed by `${contractAddress}::${betId}` so events from different historical
+/// casinos with overlapping betId ranges don't collide. `contractAddress` is
+/// the address of the contract these events came from.
+function eventsToRows(settled, stakeMap, contractAddress) {
+  const lower = (contractAddress || "").toLowerCase();
+  return settled.map((ev) => {
+    const betIdStr = ev.args.betId.toString();
+    const key = `${lower}::${betIdStr}`;
+    return {
+      // uid = txHash:logIndex - globally unique across contracts and free of
+      // betId collisions. Used as the dedup key in mergeFeedRows.
+      uid: `${ev.transactionHash}:${ev.logIndex}`,
+      betId: betIdStr,
+      contract: lower,
+      player: ev.args.player,
+      game: Number(ev.args.game),
+      won: ev.args.won,
+      payout: BigInt(ev.args.payout),
+      stake: BigInt(stakeMap.get(key) || 0n),
+      blockNumber: ev.blockNumber,
+      logIndex: ev.logIndex,
+      transactionHash: ev.transactionHash,
+    };
+  });
 }
 
 function mergeFeedRows(newRows) {
-  const seen = new Set(_feedRows.map((r) => r.betId));
+  const seen = new Set(_feedRows.map((r) => r.uid));
   let added = false;
   for (const r of newRows) {
-    if (seen.has(r.betId)) continue;
-    _feedRows.push(r); seen.add(r.betId); added = true;
+    if (seen.has(r.uid)) continue;
+    _feedRows.push(r); seen.add(r.uid); added = true;
+    // Track lifetime aggregates here too - _totalSettled / _allPlayers are
+    // dedup'd by uid via the same `seen` check, so re-runs of the cold
+    // boot path won't double-count.
+    _totalSettled++;
+    if (r.player) _allPlayers.add(r.player.toLowerCase());
   }
   if (!added) return false;
   _feedRows.sort((a, b) => (b.blockNumber - a.blockNumber) || (b.logIndex - a.logIndex));
@@ -304,6 +386,14 @@ function hydrateFromCache() {
       stake: BigInt(r.stake),
     }));
     _lastFeedBlock = Number(cached.lastBlock) || 0;
+    // Restore lifetime totals from the cache too, so the BETS SETTLED /
+    // PLAYERS counters show the lifetime number on first paint (otherwise
+    // the cache-hit flash showed `_feedRows.length` ≤ 30 instead of the
+    // real lifetime ~640).
+    _totalSettled = Number(cached.totalSettled) || _feedRows.length;
+    _allPlayers = new Set(Array.isArray(cached.allPlayers)
+      ? cached.allPlayers
+      : _feedRows.map((r) => r.player.toLowerCase()));
     renderFeed();
     return true;
   } catch (_) { return false; }
@@ -314,43 +404,106 @@ function persistCache() {
     const payload = _feedRows.slice(0, FEED_ROW_CAP).map((r) => ({
       ...r, payout: r.payout.toString(), stake: r.stake.toString(),
     }));
-    cacheSet(CACHE_KEY, payload, { lastBlock: _lastFeedBlock });
+    cacheSet(CACHE_KEY, payload, {
+      lastBlock: _lastFeedBlock,
+      totalSettled: _totalSettled,
+      allPlayers: [..._allPlayers],
+    });
   } catch (_) {}
 }
 
 export async function refreshLiveFeed() {
   if (!deployed()) return;
   try {
-    const c = casino();
     const head = await provider().getBlockNumber();
-    // Cold boot: scan backwards from head with early-exit at FEED_ROW_CAP rows.
-    // Subsequent ticks: only fetch the (last_seen_block, head] delta.
-    let settled, placed;
+    const contracts = historicalContracts();
+    const currentContract = contracts.find((c) => c.isCurrent) || contracts[contracts.length - 1];
+
+    // Each cold-boot/incremental fetch tags its events with the source
+    // contract address so eventsToRows can build a contract-namespaced
+    // stake-map key (betIds collide across contracts otherwise).
+    let perContract = []; // [{ contract: addr, settled: [...], placed: [...] }]
     if (_lastFeedBlock === 0) {
-      // Clamp the backward scan to the contract's age — scanning blocks
-      // before deploymentBlock is pure waste.
-      const minScan = _deploymentBlock > 0
-        ? Math.min(FEED_LOOKBACK_BLOCKS, head - _deploymentBlock + 5)
-        : FEED_LOOKBACK_BLOCKS;
-      settled = await fetchRecentLogs(c, "BetSettled", { minCount: FEED_ROW_CAP, maxLookback: minScan });
-      if (settled.length === 0) {
+      // COLD BOOT: scan ALL historical casinos via Shannon Explorer (one HTTP
+      // per contract). With 3 contracts and ~640 BetSettled across all-time,
+      // this is 6 HTTP calls (placed + settled per contract), runs in parallel,
+      // total ~1-2s on a warm cache.
+      const fetches = [];
+      for (const entry of contracts) {
+        const from = entry.deploymentBlock || 0;
+        // Cap each contract's range at the next contract's deployment-1, or
+        // at `head` for the current contract. This is correct AND keeps each
+        // explorer call's response small enough to fit one page (1000 logs).
+        const next = contracts.find((x) => x.deploymentBlock > entry.deploymentBlock);
+        const to = next ? next.deploymentBlock - 1 : head;
+        const addr = entry.contract.target;
+        fetches.push(
+          fetchLogs(entry.contract, "BetSettled", from, to).then((evs) => ({ kind: "settled", addr, evs })),
+          fetchLogs(entry.contract, "BetPlaced",  from, to).then((evs) => ({ kind: "placed",  addr, evs })),
+        );
+      }
+      const results = await Promise.all(fetches);
+      // Bucket per-contract so stake/settled live in the same scope.
+      const byAddr = new Map();
+      const bucket = (addr) => {
+        let b = byAddr.get(addr);
+        if (!b) { b = { contract: addr, settled: [], placed: [] }; byAddr.set(addr, b); }
+        return b;
+      };
+      for (const r of results) {
+        const b = bucket(r.addr);
+        if (r.kind === "settled") b.settled.push(...r.evs);
+        else                      b.placed.push(...r.evs);
+      }
+      perContract = [...byAddr.values()];
+      const totalSettled = perContract.reduce((n, b) => n + b.settled.length, 0);
+      if (totalSettled === 0) {
         const body = document.querySelector("#feed-body");
-        if (body && _feedRows.length === 0) body.innerHTML = `<tr><td class="dim" colspan="5">no settled bets yet — be the first</td></tr>`;
+        if (body && _feedRows.length === 0) body.innerHTML = `<tr><td class="dim" colspan="5">no settled bets yet - be the first</td></tr>`;
         _lastFeedBlock = head;
+        // Still seed the stake map for any placed-but-not-settled rounds.
+        for (const b of perContract) {
+          const lower = b.contract.toLowerCase();
+          for (const ev of b.placed) _stakeByBet.set(`${lower}::${ev.args.betId.toString()}`, ev.args.amount);
+        }
+        renderFeed();
         return;
       }
-      const minBlock = settled[settled.length - 1].blockNumber;
-      placed = await fetchLogs(c, "BetPlaced", minBlock, head);
+      // Cold-boot owns the lifetime aggregates - reset before merge so a
+      // prior cache-hit doesn't get double-counted on top of the fresh
+      // full-history pull. mergeFeedRows re-derives all three as it walks
+      // the fetched events (including _feedRows, which we also clear so
+      // cached-but-stale rows don't poison the dedup map).
+      _feedRows = [];
+      _totalSettled = 0;
+      _allPlayers = new Set();
     } else if (head > _lastFeedBlock) {
-      const fromBlock = _lastFeedBlock + 1;
-      settled = await fetchLogs(c, "BetSettled", fromBlock, head);
-      placed = await fetchLogs(c, "BetPlaced", fromBlock, head);
+      // INCREMENTAL: only the current contract can have new events (older
+      // ones are frozen). Use Shannon Explorer for the small (last, head]
+      // delta - one HTTP per event type.
+      const c = currentContract.contract;
+      const fromBlock = Math.max(_lastFeedBlock + 1, currentContract.deploymentBlock || 0);
+      const [settled, placed] = await Promise.all([
+        fetchLogs(c, "BetSettled", fromBlock, head),
+        fetchLogs(c, "BetPlaced",  fromBlock, head),
+      ]);
+      perContract = [{ contract: c.target, settled, placed }];
     } else {
       return;
     }
-    for (const ev of placed) _stakeByBet.set(ev.args.betId.toString(), ev.args.amount);
-    if (settled.length === 0) { _lastFeedBlock = head; return; }
-    const newRows = eventsToRows(settled, _stakeByBet);
+
+    // Build the namespaced stake map first so eventsToRows can look up each
+    // BetSettled's matching stake.
+    const allNewRows = [];
+    let anySettled = false;
+    for (const b of perContract) {
+      const lower = b.contract.toLowerCase();
+      for (const ev of b.placed) _stakeByBet.set(`${lower}::${ev.args.betId.toString()}`, ev.args.amount);
+      if (b.settled.length) anySettled = true;
+      allNewRows.push(...eventsToRows(b.settled, _stakeByBet, b.contract));
+    }
+    if (!anySettled) { _lastFeedBlock = head; return; }
+    const newRows = allNewRows;
     const animate = _lastFeedBlock > 0; // first cold load: no animation, just render
     const added = mergeFeedRows(newRows);
     _lastFeedBlock = head;
@@ -360,7 +513,7 @@ export async function refreshLiveFeed() {
         if (body) {
           // Animate only the brand-new ones at the top; keep the existing
           // rendered rows in place.
-          const fresh = newRows.filter((r) => _feedRows.slice(0, FEED_ROW_CAP).some((x) => x.betId === r.betId))
+          const fresh = newRows.filter((r) => _feedRows.slice(0, FEED_ROW_CAP).some((x) => x.uid === r.uid))
                                .sort((a, b) => (b.blockNumber - a.blockNumber) || (b.logIndex - a.logIndex));
           if (body.querySelector("td.dim")) body.innerHTML = "";
           for (const r of fresh) appendFeedRow(body, r, true);
@@ -484,7 +637,7 @@ export async function refreshQuorum() {
 }
 
 // ---------------------------------------------------------------------------
-// Block ticker — every second, refresh the block number + median finality.
+// Block ticker - every second, refresh the block number + median finality.
 // Uses WS subscription when available (push), otherwise polls.
 // ---------------------------------------------------------------------------
 
@@ -528,10 +681,10 @@ function renderBlockTicker(blockNumber) {
 }
 
 async function startBlockTicker() {
-  // ALWAYS run the 1-second poll — it's our source of truth. WS is only an
+  // ALWAYS run the 1-second poll - it's our source of truth. WS is only an
   // accelerator that can skip the poll on its tick when a push arrives.
   // (Somnia's WS endpoint sometimes accepts the upgrade but never delivers
-  // a `block` event; the silent-fail mode bit us in v0.8 — hence belt &
+  // a `block` event; the silent-fail mode bit us in v0.8 - hence belt &
   // braces here.)
   let lastSeen = -1;
   async function pull() {
@@ -543,7 +696,7 @@ async function startBlockTicker() {
       recordBlockTimestamp(blk.number, blk.timestamp);
       renderBlockTicker(blk.number);
     } catch (e) {
-      // Transient — withRetry() inside rpc.js already smooths most. Just skip.
+      // Transient - withRetry() inside rpc.js already smooths most. Just skip.
     }
   }
   pull(); // immediate first paint
@@ -585,22 +738,28 @@ async function startFeedRealtime() {
       const wsContract = new ethers.Contract(CONFIG.casino, c.interface.fragments, ws);
       const settledTopic = c.interface.getEvent("BetSettled").topicHash;
       const placedTopic  = c.interface.getEvent("BetPlaced").topicHash;
+      const currentLower = CONFIG.casino.toLowerCase();
       ws.on({ address: CONFIG.casino, topics: [placedTopic] }, (log) => {
         try {
           const parsed = c.interface.parseLog(log);
-          _stakeByBet.set(parsed.args.betId.toString(), parsed.args.amount);
+          // Namespace by current-casino address; matches the cold-boot key
+          // scheme used in eventsToRows / refreshLiveFeed.
+          _stakeByBet.set(`${currentLower}::${parsed.args.betId.toString()}`, parsed.args.amount);
         } catch (_) {}
       });
       ws.on({ address: CONFIG.casino, topics: [settledTopic] }, (log) => {
         try {
           const parsed = c.interface.parseLog(log);
+          const betIdStr = parsed.args.betId.toString();
           const row = {
-            betId: parsed.args.betId.toString(),
+            uid: `${log.transactionHash}:${log.logIndex}`,
+            betId: betIdStr,
+            contract: currentLower,
             player: parsed.args.player,
             game: Number(parsed.args.game),
             won: parsed.args.won,
             payout: BigInt(parsed.args.payout),
-            stake: BigInt(_stakeByBet.get(parsed.args.betId.toString()) || 0n),
+            stake: BigInt(_stakeByBet.get(`${currentLower}::${betIdStr}`) || 0n),
             blockNumber: log.blockNumber,
             logIndex: log.logIndex,
             transactionHash: log.transactionHash,
@@ -612,23 +771,26 @@ async function startFeedRealtime() {
               if (body.querySelector("td.dim")) body.innerHTML = "";
               appendFeedRow(body, row, true);
               // Fade-out bottom rows that exceed the cap rather than yank
-              // them — gentler eye candy, takes ~600ms.
+              // them - gentler eye candy, takes ~600ms.
               while (body.children.length > FEED_ROW_CAP) {
                 const last = body.lastChild;
                 last.style.transition = "opacity 0.6s ease, transform 0.6s ease";
                 last.style.opacity = "0";
                 last.style.transform = "translateY(8px)";
                 setTimeout(() => last.remove(), 650);
-                // bail after one row to avoid stacking removals — fade is async
+                // bail after one row to avoid stacking removals - fade is async
                 break;
               }
             }
             persistCache();
-            // bump totalBets counter optimistically
-            document.querySelectorAll('[data-sl="totalBets"]').forEach((el) => {
-              const cur = Number((el.textContent || "0").replace(/\s/g, "")) || 0;
-              setText(el, fmtNum(cur + 1));
-            });
+            // Push the freshly-incremented lifetime aggregates to every
+            // hero label. mergeFeedRows already updated _totalSettled +
+            // _allPlayers - we just relay them to the DOM since this WS
+            // path doesn't go through renderFeed().
+            document.querySelectorAll('[data-sl="totalBets"]').forEach((el) => setText(el, fmtNum(_totalSettled)));
+            document.querySelectorAll('[data-sl="playersOnline"]').forEach((el) => setText(el, fmtNum(_allPlayers.size)));
+            document.querySelectorAll('[data-count][data-sl-role="totalBets"]').forEach((el) => { el.textContent = fmtNum(_totalSettled); });
+            document.querySelectorAll('[data-count][data-sl-role="playersOnline"]').forEach((el) => { el.textContent = fmtNum(_allPlayers.size); });
           }
         } catch (e) { console.warn("[livedata] ws settled parse:", e.message); }
       });
@@ -653,7 +815,7 @@ async function boot() {
   setTimeout(refreshAgentIds, 50);
   setTimeout(refreshAgentIds, 250);
 
-  // Hydrate from cache first — gives an instant first paint.
+  // Hydrate from cache first - gives an instant first paint.
   if (deployed()) {
     hydrateFromCache();
   }
@@ -663,7 +825,7 @@ async function boot() {
   // Start the block-ticker poll FIRST so the header keeps moving even if
   // the cold-start log scans below take a while (or hang on a flaky RPC).
   // The ticker is the single most visible "is anything alive" signal, and
-  // it's cheap — one eth_getBlockByNumber per 3s.
+  // it's cheap - one eth_getBlockByNumber per 3s.
   startBlockTicker();
   startFeedRealtime();
 

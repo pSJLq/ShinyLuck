@@ -1,6 +1,8 @@
 // agent-service entrypoint: HTTP API + tick scheduler.
 
-require("dotenv").config();
+// Look for .env next to THIS script, not in cwd - dev:play runs us from
+// the repo root, where there's a different .env that doesn't have our keys.
+require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 const relayer = require("./relayer");
 const apiMod = require("./api");
 const executor = require("./strategies/executor");

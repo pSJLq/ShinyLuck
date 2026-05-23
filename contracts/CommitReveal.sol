@@ -6,7 +6,7 @@ pragma solidity ^0.8.24;
 /// @dev    Randomness recipe (must match off-chain verifier):
 ///         keccak256(serverSeed, clientSeed, blockhash(commitBlock + REVEAL_DELAY), nonce)
 ///
-///         REVEAL_DELAY = 3 means the verifier reads blockhash of (commitBlock + 3).
+///         REVEAL_DELAY = 1 means the verifier reads blockhash of (commitBlock + 1).
 ///         Rules (enforced by the consuming contract via the helpers below):
 ///           - reveal allowed when block.number > commitBlock + REVEAL_DELAY
 ///             (strict >; on equality blockhash(current block) is 0, which would
@@ -17,7 +17,12 @@ pragma solidity ^0.8.24;
 ///             server seed; expired bets MUST NOT be settled with bogus 0 hash
 library CommitReveal {
     /// @notice Number of blocks between commit and the block whose hash is mixed in.
-    uint256 internal constant REVEAL_DELAY = 3;
+    ///         Was 3 on the initial deploy; trimmed to 1 to cut ~2.4s (2 blocks
+    ///         × 1.2s Somnia block time) off the spin loop. Reveal becomes
+    ///         possible at commitBlock+2 instead of commitBlock+4. Security is
+    ///         unchanged - randomness still pulls from a block whose hash was
+    ///         not known at commit time, and the seed commitment remains.
+    uint256 internal constant REVEAL_DELAY = 1;
 
     /// @notice Maximum age (in blocks) of (commitBlock + REVEAL_DELAY) for which
     ///         blockhash(...) is non-zero. EVM exposes the last 256 blocks.

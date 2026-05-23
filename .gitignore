@@ -36,9 +36,23 @@ Thumbs.db
 # agent-service local DB
 agent-service/*.sqlite
 agent-service/*.db
+agent-service/data/
 
 # demo-bot wallets
 demo-bot/wallets.json
+
+# Local runtime state (per-user strategies, HM cron state)
+data/
+**/hm-state.json
+
+# Tooling working directories — never commit these
+.claude/
+slots-from-design/
+
+# Personal working files (hackathon submission drafts, notes, etc.)
+SUBMISSION.md
+NOTES.md
+TODO.md
 
 # seeds revealed off-chain — must NEVER be committed
 deployments/seeds/

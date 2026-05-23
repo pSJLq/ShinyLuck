@@ -10,7 +10,7 @@
 //   - explorerTxUrl / explorerAddrUrl
 //   - DOM helpers ($, $$, setText)
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { SL } from "../wallet.js";
 import { CONFIG } from "../config.js";
 import { CHAINS } from "../shinyluck-sdk.js";

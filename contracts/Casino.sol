@@ -14,10 +14,10 @@ import {ClusterLib} from "./lib/ClusterLib.sol";
 ///         provably fair via commit-reveal + future blockhash.
 ///
 /// @dev Game flavours:
-///        DICE / MINES / PLINKO / SLOTS  — per-bet (commit-reveal each call).
-///        CRASH    — round-based: 30s open betting window, then a single
+///        DICE / MINES / PLINKO / SLOTS  - per-bet (commit-reveal each call).
+///        CRASH    - round-based: 30s open betting window, then a single
 ///                   crashPoint is revealed for everyone in the round.
-///        ROULETTE — round-based: 30s window with up to 5 multi-bets per
+///        ROULETTE - round-based: 30s window with up to 5 multi-bets per
 ///                   player, a single result number resolves all of them.
 ///
 ///      Round-based games still bind to a server-seed slot consumed via
@@ -35,11 +35,11 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     enum GameType {
         DICE,
         CRASH,
-        SLOTS,      // VAULT.7 — 5×3, 20 paylines, WILD + SCATTER
+        SLOTS,      // VAULT.7 - 5×3, 20 paylines, WILD + SCATTER
         MINES,
         PLINKO,
         ROULETTE,
-        CLUSTER     // SUGAR.LAB — 7×7 cluster pays, tumble cascades
+        CLUSTER     // SUGAR.LAB - 7×7 cluster pays, tumble cascades
     }
 
     /// @dev DICE params: target in [2,98], direction (0 = under, 1 = over).
@@ -61,7 +61,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     }
 
     // ---------------------------------------------------------------------
-    // Storage — RNG
+    // Storage - RNG
     // ---------------------------------------------------------------------
 
     bytes32[] public seedHashes;
@@ -69,7 +69,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     mapping(uint256 => bytes32) public revealedSeed;
 
     // ---------------------------------------------------------------------
-    // Storage — Bets (per-bet flow)
+    // Storage - Bets (per-bet flow)
     // ---------------------------------------------------------------------
 
     Bet[] private _bets;
@@ -77,7 +77,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant BET_HISTORY_CAP = 200;
 
     // ---------------------------------------------------------------------
-    // Storage — bankroll / policy
+    // Storage - bankroll / policy
     // ---------------------------------------------------------------------
 
     uint256 public lockedReserve;
@@ -96,16 +96,20 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant CIRCUIT_BREAKER_LOSS_BPS = 2000;
 
     // ---------------------------------------------------------------------
-    // Storage — auth
+    // Storage - auth
     // ---------------------------------------------------------------------
 
     address public houseManager;
 
     // ---------------------------------------------------------------------
-    // Storage — owner timelock
+    // Storage - owner timelock
     // ---------------------------------------------------------------------
 
-    uint256 public constant OWNER_WITHDRAW_DELAY = 24 hours;
+    // Testnet build: timelock disabled so the operator can claw STT back
+    // without a 24h wait between redeploys. Restore to `24 hours` before any
+    // mainnet deploy - a real timelock is a load-bearing mitigation against
+    // a compromised owner key draining the bankroll.
+    uint256 public constant OWNER_WITHDRAW_DELAY = 0;
     struct PendingWithdraw { uint128 amount; uint64 readyAt; }
     PendingWithdraw public ownerWithdrawal;
 
@@ -205,7 +209,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     // Free-spin loyalty programme
     //
     // Every 150 placed slot/cluster bets earn the player +5 guaranteed free
-    // spins. Free spins are bookkept on-chain — no off-chain trust. The
+    // spins. Free spins are bookkept on-chain - no off-chain trust. The
     // counters are global across SLOTS + CLUSTER (any slot spin counts).
     //
     // Free-spin redemption: when `useFreeSpin=true` is passed to
@@ -228,7 +232,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant FREE_SPINS_PER_BONUS = 5;
     uint256 internal constant VAULT7_FREE_SPIN_MULT_X100 = 200; // 2× during free spins
     uint256 internal constant FREE_SPIN_REFERENCE_STAKE = 0.001 ether; // 0.001 STT notional
-    /// @dev Floor stake that actually progresses the loyalty counter — keeps
+    /// @dev Floor stake that actually progresses the loyalty counter - keeps
     ///      a 20-wei spam attack from earning free spins for free.
     uint256 internal constant LOYALTY_MIN_STAKE = 0.001 ether;
 
@@ -246,7 +250,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         toNext = SPINS_PER_BONUS - (uint256(s.totalSpins) % SPINS_PER_BONUS);
     }
 
-    /// @dev Caller passes the actual stake — only spins above LOYALTY_MIN_STAKE
+    /// @dev Caller passes the actual stake - only spins above LOYALTY_MIN_STAKE
     ///      tick the counter so a 20-wei dust-spam can't farm free spins.
     function _tickSlotCounter(address player, uint256 stake) internal {
         if (stake < LOYALTY_MIN_STAKE) return;
@@ -380,7 +384,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     function houseEdgeBps(GameType g) public view returns (uint256 bps) {
         if (g == GameType.DICE)        bps = 100;
         else if (g == GameType.CRASH)  bps = 300;
-        // SLOTS / CLUSTER edge is *inside* the symbol pay tables — the math
+        // SLOTS / CLUSTER edge is *inside* the symbol pay tables - the math
         // is the edge. Applying additional bps here on top of the resolver
         // would double-discount payouts. The pay-table boosts in `_settleBet`
         // (VAULT7_PAY_BOOST_X100 / CLUSTER_PAY_BOOST_X100) put the empirical
@@ -390,14 +394,14 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         else if (g == GameType.SLOTS)  bps = 0;
         else if (g == GameType.MINES)  bps = 120;
         else if (g == GameType.PLINKO) bps = 150;
-        else if (g == GameType.ROULETTE) bps = 526;   // American (00) wheel — 5.26% edge
-        else if (g == GameType.CLUSTER)  bps = 0;     // SUGAR.LAB — math is the edge
+        else if (g == GameType.ROULETTE) bps = 526;   // American (00) wheel - 5.26% edge
+        else if (g == GameType.CLUSTER)  bps = 0;     // SUGAR.LAB - math is the edge
 
         if (bonusModeActive()) bps = bps / 2;
     }
 
     // ---------------------------------------------------------------------
-    // Reported RTP — the "publish" number shown on game pages. Differs from
+    // Reported RTP - the "publish" number shown on game pages. Differs from
     // the math edge for slots: math gives ~96% but we publish a conservative
     // 92% floor that the autonomous HouseManager Agent can flex ±2% based on
     // bankroll health (see HouseManager._onEvent). For DICE/CRASH/MINES/
@@ -461,10 +465,10 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     }
 
     // =====================================================================
-    // SLOTS — VAULT.7  (5×3 / 20 paylines / WILD + SCATTER)
+    // SLOTS - VAULT.7  (5×3 / 20 paylines / WILD + SCATTER)
     // =====================================================================
     //   Symbol IDs (matches Vault7Lib + slots/engine.js):
-    //     0..3 = LOW fruits (E, D, F, A — different per-reel weights)
+    //     0..3 = LOW fruits (E, D, F, A - different per-reel weights)
     //     4..5 = MID bonus  (COIN, BOLT)
     //     6..7 = HIGH       (CRYS, DIAM)
     //     8    = WILD
@@ -518,12 +522,12 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     }
 
     // =====================================================================
-    // CLUSTER — SUGAR.LAB  (7×7 cluster pays · tumble cascades)
+    // CLUSTER - SUGAR.LAB  (7×7 cluster pays · tumble cascades)
     // =====================================================================
 
     /// @dev Hard cap on a single SUGAR.LAB payout, basis 100. STATS.md
     ///      quotes 25,000× as a "max-win" headline, but on a 32 STT bankroll
-    ///      reserving 25,000× per bet means a 0.0013 STT max bet — unplayable.
+    ///      reserving 25,000× per bet means a 0.0013 STT max bet - unplayable.
     ///      We cap at 2,500× to keep bankroll reservations sane; empirical
     ///      single-spin payouts under the boost rarely exceed ~100× stake
     ///      outside of long sticky-mult free-spin chains (see validate-rtp.js).
@@ -533,24 +537,26 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     ///      pay tables, run through the cluster engine, intrinsically yield
     ///      only ~40% RTP (see `scripts/validate-rtp.js`). This basis-100
     ///      multiplier scales the resolver output so empirical RTP (base +
-    ///      charge meter) lands at ~91-92%.
-    ///         BOOST × intrinsic = target →  3.20 × 0.40 + charge 0.14 ≈ 0.91
+    ///      charge meter) lands at ~92%.
+    ///      Monte-Carlo verified at 100K spins (scripts/_rtp-simulation-full.js):
+    ///         320 → 89.21% total (base 74.78 + charge 14.17 + loyalty FS 0.26)
+    ///         332 → 92.01% total (base 77.59 + charge ~14.17 + loyalty FS ~0.25)
     ///      MUST stay in sync with `frontend/games/sugar/engine.js`
     ///      `SUGAR_PAY_BOOST` constant.
-    uint256 internal constant CLUSTER_PAY_BOOST_X100 = 320;
+    uint256 internal constant CLUSTER_PAY_BOOST_X100 = 332;
 
     /// @dev Buy Bonus multipliers (megaprompt Section 1.1). Player pays
     ///      `MULT × unitStake`; the bet is settled as a single high-variance
     ///      spin at the elevated bet amount, so payouts scale linearly with
     ///      the premium. Same RTP envelope as a regular spin, just bigger
-    ///      stake. (Forced-scatter variant requires resolver rewrite — v2.)
+    ///      stake. (Forced-scatter variant requires resolver rewrite - v2.)
     uint256 internal constant BUY_BONUS_SUGAR_MULTIPLIER = 100;
     uint256 internal constant BUY_BONUS_VAULT_MULTIPLIER = 75;
 
     event BuyBonusPlaced(uint256 indexed betId, address indexed player, uint8 game, uint256 totalStake, uint256 unitStake);
 
     // ---------------------------------------------------------------------
-    // Charge Meter (SUGAR.LAB) — per-player accumulator with a hidden random
+    // Charge Meter (SUGAR.LAB) - per-player accumulator with a hidden random
     // threshold. Each cluster spin increments the meter. When it crosses the
     // threshold, a weighted reward is rolled and the meter resets with a new
     // threshold. Mirrors cluster-engine.js CHARGE_REWARDS table.
@@ -657,7 +663,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         if (unitStake == 0) revert InvalidBet("stake too small");
         _tickSlotCounter(msg.sender, msg.value);
         uint256 maxPayout = (msg.value * CLUSTER_MAX_MULT_X100) / 100;
-        // params = abi.encode(useFreeSpin=false, buyBonus=true) — settle path
+        // params = abi.encode(useFreeSpin=false, buyBonus=true) - settle path
         // ignores the buyBonus flag for now (resolver still runs unmodified),
         // but it's stored so the frontend / subgraph can surface it.
         betId = _openBet(GameType.CLUSTER, msg.value, clientSeed, maxPayout, abi.encode(false, true));
@@ -1255,7 +1261,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         }
         if (total != msg.value) revert InvalidBet("value sum");
         // Stake & bankroll caps applied to the *sum* (treat one tx as one bet
-        // for cap purposes — multi-bet is convenience, not a way to dodge caps).
+        // for cap purposes - multi-bet is convenience, not a way to dodge caps).
         if (gameMaxBet[GameType.ROULETTE] > 0 && total > gameMaxBet[GameType.ROULETTE]) revert BetTooLarge();
         uint256 free = freeBankroll();
         uint256 bpsCap = (free * maxBetBps) / 10000;
@@ -1283,7 +1289,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         }
         bytes32 blockHash = blockhash(uint256(r.commitBlock) + CommitReveal.REVEAL_DELAY);
         bytes32 randomness = keccak256(abi.encodePacked(stored, blockHash, r.roundId));
-        // American wheel: 38 outcomes — 0, 1..36, 00 (encoded as 37).
+        // American wheel: 38 outcomes - 0, 1..36, 00 (encoded as 37).
         uint8 result = uint8(uint256(randomness) % 38);
         r.resultNumber = result;
         r.serverSeed = stored;
@@ -1535,7 +1541,16 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
             // after the resolver returns, before the cap clamp.
             (uint256 p, uint8[15] memory grid, uint256 lineMult, uint8 scatterCount, uint256 scatterPay) =
                 Vault7Lib.resolve(bet.amount, randomness, 0, freeMult);
-            payout = (p * VAULT7_PAY_BOOST_X100) / 100;
+            // BONUS MODE for zero-edge games. houseEdgeBps() halves bps for
+            // dice/crash/mines/plinko/roulette during bonus mode but SLOTS/
+            // CLUSTER have bps=0 - half of zero does nothing. To make Bonus
+            // Mode actually affect slot/cluster RTP we additively bump the
+            // pay-boost by 32 points (~+4% RTP) during the bonus window.
+            // 560 → 592 puts vault7 RTP from ~92% to ~96%.
+            uint256 boostX100 = bonusModeActive()
+                ? VAULT7_PAY_BOOST_X100 + 32
+                : VAULT7_PAY_BOOST_X100;
+            payout = (p * boostX100) / 100;
             uint256 vaultCap = (uint256(bet.amount) * VAULT7_MAX_MULT_X100) / 100;
             if (payout > vaultCap) payout = vaultCap;
             // For a free spin, ANY non-zero payout is a "win" (we don't have a
@@ -1549,8 +1564,15 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
             // ClusterLib.totalPayoutX100 is basis-100 of stake (per STATS.md
             // pay tables). Multiply by CLUSTER_PAY_BOOST_X100 to land at the
             // STATS.md ~92% RTP target, then clamp at CLUSTER_MAX_MULT_X100.
+            // Bonus Mode adds +18 to the boost (~+5.4% RTP, lifting cluster
+            // from ~92% to ~97% while the bonus window is active). See the
+            // SLOTS branch above for the rationale - bps/2 in houseEdgeBps()
+            // is a no-op for the zero-edge games.
             uint256 stake = bet.amount;
-            uint256 raw = (stake * rr.totalPayoutX100 * CLUSTER_PAY_BOOST_X100) / 10_000;
+            uint256 boostX100 = bonusModeActive()
+                ? CLUSTER_PAY_BOOST_X100 + 18
+                : CLUSTER_PAY_BOOST_X100;
+            uint256 raw = (stake * rr.totalPayoutX100 * boostX100) / 10_000;
             uint256 capped = (stake * CLUSTER_MAX_MULT_X100) / 100;
             payout = raw;
             if (payout > capped) payout = capped;
@@ -1603,7 +1625,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         uint256 reserveRelease = isFree ? maxPayout : maxPayout - bet.amount;
         lockedReserve -= reserveRelease;
         if (isFree) {
-            // Player didn't actually pay anything — give the free spin back
+            // Player didn't actually pay anything - give the free spin back
             // instead of crediting a stake refund.
             playerSlotState[bet.player].freeSpinsUsed -= 1;
             emit BetRefunded(betId, bet.player, 0, reason);

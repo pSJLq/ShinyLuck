@@ -1,5 +1,5 @@
 // Top up the live Casino's bankroll. Reads target casino addr from the
-// deployments manifest (or env var). Calls depositBankroll() — emits
+// deployments manifest (or env var). Calls depositBankroll() - emits
 // BankrollDeposited which the subgraph / livedata can pick up.
 //
 //   AMOUNT=30 npx hardhat run scripts/topup-bankroll.js --network somniaTestnet

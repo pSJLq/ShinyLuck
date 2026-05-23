@@ -1,5 +1,5 @@
 /* ============================================================================
- * vault7/engine.js — pure math + ResultData generator for VAULT.7 (5×3, 20 lines)
+ * vault7/engine.js - pure math + ResultData generator for VAULT.7 (5×3, 20 lines)
  * No DOM. Deterministic from seed. Wei (bigint) for amounts.
  * ============================================================================ */
 
@@ -9,7 +9,7 @@ export const SYMBOL_INDEX = {
 };
 export const SYMBOL_BY_INDEX = ['WILD','DIAM','CRYS','BOLT','COIN','A','F','D','E','SCAT'];
 
-// pay table — [3-of-a-kind, 4, 5] (multiplier of line bet)
+// pay table - [3-of-a-kind, 4, 5] (multiplier of line bet)
 export const SYMBOL_PAY = {
   WILD: [50, 200, 800],
   DIAM: [25, 100, 400],
@@ -24,7 +24,7 @@ export const SYMBOL_PAY = {
 
 const SCATTER_PAY = { 3: 2, 4: 10, 5: 50 }; // × total stake
 
-// RTP boost — the STATS.md pay tables alone deliver only ~30% RTP (see
+// RTP boost - the STATS.md pay tables alone deliver only ~30% RTP (see
 // `scripts/validate-rtp.js`). This multiplier scales every line / scatter
 // payout uniformly so empirical RTP lands at ~91-92%. MUST stay in sync
 // with `contracts/Casino.sol::VAULT7_PAY_BOOST_X100` (560 = 5.60).

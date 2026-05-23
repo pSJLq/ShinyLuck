@@ -80,7 +80,7 @@
       <div class="acc-avatar"></div>
       <div>
         <h1 data-sl-acc-addr-short>connect wallet</h1>
-        <div class="addr">address · <b data-sl-acc-addr-full>—</b><span data-sl-acc-readonly class="readonly-pill" style="display:none;">READ-ONLY</span></div>
+        <div class="addr">address · <b data-sl-acc-addr-full>-</b><span data-sl-acc-readonly class="readonly-pill" style="display:none;">READ-ONLY</span></div>
       </div>
     </div>
     <div class="acc-actions">
@@ -97,17 +97,17 @@
         <div class="acc-balance">
           <div class="b">
             <div class="l">Wallet balance</div>
-            <div class="v cyan"><span data-sl-acc-balance>—</span> STT</div>
+            <div class="v cyan"><span data-sl-acc-balance>-</span> STT</div>
             <div class="d">native balance on Somnia</div>
           </div>
           <div class="b">
             <div class="l">Pending withdrawal</div>
-            <div class="v"><span data-sl-acc-pending>—</span> STT</div>
+            <div class="v"><span data-sl-acc-pending>-</span> STT</div>
             <div class="d">claimable winnings · <button data-sl-acc-claim style="background:none;border:1px solid var(--cyan);color:var(--cyan);padding:2px 8px;font-size:10px;letter-spacing:1px;cursor:pointer;">CLAIM</button></div>
           </div>
           <div class="b">
             <div class="l">Net P&amp;L (window)</div>
-            <div class="v" data-sl-acc-pnl>—</div>
+            <div class="v" data-sl-acc-pnl>-</div>
             <div class="d" data-sl-acc-bets>0 bets</div>
           </div>
         </div>
@@ -130,8 +130,8 @@
           <g data-sl-acc-chart-axis></g>
           <path class="acc-chart-fill"  d="" fill="url(#accFill)"/>
           <path class="acc-chart-line"  d="" fill="none" stroke="#22D3EE" stroke-width="2"/>
-          <text x="780" y="14" text-anchor="end" class="acc-chart-axis" data-sl-acc-chart-max>—</text>
-          <text x="780" y="196" text-anchor="end" class="acc-chart-axis" data-sl-acc-chart-min>—</text>
+          <text x="780" y="14" text-anchor="end" class="acc-chart-axis" data-sl-acc-chart-max>-</text>
+          <text x="780" y="196" text-anchor="end" class="acc-chart-axis" data-sl-acc-chart-min>-</text>
         </svg>
       </div>
 
@@ -181,7 +181,7 @@
       <div class="acc-card">
         <h3>Wallet · receive / send</h3>
         <div style="font-size: 11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">YOUR ADDRESS</div>
-        <div style="font-size: 11px; word-break: break-all; color: var(--cyan); margin-bottom: 4px;" data-sl-acc-receive-addr>—</div>
+        <div style="font-size: 11px; word-break: break-all; color: var(--cyan); margin-bottom: 4px;" data-sl-acc-receive-addr>-</div>
         <button class="adm-btn" style="border:1px solid var(--line); background:none; color:var(--cyan); padding: 4px 10px; font-size: 10px; cursor:pointer; margin-bottom: 12px;" data-sl-acc-copy-receive>copy address</button>
         <a class="adm-btn" style="display:inline-block; border:1px solid var(--line); color:var(--fg); padding: 4px 10px; font-size: 10px; margin-left: 6px;" href="https://testnet.somnia.network/faucet" target="_blank" rel="noopener" data-sl-acc-faucet>get test STT ↗</a>
         <div style="border-top: 1px dashed var(--line-2); margin: 14px 0;"></div>
@@ -199,13 +199,13 @@
 
       <div class="acc-card">
         <h3>Stats (window)</h3>
-        <div class="acc-stat-row"><span class="l">Bets settled</span><span class="v" data-sl-acc-stat-bets>—</span></div>
-        <div class="acc-stat-row"><span class="l">Wins</span><span class="v green" data-sl-acc-stat-wins>—</span></div>
-        <div class="acc-stat-row"><span class="l">Win rate</span><span class="v" data-sl-acc-stat-winrate>—</span></div>
-        <div class="acc-stat-row"><span class="l">Wagered</span><span class="v" data-sl-acc-stat-wagered>—</span></div>
-        <div class="acc-stat-row"><span class="l">Returned</span><span class="v" data-sl-acc-stat-returned>—</span></div>
-        <div class="acc-stat-row"><span class="l">Biggest win</span><span class="v cyan" data-sl-acc-stat-biggestwin>—</span></div>
-        <div class="acc-stat-row"><span class="l">Longest streak</span><span class="v" data-sl-acc-stat-streak>—</span></div>
+        <div class="acc-stat-row"><span class="l">Bets settled</span><span class="v" data-sl-acc-stat-bets>-</span></div>
+        <div class="acc-stat-row"><span class="l">Wins</span><span class="v green" data-sl-acc-stat-wins>-</span></div>
+        <div class="acc-stat-row"><span class="l">Win rate</span><span class="v" data-sl-acc-stat-winrate>-</span></div>
+        <div class="acc-stat-row"><span class="l">Wagered</span><span class="v" data-sl-acc-stat-wagered>-</span></div>
+        <div class="acc-stat-row"><span class="l">Returned</span><span class="v" data-sl-acc-stat-returned>-</span></div>
+        <div class="acc-stat-row"><span class="l">Biggest win</span><span class="v cyan" data-sl-acc-stat-biggestwin>-</span></div>
+        <div class="acc-stat-row"><span class="l">Longest streak</span><span class="v" data-sl-acc-stat-streak>-</span></div>
       </div>
 
       <div class="acc-card">
@@ -217,9 +217,9 @@
 
       <div class="acc-card">
         <h3>Player-agent</h3>
-        <div class="acc-stat-row"><span class="l">Status</span><span class="v" data-sl-acc-agent-status>—</span></div>
-        <div class="acc-stat-row"><span class="l">Vault</span><span class="v cyan" data-sl-acc-agent-vault>—</span></div>
-        <div class="acc-stat-row"><span class="l">Daily / spent</span><span class="v" data-sl-acc-agent-daily>—</span></div>
+        <div class="acc-stat-row"><span class="l">Status</span><span class="v" data-sl-acc-agent-status>-</span></div>
+        <div class="acc-stat-row"><span class="l">Vault</span><span class="v cyan" data-sl-acc-agent-vault>-</span></div>
+        <div class="acc-stat-row"><span class="l">Daily / spent</span><span class="v" data-sl-acc-agent-daily>-</span></div>
         <div style="margin-top: 12px;">
           <a href="agent.html" data-link style="color:var(--cyan); font-size: 11px; letter-spacing: 1.5px;">manage on /agent →</a>
         </div>

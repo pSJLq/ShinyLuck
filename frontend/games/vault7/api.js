@@ -1,5 +1,5 @@
 /* ============================================================================
- * vault7/api.js — PUBLIC API. Exports class Vault7Slot.
+ * vault7/api.js - PUBLIC API. Exports class Vault7Slot.
  * Same shape as SugarSlot but for VAULT.7 (5×3 classic).
  * ============================================================================ */
 
@@ -103,9 +103,9 @@ export class Vault7Slot {
       // wrapper; here we just translate a couple of high-frequency ones.
       const msg = String(e?.message || e);
       if (/0x61bc0a1e|GameIsPaused/i.test(msg)) {
-        this.opts.onError?.({ kind: 'paused', message: 'VAULT.7 is temporarily paused — try again in a few seconds.' });
+        this.opts.onError?.({ kind: 'paused', message: 'VAULT.7 is temporarily paused - try again in a few seconds.' });
       } else if (/BankrollInsufficient|0x8f523bc4/i.test(msg)) {
-        this.opts.onError?.({ kind: 'bankroll', message: 'Casino bankroll low — try a smaller stake.' });
+        this.opts.onError?.({ kind: 'bankroll', message: 'Casino bankroll low - try a smaller stake.' });
       } else {
         this.opts.onError?.({ kind: 'revert', message: e?.shortMessage || msg.slice(0, 200) });
       }
@@ -116,7 +116,7 @@ export class Vault7Slot {
     this._updateUI();
 
     // Mark this play() as user-initiated. The animator's play() refuses
-    // to run otherwise — protects against rogue callers on mount.
+    // to run otherwise - protects against rogue callers on mount.
     this.animator._userInitiated = true;
     try { await this.animator.play(result); }
     finally { this.animator._userInitiated = false; }
@@ -127,7 +127,7 @@ export class Vault7Slot {
     if (result.totalPayout > 0n) {
       lw.textContent = '+' + fmtStt(result.totalPayout) + ' STT'; lw.classList.remove('zero');
       this._pushTicker({ who: 'YOU', amountWei: result.totalPayout, fresh: true, mega: Number(result.totalPayout) / Number(this.stakeWei) >= 25 });
-    } else { lw.textContent = '— no win'; lw.classList.add('zero'); }
+    } else { lw.textContent = '- no win'; lw.classList.add('zero'); }
 
     // bonus end summary
     if (result.freeSpins?.length > 0) {
@@ -171,7 +171,7 @@ export class Vault7Slot {
     <div class="ambient-orb o3"></div>
   </div>
 
-  <!-- Slot's own nav-bar hidden — partials.js provides shared site nav.
+  <!-- Slot's own nav-bar hidden - partials.js provides shared site nav.
        We keep the data-sound button (wired by _wireControls + 'M' shortcut)
        and data-balance-mini in the DOM tree, just invisible. -->
   <div class="nav-bar" style="display:none">
@@ -256,8 +256,8 @@ export class Vault7Slot {
         <div class="balance-block">
           <div class="lbl">BALANCE</div>
           <div class="balance"><span class="cur">STT</span><span data-balance>1,000.00</span></div>
-          <div class="last-win zero" data-last-win>— no win yet</div>
-          <div class="ev-note">Honest 92% RTP — published from contract</div>
+          <div class="last-win zero" data-last-win>- no win yet</div>
+          <div class="ev-note">Honest 92% RTP - published from contract</div>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-/* ShinyLuck — interactivity */
+/* ShinyLuck - interactivity */
 
 // =============== ENTER LOBBY SMOOTH SCROLL ===============
 document.addEventListener('click', (e) => {
@@ -7,6 +7,29 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   const target = document.querySelector('#games') || document.querySelector('.game-grid');
   if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+// =============== BETA STICKER ON LOBBY GAME CARDS ===============
+// Mirrors the full TESTING ribbon on the actual game pages but smaller -
+// a corner badge on each lobby card so users see at a glance which games
+// are polished (sugar, dice) and which are still rough. pointer-events:none
+// keeps the card clickable through the sticker.
+document.addEventListener('DOMContentLoaded', () => {
+  const BETA_GAMES = ['crash', 'vault7', 'mines', 'plinko', 'roulette'];
+  document.querySelectorAll('a.game[href*="games/"]').forEach((card) => {
+    const href = (card.getAttribute('href') || '').toLowerCase();
+    if (!BETA_GAMES.some((g) => href.includes('/' + g))) return;
+    if (card.querySelector('.sl-beta-card-sticker')) return; // already injected
+    const sticker = document.createElement('div');
+    sticker.className = 'sl-beta-card-sticker';
+    sticker.innerHTML = '<span>BETA</span>';
+    sticker.title = 'This game is in beta - Sugar.Lab and Dice are the polished demos';
+    // Anchor inside the preview wrap if present (so the sticker sits over
+    // the artwork, not below the meta block). Fallback to the card itself.
+    const host = card.querySelector('.game-preview-wrap') || card;
+    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    host.appendChild(sticker);
+  });
 });
 
 // =============== CUSTOM CURSOR ===============
@@ -80,10 +103,10 @@ function countUp(el, to, opts = {}) {
 
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-count]').forEach(el => {
-    // Skip elements managed by livedata.js — they get real values, not the
-    // hardcoded `data-count` placeholder. Show "—" until the live read lands.
+    // Skip elements managed by livedata.js - they get real values, not the
+    // hardcoded `data-count` placeholder. Show "-" until the live read lands.
     if (el.dataset.slRole || el.hasAttribute('data-sl')) {
-      el.textContent = "—";
+      el.textContent = "-";
       return;
     }
     const target = parseFloat(el.dataset.count);
@@ -94,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
       duration: parseInt(el.dataset.duration || '1800')
     });
   });
-  // Jackpot ticker removed — replaced by live casino contract address pill in hero.
+  // Jackpot ticker removed - replaced by live casino contract address pill in hero.
 });
 
 // =============== LIVE BETS FEED ===============
@@ -128,29 +151,26 @@ function createFeedRow() {
     <td class="game-name" style="color:${GAME_COLORS[game]}">${game}</td>
     <td class="dim">${randomAddr()}</td>
     <td>${bet.toFixed(3)} STT</td>
-    <td class="dim">${mult ? mult.toFixed(2) + 'x' : '—'}</td>
+    <td class="dim">${mult ? mult.toFixed(2) + 'x' : '-'}</td>
     <td class="${win ? 'win' : 'lose'}">${win ? '+' : ''}${pnl.toFixed(3)} STT</td>
   `;
   return tr;
 }
 // Live feed is populated by frontend/lib/livedata.js from real BetSettled
 // events. The createFeedRow / random-address generator above is dead code,
-// kept only because some pages still import app.js — but it is never called.
+// kept only because some pages still import app.js - but it is never called.
 
 // =============== AGENT ACTIVITY BARS ===============
+// Was random eye-candy. Now driven by lib/agent-activity.js which pulls
+// real on-chain events (HM ReactiveBetSettledHandled / ReactiveHourlyTick /
+// RtpAnalysisRequested / RtpAnalysisResolved, Verifier QuorumResult).
+// Left in place here as a 0-fill so the bars render at all if the module
+// is slow to load - agent-activity.js overwrites once cold-start completes.
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.agent-bar').forEach(bar => {
+    if (bar.children.length > 0) return; // already populated by the module
     const N = 28;
     bar.innerHTML = Array.from({ length: N }, () => '<span></span>').join('');
-    const cells = bar.querySelectorAll('span');
-    function tick() {
-      cells.forEach(c => {
-        c.style.height = (Math.random() * 26 + 3) + 'px';
-        c.classList.toggle('on', Math.random() > 0.4);
-      });
-    }
-    tick();
-    setInterval(tick, 1400 + Math.random() * 600);
   });
 });
 
@@ -191,7 +211,7 @@ document.addEventListener('DOMContentLoaded', () => {
       linePath.style.animation = 'none';
       areaPath.style.animation = 'none';
       // The initial CSS draw-line animation leaves stroke-dashoffset=600
-      // (fully hidden) — when JS takes over and updates `d`, the path keeps
+      // (fully hidden) - when JS takes over and updates `d`, the path keeps
       // updating but stays invisible because of the dash gap. Reset both
       // dash attrs so the live curve is drawn as a solid line.
       linePath.removeAttribute('stroke-dasharray');
@@ -227,7 +247,7 @@ document.addEventListener('DOMContentLoaded', () => {
   startRound();
 });
 
-// =============== SLOTS — sequential stop ===============
+// =============== SLOTS - sequential stop ===============
 document.addEventListener('DOMContentLoaded', () => {
   const slots = document.querySelectorAll('.slots, .slots-big');
   slots.forEach(slot => {

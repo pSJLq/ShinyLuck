@@ -1,5 +1,5 @@
 /* ============================================================================
- * vault7/animation.js — data-driven reel-stop animation. NO RNG. NO MATH.
+ * vault7/animation.js - data-driven reel-stop animation. NO RNG. NO MATH.
  * Consumes Vault7ResultData and animates reels/paylines.
  * ============================================================================ */
 
@@ -74,7 +74,7 @@ export class Vault7Animator {
     const reels = $$('.reel', this.reelsEl);
     if (!reels.length) return;
     const w = reels[0].clientWidth;
-    // GUARD (per claude-design diagnosis): if the container hasn't been
+    // GUARD (per design diagnosis): if the container hasn't been
     // laid out yet, w is 0, cells get height: 0, and the entire grid
     // collapses. We retry on the next rAF tick until the container has
     // a real size. ResizeObserver picks up any subsequent change.
@@ -109,7 +109,7 @@ export class Vault7Animator {
 
   // Optimistic-spin marker: only flip on .spinning so the rim glow
   // brightens. Reels stay STILL until _spinToGrid() takes over with the
-  // real reel scroll — user explicitly wants no pre-spin animation. The
+  // real reel scroll - user explicitly wants no pre-spin animation. The
   // glow-rim opacity bump is the only visual cue during the on-chain wait.
   startSpinning() {
     if (!this.frameEl) return;
@@ -129,11 +129,11 @@ export class Vault7Animator {
   /** Play one Vault7ResultData: base spin + optional FS chain.
    *  Hard guard against being invoked from anywhere other than spin(): if
    *  no user-initiated spin is in flight, refuse and log a stack trace so
-   *  whatever is calling us can be identified. This is the claude-design
+   *  whatever is calling us can be identified. This is the design
    *  fix for "reels animate on page load" reports. */
   async play(result) {
     if (!this._userInitiated) {
-      console.warn('[Vault7] play() called outside of a user-initiated spin — ignored.');
+      console.warn('[Vault7] play() called outside of a user-initiated spin - ignored.');
       console.trace('[Vault7] play() unauthorized call');
       return;
     }
@@ -203,10 +203,10 @@ export class Vault7Animator {
   async _spinToGrid(targetGrid, scatterCount = 0) {
     // Defense-in-depth: even though only play() calls this, refuse if a
     // user-initiated spin isn't active. Same rationale as the play()
-    // guard — a rogue caller would otherwise wipe strips and visually
+    // guard - a rogue caller would otherwise wipe strips and visually
     // animate without any user input.
     if (!this._userInitiated) {
-      console.warn('[Vault7] _spinToGrid called outside a spin — ignored.');
+      console.warn('[Vault7] _spinToGrid called outside a spin - ignored.');
       console.trace('[Vault7] _spinToGrid unauthorized call');
       return;
     }

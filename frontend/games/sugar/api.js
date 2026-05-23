@@ -1,11 +1,11 @@
 /* ============================================================================
- * sugar/api.js — PUBLIC API. The integration boundary for blockchain claude-code.
+ * sugar/api.js - PUBLIC API. The integration boundary for blockchain integrations.
  * Exports class SugarSlot.
  *
  * In demo mode: uses engine.js to generate ResultData locally.
  * In production mode: calls options.onSpinRequest(stake) → Promise<ResultData>.
  *
- * DO NOT MODIFY THE PUBLIC SIGNATURE OF SugarSlot — see prompt spec.
+ * DO NOT MODIFY THE PUBLIC SIGNATURE OF SugarSlot - see prompt spec.
  * ============================================================================ */
 
 import { SugarAnimator } from './animation.js';
@@ -19,7 +19,16 @@ import {
 } from './engine.js';
 
 const WEI_PER_STT = 1_000_000_000_000_000_000n;
-const fmtStt = (wei, d=2) => (Number(BigInt(wei)) / 1e18).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+// 3 decimals by default: micro-payouts (e.g. +0.00098 STT cluster bonus
+// crumbs) used to display as "+0.00 STT" which read like a zero win.
+// Three places resolves anything ≥ 0.001 STT - below that we widen to 4.
+const fmtStt = (wei, d=3) => {
+  const n = Number(BigInt(wei)) / 1e18;
+  // Auto-widen for very small non-zero values so we never show "+0.000"
+  // for a positive payout that does exist.
+  const digits = (n > 0 && n < 0.001) ? 4 : d;
+  return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+};
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // --------------- preset stakes (in wei) ----------------
@@ -86,6 +95,32 @@ export class SugarSlot {
     this.chargeThreshold = threshold;
     this._updateUI();
   }
+  /// Write real provably-fair data into the right-aside panel after a spin
+  /// settles. fairData = { clientSeed, serverSeed, betId, txHash }. All
+  /// fields optional - only present ones are rendered.
+  updateFair(fairData) {
+    const c = this.container;
+    const short = (h) => h && h.length > 14 ? `${h.slice(0, 10)}…${h.slice(-6)}` : (h || '-');
+    if (fairData.clientSeed) {
+      const el = c.querySelector('[data-fair-client]');
+      if (el) { el.textContent = short(fairData.clientSeed); el.title = fairData.clientSeed; }
+    }
+    if (fairData.serverSeed) {
+      const el = c.querySelector('[data-fair-server]');
+      if (el) { el.textContent = short(fairData.serverSeed); el.title = fairData.serverSeed; }
+    }
+    if (fairData.betId != null) {
+      const el = c.querySelector('[data-fair-nonce]');
+      if (el) el.textContent = String(fairData.betId);
+    }
+    if (fairData.txHash) {
+      const el = c.querySelector('[data-fair-explorer]');
+      if (el) {
+        el.href = `https://shannon-explorer.somnia.network/tx/${fairData.txHash}`;
+        el.style.display = 'block';
+      }
+    }
+  }
   setChargeRewardClaimed() {
     // close any open reward overlay
     $('[data-charge-pop]', this.container).classList.remove('show');
@@ -120,7 +155,7 @@ export class SugarSlot {
     const forceFast = this.autoRemaining > 0;
     if (forceFast) this.animator.setTurbo(true);
 
-    // debit (demo only — production updates via callback after tx)
+    // debit (demo only - production updates via callback after tx)
     if (this.mode === 'demo') {
       if (!isFree) this.balance -= cost;
     }
@@ -154,9 +189,15 @@ export class SugarSlot {
       $('[data-spin]', this.container).classList.remove('spinning');
       const msg = String(e?.message || e);
       if (/0x61bc0a1e|GameIsPaused/i.test(msg)) {
-        this.opts.onError?.({ kind: 'paused', message: 'SUGAR.LAB is temporarily paused — try again in a few seconds.' });
+        this.opts.onError?.({ kind: 'paused', message: 'SUGAR.LAB is temporarily paused - try again in a few seconds.' });
       } else if (/BankrollInsufficient|0x8f523bc4/i.test(msg)) {
-        this.opts.onError?.({ kind: 'bankroll', message: 'Casino bankroll low — try a smaller stake.' });
+        this.opts.onError?.({ kind: 'bankroll', message: 'Casino bankroll low - try a smaller stake.' });
+      } else if (/placement timed out|iframe sign timeout|Privy sendTransaction timeout|TRANSACTION_REPLACED|timeout/i.test(msg)) {
+        // Transient Privy-iframe / RPC hiccup - the chain hasn't seen our
+        // tx (or it was replaced). Safe for the user to click SPIN again.
+        // Don't auto-retry - would risk a double-broadcast if the original
+        // tx silently landed mid-timeout.
+        this.opts.onError?.({ kind: 'network', message: 'Network hiccup - please click SPIN again.' });
       } else {
         this.opts.onError?.({ kind: 'revert', message: e?.shortMessage || msg.slice(0, 200) });
       }
@@ -204,7 +245,7 @@ export class SugarSlot {
       lw.classList.remove('zero');
       this._pushTicker({ who: 'YOU', amountWei: result.totalPayout, fresh: true, mega: Number(result.totalPayout) / Number(this.stakeWei) >= 25 });
     } else {
-      lw.textContent = '— no win';
+      lw.textContent = '- no win';
       lw.classList.add('zero');
     }
 
@@ -271,11 +312,11 @@ export class SugarSlot {
     <div class="ambient-orb o3"></div>
   </div>
 
-  <!-- Slot's own nav-bar is hidden — partials.js provides the shared site nav.
+  <!-- Slot's own nav-bar is hidden - partials.js provides the shared site nav.
        Balance pill is kept inline (in the cabinet header above the reels) so
        the slot HUD shows live balance after every spin.  data-balance-mini
        still updates from this.balance in _updateUI(). -->
-  <!-- Slot's own nav-bar is hidden — partials.js provides the shared site nav.
+  <!-- Slot's own nav-bar is hidden - partials.js provides the shared site nav.
        We keep the data-sound button (still wired by _wireControls + the 'M' key
        shortcut) and data-balance-mini in the DOM tree, just invisible. -->
   <div class="nav-bar" style="display:none">
@@ -292,10 +333,10 @@ export class SugarSlot {
   <div class="game-hero">
     <div>
       <h1>S<span class="grad">u</span>gar<span class="grad">.</span>Lab</h1>
-      <p class="lede">7×7 cluster cascade with sticky multiplier orbs and a hidden-threshold Vault Charge meter. Honest payouts — every spin's seed is published from the contract.</p>
+      <p class="lede">7×7 cluster cascade with sticky multiplier orbs and a hidden-threshold Vault Charge meter. Honest payouts - every spin's seed is published from the contract.</p>
     </div>
     <div class="hero-meta">
-      <div class="m">RTP<b class="cyan">92.00%</b></div>
+      <div class="m">RTP<b class="cyan" data-sl-cluster-rtp>92.00%</b></div>
       <div class="m">Volatility<b class="pink">VERY HIGH</b></div>
       <div class="m">Max Win<b class="gold">25,000×</b></div>
       <div class="m">Mechanic<b class="purple">CLUSTER + TUMBLE</b></div>
@@ -308,13 +349,13 @@ export class SugarSlot {
         <div class="badge">★ FEATURED</div>
         <div class="scroll">
           <div class="track" data-marquee-track>
-            <span class="item">RTP <b>92%</b> · house edge <b class="gold">8%</b> · published on-chain</span>
-            <span class="item">Tournament live · <b>$25,000</b> pool · 4h left</span>
-            <span class="item">Vault Charge — hidden threshold · cycle resets each prize</span>
+            <span class="item">RTP <b data-sl-cluster-rtp>92%</b> · LLM agent live-adjusted hourly · published on-chain</span>
+            <span class="item">Every bet verifiable · <b>Shannon Explorer</b> · finality ~1s</span>
+            <span class="item">Vault Charge - hidden threshold · cycle resets each prize</span>
             <span class="item">All seeds verifiable post-spin</span>
-            <span class="item">RTP <b>92%</b> · house edge <b class="gold">8%</b> · published on-chain</span>
-            <span class="item">Tournament live · <b>$25,000</b> pool · 4h left</span>
-            <span class="item">Vault Charge — hidden threshold · cycle resets each prize</span>
+            <span class="item">RTP <b data-sl-cluster-rtp>92%</b> · LLM agent live-adjusted hourly · published on-chain</span>
+            <span class="item">Every bet verifiable · <b>Shannon Explorer</b> · finality ~1s</span>
+            <span class="item">Vault Charge - hidden threshold · cycle resets each prize</span>
             <span class="item">All seeds verifiable post-spin</span>
           </div>
         </div>
@@ -329,7 +370,7 @@ export class SugarSlot {
         <div class="col">
           <div class="top">
             <span class="lbl">VAULT CHARGE</span>
-            <span class="hint">— filling up · next prize unknown</span>
+            <span class="hint">- filling up · next prize unknown</span>
             <span class="cycle">CYCLE · <b data-cycle>1</b></span>
           </div>
           <div class="charge-bar" data-charge-bar>
@@ -379,8 +420,8 @@ export class SugarSlot {
         <div class="balance-block">
           <div class="lbl">BALANCE</div>
           <div class="balance"><span class="cur">STT</span><span data-balance>1,000.00</span></div>
-          <div class="last-win zero" data-last-win>— no win yet</div>
-          <div class="ev-note" data-ev-note>Honest 92% RTP — published from contract</div>
+          <div class="last-win zero" data-last-win>- no win yet</div>
+          <div class="ev-note" data-ev-note><span data-sl-cluster-rtp>92.00%</span> RTP - autonomously adjusted by LLM agent</div>
         </div>
       </div>
     </div>
@@ -397,9 +438,10 @@ export class SugarSlot {
       <div class="panel">
         <h3><span class="pip" style="background:var(--violet);box-shadow:0 0 8px var(--violet)"></span>Provably fair</h3>
         <div class="fair">
-          <div class="l">CLIENT SEED</div><div class="v cyan" data-fair-client>${this._clientSeed}</div>
-          <div class="l">SERVER SEED · HASH</div><div class="v purple" data-fair-server>${this._serverSeed.slice(0,8)}…${this._serverSeed.slice(-6)}</div>
-          <div class="l">NONCE / BET ID</div><div class="v" data-fair-nonce>000000</div>
+          <div class="l">CLIENT SEED</div><div class="v cyan" data-fair-client>-</div>
+          <div class="l">SERVER SEED (after reveal)</div><div class="v purple" data-fair-server>-</div>
+          <div class="l">BET ID</div><div class="v" data-fair-nonce>-</div>
+          <a class="v" data-fair-explorer href="#" target="_blank" rel="noopener" style="display:none;font-size:11px;letter-spacing:1.5px;color:var(--cyan);text-transform:uppercase;margin-top:6px">verify on explorer ↗</a>
         </div>
       </div>
     </aside>
@@ -480,7 +522,10 @@ export class SugarSlot {
     $('[data-stake-fiat]', c).textContent = '≈ $' + this.stakeStt.toFixed(2);
     $('[data-total-bet]', c).textContent = this.stakeStt.toFixed(2);
     $('[data-buy-price]', c).textContent = (this.stakeStt * 100).toFixed(2);
-    $('[data-fair-nonce]', c).textContent = String(this._nonce).padStart(6, '0');
+    // [data-fair-nonce] is now driven by updateFair() with the real on-chain
+    // bet id after each settle - NOT this local _nonce counter. _updateUI
+    // would clobber the real value on every UI tick (balance refresh, stake
+    // change, etc.) and the user would see "00000" instead of the actual id.
     $('[data-cycle]', c).textContent = this.chargeCycle;
     const fill = visibleFill(this.charge, this.chargeThreshold);
     $('[data-charge-fill]', c).style.right = (100 - fill * 100) + '%';
@@ -640,7 +685,7 @@ export class SugarSlot {
     }
   }
   _jackpotDrift() {
-    // P0 fix: stop the 600ms setInterval — element is display:none anyway.
+    // P0 fix: stop the 600ms setInterval - element is display:none anyway.
     // (Removing the timer eliminates per-frame work that contributed to the
     //  page being heavy enough for the custom cursor to feel laggy.)
   }

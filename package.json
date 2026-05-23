@@ -18,8 +18,10 @@
     "dev:frontend": "node scripts/_dev-frontend.js",
     "dev:reveal-bot": "node scripts/_dev-reveal-bot.js",
     "dev:demo-bot": "node demo-bot/index.js",
-    "dev:all": "concurrently -n FRONTEND,REVEAL,DEMO -c blue,green,yellow -k --kill-others-on-fail \"npm:dev:frontend\" \"npm:dev:reveal-bot\" \"npm:dev:demo-bot\"",
-    "dev:play": "concurrently -n FRONTEND,REVEAL -c blue,green -k --kill-others-on-fail \"npm:dev:frontend\" \"npm:dev:reveal-bot\""
+    "dev:agent-service": "node agent-service/index.js",
+    "dev:hm-cron": "node agent-service/hm-cron.js",
+    "dev:all": "concurrently -n FRONTEND,REVEAL,AGENT,HMCRON,DEMO -c blue,green,magenta,red,yellow -k --kill-others-on-fail \"npm:dev:frontend\" \"npm:dev:reveal-bot\" \"npm:dev:agent-service\" \"npm:dev:hm-cron\" \"npm:dev:demo-bot\"",
+    "dev:play": "concurrently -n FRONTEND,REVEAL,AGENT,HMCRON -c blue,green,magenta,red -k --kill-others-on-fail \"npm:dev:frontend\" \"npm:dev:reveal-bot\" \"npm:dev:agent-service\" \"npm:dev:hm-cron\""
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",

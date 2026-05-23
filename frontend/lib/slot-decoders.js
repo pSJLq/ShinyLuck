@@ -1,5 +1,5 @@
 /* ============================================================================
- * slot-decoders.js — convert on-chain BetSettled into the ResultData shape
+ * slot-decoders.js - convert on-chain BetSettled into the ResultData shape
  * the slot animators (SugarSlot/Vault7Slot) expect.
  *
  * CONTRACT-EXACT REPLAY (NEW)
@@ -26,19 +26,22 @@
  * showed them.
  * ========================================================================= */
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 
 // ----------------------------------------------------------------------------
-// Pay-boost constants — MUST stay in sync with contracts/Casino.sol.
+// Pay-boost constants - MUST stay in sync with contracts/Casino.sol.
 // `CLUSTER_PAY_BOOST_X100 = 320` means cluster payouts are scaled 3.20× on
 // chain after the ClusterLib resolver returns its basis-100 figure.
 // ----------------------------------------------------------------------------
-const CLUSTER_PAY_BOOST_X100 = 320n;
+// Monte-Carlo'd to land total RTP at ~92% (was 320 → 89.21%, now 332 → 92.01%).
+// Must match Casino.sol's CLUSTER_PAY_BOOST_X100 exactly - every redeploy
+// bump both in lockstep so the JS replay matches chain payouts to the wei.
+const CLUSTER_PAY_BOOST_X100 = 332n;
 const VAULT_PAY_BOOST_X100   = 560n;
 const VAULT7_FREE_SPIN_MULT_X100 = 200n;
 
 // ----------------------------------------------------------------------------
-// CLUSTER (SUGAR.LAB) — symbol IDs
+// CLUSTER (SUGAR.LAB) - symbol IDs
 // ----------------------------------------------------------------------------
 //   ClusterLib.sol:  0=L2 1=L1 2=M3 3=M2 4=M1 5=H3 6=H2 7=H1 8=WILD 9=SCAT
 //   frontend engine.js (sugar): WILD:0 H1:1 H2:2 H3:3 M1:4 M2:5 M3:6 L1:7 L2:8 SCAT:9
@@ -86,7 +89,7 @@ function _clusterPayX100(sym, n) {
   return p;
 }
 
-// keccak256(abi.encode(rr)) — single bytes32 input.
+// keccak256(abi.encode(rr)) - single bytes32 input.
 function _hashRR(rr) {
   return ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(["bytes32"], [rr]),
@@ -131,7 +134,7 @@ function _initialGrid(randomness) {
 }
 
 // BFS findClusters + accumulate payouts. Returns { totalX100, clusters }.
-// Each cluster: { sym, cells: [{r,c,idx}, ...] } — cells are removed positions.
+// Each cluster: { sym, cells: [{r,c,idx}, ...] } - cells are removed positions.
 function _findAndPay(g) {
   const seen = new Array(49).fill(false);
   let totalX100 = 0n;
@@ -206,7 +209,7 @@ function _toEnginePositions(indices) {
 }
 
 // ============================================================================
-// SUGAR.LAB — full contract-exact replay
+// SUGAR.LAB - full contract-exact replay
 // ============================================================================
 //
 // Builds the ResultData the SugarSlot animator expects, with every cascade
@@ -249,20 +252,27 @@ export function decodeSugarLabResult({ settled, stakeWei, chargeEvent = null, is
   } catch (_) {}
 
   // ----- Replay -----
-  const { g: initialFlat, scatterCount } = _initialGrid(randomness);
+  // CRITICAL: ClusterLib mutates `rr` during the initial fill - every 32
+  // bytes consumed, it rehashes via keccak. The cascade loop then continues
+  // from THAT mutated `rr`, not the original randomness. JS used to reset
+  // `rr = randomness` here, which made the first tumble step use different
+  // entropy than chain → all subsequent cascade grids diverged → replay
+  // mismatch warning + visible second-cascade desync. Use the rr returned
+  // by _initialGrid (mirrors Solidity's same-variable carry-over).
+  const { g: initialFlat, scatterCount, rr: rrAfterInitial } = _initialGrid(randomness);
   const initialGrid = _toEngineGrid(initialFlat);
 
   // Walk cascade chain, capture per-step state for animator.
   const baseCascades = [];
   const working = Uint8Array.from(initialFlat);
-  let rr = randomness;
+  let rr = rrAfterInitial;
   let totalPayX100 = 0n;
   for (let depth = 0; depth < MAX_CASCADE; depth++) {
     const { totalX100, clusters } = _findAndPay(working);
     if (totalX100 === 0n) break;
     totalPayX100 += totalX100;
 
-    // Build animator's cluster records BEFORE tumble — engine.js expects:
+    // Build animator's cluster records BEFORE tumble - engine.js expects:
     //   { symbolIndex, positions, size, payout, appliedMultipliers }
     const animClusters = clusters.map((cl) => {
       // Per-cluster payout in wei (with boost): stake × payX100 × BOOST / 10000
@@ -290,12 +300,12 @@ export function decodeSugarLabResult({ settled, stakeWei, chargeEvent = null, is
   }
 
   // Sanity check: our replayed final grid should equal the contract's emitted
-  // finalGrid. Log a warning if they ever diverge — guards against drift.
+  // finalGrid. Log a warning if they ever diverge - guards against drift.
   if (onchainFinalGrid && onchainFinalGrid.length === 49) {
     let mismatch = false;
     for (let i = 0; i < 49; i++) if (working[i] !== onchainFinalGrid[i]) { mismatch = true; break; }
     if (mismatch) {
-      console.warn("[slot-decoders] sugar replay mismatch vs on-chain finalGrid — please audit ClusterLib in sync");
+      console.warn("[slot-decoders] sugar replay mismatch vs on-chain finalGrid - please audit ClusterLib in sync");
     }
   }
 
@@ -345,14 +355,14 @@ export function decodeSugarLabResult({ settled, stakeWei, chargeEvent = null, is
 }
 
 // ============================================================================
-// VAULT.7 — contract-exact replay
+// VAULT.7 - contract-exact replay
 // ============================================================================
 // Mirror Vault7Lib.resolve(). 5 reel strips × 40 cells each. Each reel picks a
 // starting index from 8 bits of randomness; cells are 3 consecutive strip
 // positions (mod 40). 20 paylines.
 // ----------------------------------------------------------------------------
 
-// Sym IDs: same convention as cluster — Solidity vs engine.js layout.
+// Sym IDs: same convention as cluster - Solidity vs engine.js layout.
 //   Vault7Lib.sol: 0=E 1=D 2=F 3=A 4=COIN 5=BOLT 6=CRYS 7=DIAM 8=WILD 9=SCAT
 //   vault7 engine.js: WILD:0 DIAM:1 CRYS:2 BOLT:3 COIN:4 A:5 F:6 D:7 E:8 SCAT:9
 const VAULT_SOL_TO_ENGINE = [8, 7, 6, 5, 4, 3, 2, 1, 0, 9];
@@ -500,7 +510,7 @@ export function decodeVault7Result({ settled, stakeWei, isBuyBonus = false }) {
       if (mismatch) break;
     }
     if (mismatch) {
-      console.warn("[slot-decoders] vault replay mismatch vs on-chain grid — please audit Vault7Lib in sync");
+      console.warn("[slot-decoders] vault replay mismatch vs on-chain grid - please audit Vault7Lib in sync");
     }
   }
 

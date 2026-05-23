@@ -3,7 +3,7 @@
 // Three responsibilities:
 //   1. Per-bet games (Dice/Slots/Plinko): scan BetPlaced → reveal+settle
 //      once the future blockhash is available.
-//   2. Mines: scan BetPlaced for game=3 → revealMinesSeed (no settle —
+//   2. Mines: scan BetPlaced for game=3 → revealMinesSeed (no settle -
 //      the player drives cell-by-cell, then cashouts/busts).
 //   3. Round-based games (Crash/Roulette):
 //        - keep one round open at all times (startCrashRound/
@@ -23,13 +23,17 @@ const { ethers, network } = require("hardhat");
 const fs = require("fs");
 const path = require("path");
 
-// POLL_MS pushed to 800ms (was 5000 by default). REVEAL_DELAY+1 blocks
-// (~1.6s on Somnia's ~0.4s/block) is the hard floor — the contract refuses
-// to reveal before then. So the practical click→settle floor is poll +
-// reveal-delay + RPC roundtrip ≈ 0.8 + 1.6 + 0.4 = ~2.8s. Going below 800ms
-// burns RPC budget without helping.
-const POLL_MS = parseInt(process.env.POLL_MS || "300", 10);
-const REVEAL_DELAY = 3n;
+// POLL_MS pushed to 100ms (was 5000 default, then 300, then 100). On Somnia
+// (~0.4s/block), 100ms poll gives avg detection latency of ~50ms vs 150ms
+// at 300ms. Practical click→settle floor is now poll + reveal-delay +
+// RPC roundtrip ≈ 0.1 + 0.8 + 0.3 = ~1.2s. Going below 100ms risks burning
+// RPC budget without commensurate gain.
+const POLL_MS = parseInt(process.env.POLL_MS || "100", 10);
+// MUST match CommitReveal.sol REVEAL_DELAY exactly. We trimmed the on-chain
+// constant from 3 → 1 to shave ~0.8s off the spin wait; the bot has to
+// match or it sits idle waiting for an unnecessary 2 extra blocks before
+// calling revealAndSettle.
+const REVEAL_DELAY = 1n;
 const BLOCKHASH_WINDOW = 256n;
 const COLD_START_LOOKBACK = parseInt(process.env.COLD_START_LOOKBACK || "200000", 10);
 const SCAN_CHUNK = parseInt(process.env.SCAN_CHUNK || "900", 10);   // Somnia RPC caps eth_getLogs at 1000-block ranges
@@ -55,8 +59,8 @@ function makeSeedStore({ initialSeedsFile, poolFile }) {
   console.log(`[reveal-bot] loaded ${initial.length} initial seeds from ${initialSeedsFile}`);
   if (poolFile) console.log(`[reveal-bot] watching pool file: ${poolFile}`);
   // Pool format supports both shapes:
-  //   1. { seeds: [...], hashes: [...] }  — written by deploy.js / topup-seeds.js
-  //   2. { "0": "0x...", "37": "0x...", ... }  — sparse map written by hm-cron.js
+  //   1. { seeds: [...], hashes: [...] }  - written by deploy.js / topup-seeds.js
+  //   2. { "0": "0x...", "37": "0x...", ... }  - sparse map written by hm-cron.js
   // We normalise to an indexed array for fast .get(idx).
   let poolArray = [];
   let poolMtime = 0;
@@ -115,10 +119,75 @@ async function main() {
   };
 
   const currentBlock0 = await provider.getBlockNumber();
+
+  // ───────────────────────── PUSH PATH (WebSocket) ──────────────────────────
+  // The HTTP poll loop below still runs every POLL_MS as a safety net (catches
+  // anything the WS dropped during reconnect, plus the periodic refundExpired
+  // sweep). The WS subscriptions let us add a new pending bet to the map
+  // ~5-20ms after the placement tx mines instead of paying the average poll
+  // latency (~50ms at POLL_MS=100). On a spin this shaves the wait window
+  // measurably and removes the variance of "did we just miss the poll window".
+  let wsProvider = null;
+  let triggerLoop = () => {}; // overwritten after `loop` is defined
+  try {
+    // Canonical infra endpoint per emrestay's reactivity examples - more
+    // reliable for sub pushes than the public dream-rpc.
+    const wsUrl = process.env.WS_URL || "wss://api.infra.testnet.somnia.network/ws";
+    wsProvider = new ethers.WebSocketProvider(wsUrl);
+    const onBetPlaced = (log) => {
+      try {
+        const parsed = casino.interface.parseLog({ topics: log.topics, data: log.data });
+        const a = parsed.args;
+        const id = a.betId.toString();
+        if (!pending.has(id)) {
+          pending.set(id, {
+            commitBlock: BigInt(a.commitBlock),
+            seedIdx: Number(a.seedIdx),
+            game: Number(a.game),
+            player: a.player,
+          });
+          // Kick the loop immediately so we attempt reveal the moment
+          // REVEAL_DELAY+1 blocks have elapsed (the loop itself rechecks age).
+          triggerLoop();
+        }
+      } catch (_) {}
+    };
+    const onCrashRound = (log) => {
+      try {
+        const parsed = casino.interface.parseLog({ topics: log.topics, data: log.data });
+        const a = parsed.args;
+        const id = a.roundId.toString();
+        if (!pendingRounds.has("c:" + id)) {
+          pendingRounds.set("c:" + id, { kind: "crash", roundId: id, commitBlock: BigInt(a.commitBlock), seedIdx: Number(a.seedIdx), betWindowEnd: Number(a.betWindowEnd) });
+        }
+      } catch (_) {}
+    };
+    const onRouletteRound = (log) => {
+      try {
+        const parsed = casino.interface.parseLog({ topics: log.topics, data: log.data });
+        const a = parsed.args;
+        const id = a.roundId.toString();
+        if (!pendingRounds.has("r:" + id)) {
+          pendingRounds.set("r:" + id, { kind: "roulette", roundId: id, commitBlock: BigInt(a.commitBlock), seedIdx: Number(a.seedIdx), betWindowEnd: Number(a.betWindowEnd) });
+        }
+      } catch (_) {}
+    };
+    wsProvider.on({ address: casinoAddr, topics: [topics.betPlaced] }, onBetPlaced);
+    wsProvider.on({ address: casinoAddr, topics: [topics.crashRoundStarted] }, onCrashRound);
+    wsProvider.on({ address: casinoAddr, topics: [topics.rouletteRoundStarted] }, onRouletteRound);
+    // Newheads subscription - every block tick wakes the loop, so the moment
+    // a pending bet's REVEAL_DELAY block is mined we attempt reveal. Without
+    // this we'd wait up to POLL_MS extra after the block ticked.
+    wsProvider.on("block", () => { triggerLoop(); });
+    console.log(`[reveal-bot] WS push-path active (${wsUrl})`);
+  } catch (e) {
+    console.warn(`[reveal-bot] WS setup failed, polling-only: ${e.message}`);
+    wsProvider = null;
+  }
   let lastScannedBlock;
   // Cap the cold-start range so the bot doesn't block for minutes scanning
   // tens of thousands of blocks from deploymentBlock. Anything older than
-  // BLOCKHASH_WINDOW (256 blocks) can't be revealed anyway — it falls into
+  // BLOCKHASH_WINDOW (256 blocks) can't be revealed anyway - it falls into
   // the refundExpired branch which the bot reaches via the periodic sweep.
   const COLD_START_MAX = Math.min(COLD_START_LOOKBACK || 2000, 2000);
   if (manifest.deploymentBlock) {
@@ -243,13 +312,13 @@ async function main() {
           else if (/RevealTooEarly/.test(msg)) {/* retry next tick */}
           else if (/RevealExpired/.test(msg)) {/* refund branch next tick */}
           else {
-            // Generic "execution reverted" — bot can't decode the custom
+            // Generic "execution reverted" - bot can't decode the custom
             // error. Probable causes:
             //   • on-chain bet was already settled by another caller
             //   • the seed in our local store doesn't match the contract's
             //     hash at this seedIdx (stale seed file vs new deploy)
             //   • CommitReveal expired between scan and tx submit
-            // Either way, retrying forever is worse than dropping — the
+            // Either way, retrying forever is worse than dropping - the
             // refundExpired path will kick in on the age check next tick if
             // the bet is genuinely stuck.
             info._retries = (info._retries || 0) + 1;
@@ -264,7 +333,7 @@ async function main() {
       }
     }
 
-    // 3. Sweep round-based pending — try settle first, then refund only on
+    // 3. Sweep round-based pending - try settle first, then refund only on
     //    real timeout. The contract enforces order:
     //      - settle is allowed when commitBlock+3 has passed AND not settled
     //      - refund is allowed only after the round timeout (5 min + buffer)
@@ -273,7 +342,7 @@ async function main() {
     for (const [key, info] of pendingRounds) {
       const age = cur - info.commitBlock;
       if (age < 0n) continue;
-      // First — check if the round is already settled on-chain (some other
+      // First - check if the round is already settled on-chain (some other
       // caller may have done it).
       let roundState;
       try {
@@ -289,7 +358,7 @@ async function main() {
       if (windowClosed && readyToReveal) {
         const seed = seedStore.get(info.seedIdx);
         if (!seed) {
-          // No seed yet — HM cron will refill; keep this round around.
+          // No seed yet - HM cron will refill; keep this round around.
           continue;
         }
         const fn = info.kind === "crash" ? "settleCrashRound" : "settleRouletteRound";
@@ -310,7 +379,7 @@ async function main() {
         }
       }
       // Refund only on hard timeout (blockhash window expired OR betWindowEnd
-      // long past + buffer). Contract enforces this — the check is just to
+      // long past + buffer). Contract enforces this - the check is just to
       // avoid noisy reverts here.
       const refundable = age > REVEAL_DELAY + BLOCKHASH_WINDOW
                       || (nowSec - info.betWindowEnd > ROUND_TIMEOUT_S + 60);
@@ -330,7 +399,7 @@ async function main() {
       }
     }
 
-    // 4. Round keepalive — make sure there's always an open Crash + Roulette
+    // 4. Round keepalive - make sure there's always an open Crash + Roulette
     //    round so players can hop in.
     if (ROUND_KEEPALIVE) {
       const startIfNoOpen = async (gameLabel, currentFn, hasFn) => {
@@ -339,8 +408,8 @@ async function main() {
           const round = await casino[hasFn](id);
           // round is open if betWindowEnd > now AND not settled
           if (!round.settled && Number(round.betWindowEnd) > nowSec) return; // open, no-op
-          if (Number(round.betWindowEnd) === 0) return; // race — wait
-        } catch (_) { /* never started — proceed */ }
+          if (Number(round.betWindowEnd) === 0) return; // race - wait
+        } catch (_) { /* never started - proceed */ }
         try {
           const startFn = gameLabel === "crash" ? "startCrashRound" : "startRouletteRound";
           const tx = await casino[startFn]();
@@ -376,9 +445,84 @@ async function main() {
     }
   };
 
-  console.log(`[reveal-bot] running (poll=${POLL_MS}ms, keepalive=${ROUND_KEEPALIVE})`);
+  // Wire the WS push handlers' trigger to the real loop now that it exists.
+  //
+  // LEADING-EDGE DEBOUNCE: the first WS event fires the loop IMMEDIATELY
+  // (no added latency); any subsequent triggers within COOLDOWN_MS are
+  // dropped because the loop is already mid-flight or just finished and
+  // re-running would just hit the same on-chain state. We track when the
+  // last loop finished and refuse to start a new one inside the cooldown.
+  // Net: zero added latency on the critical-path event; ~10 sweeps/sec
+  // ceiling even under WS flood. RPC stays well under timeout pressure.
+  const WS_COOLDOWN_MS = parseInt(process.env.WS_COOLDOWN_MS || "150", 10);
+  let loopRunning = false;
+  let lastLoopEndedAt = 0;
+  let pendingTrigger = false;
+  triggerLoop = () => {
+    const now = Date.now();
+    if (loopRunning) { pendingTrigger = true; return; }
+    if (now - lastLoopEndedAt < WS_COOLDOWN_MS) { pendingTrigger = true; return; }
+    loopRunning = true;
+    pendingTrigger = false;
+    loop()
+      .catch((e) => console.warn(`[reveal-bot] loop(ws): ${e.message}`))
+      .finally(() => {
+        loopRunning = false;
+        lastLoopEndedAt = Date.now();
+        // If a trigger came in while we were running, schedule a follow-up.
+        if (pendingTrigger) {
+          pendingTrigger = false;
+          setTimeout(() => triggerLoop(), Math.max(0, WS_COOLDOWN_MS - (Date.now() - lastLoopEndedAt)));
+        }
+      });
+  };
+
+  // ───────────────── DEPLOYER GAS AUTO-TOPUP FROM HM ─────────────────
+  // Each revealAndSettle / refundExpired costs ~0.0001 STT in gas. Over a
+  // few hundred spins this drains the deployer's float and bets start to
+  // expire un-settled (chain hands the locked reserve back only after the
+  // 256-block BLOCKHASH_WINDOW). To prevent that, periodically check the
+  // signer's balance and pull a small amount from HM if it's low. HM
+  // bond floor is the Reactivity precompile minimum (32 STT) - we leave
+  // a 0.1 STT margin above it.
+  const HM_FLOOR_BUF = ethers.parseEther("32.1");
+  const DEPLOYER_LOW = ethers.parseEther("0.2");   // refill when below this
+  const DEPLOYER_HIGH = ethers.parseEther("1.0");  // refill up to this
+  let lastTopupCheckAt = 0;
+  const TOPUP_CHECK_MS = 30_000;
+  const maybeTopup = async () => {
+    const now = Date.now();
+    if (now - lastTopupCheckAt < TOPUP_CHECK_MS) return;
+    lastTopupCheckAt = now;
+    try {
+      const [dep, hmBal] = await Promise.all([
+        provider.getBalance(signer.address),
+        provider.getBalance(manifest.addresses.houseManager),
+      ]);
+      if (dep >= DEPLOYER_LOW) return;
+      const need = DEPLOYER_HIGH - dep;
+      const room = hmBal > HM_FLOOR_BUF ? (hmBal - HM_FLOOR_BUF) : 0n;
+      if (room === 0n) {
+        console.warn(`[reveal-bot] deployer low (${ethers.formatEther(dep)} STT) but HM at floor - top up manually`);
+        return;
+      }
+      const amt = need < room ? need : room;
+      const hmContract = await ethers.getContractAt("HouseManager", manifest.addresses.houseManager, signer);
+      const tx = await hmContract.withdrawTo(signer.address, amt);
+      await tx.wait();
+      console.log(`[reveal-bot] gas auto-topup: pulled ${ethers.formatEther(amt)} STT from HM → deployer (tx=${tx.hash})`);
+    } catch (e) {
+      console.warn(`[reveal-bot] gas auto-topup failed: ${e.shortMessage || e.message}`);
+    }
+  };
+
+  console.log(`[reveal-bot] running (poll=${POLL_MS}ms, keepalive=${ROUND_KEEPALIVE}, ws=${wsProvider ? "on" : "off"}, gas-autopilot=on)`);
   await loop();
-  setInterval(() => { loop().catch((e) => console.warn(`[reveal-bot] loop: ${e.message}`)); }, POLL_MS);
+  await maybeTopup();
+  setInterval(() => {
+    loop().catch((e) => console.warn(`[reveal-bot] loop: ${e.message}`));
+    maybeTopup().catch(() => {});
+  }, POLL_MS);
   await new Promise(() => {});
 }
 

@@ -7,11 +7,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-<!-- Absolute paths — works even when http-server doesn't redirect trailing-slash. -->
+<!-- Absolute paths - works even when http-server doesn't redirect trailing-slash. -->
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/games/vault7/styles.css">
 <style>
-  /* Native cursor on slot pages — same rationale as sugar/index.html. */
+  /* Native cursor on slot pages - same rationale as sugar/index.html. */
   html, body { cursor: auto !important; }
   .cursor-dot, .cursor-ring { display: none !important; }
   .vault-shell .ambient,
@@ -49,7 +49,7 @@
 <div class="sl-connect-prompt" id="connect-prompt">
   <div class="card">
     <h2>VAULT.7 · 5×3 / 20 lines</h2>
-    <p>Sign in to play on Somnia Testnet. Reels are seeded by the contract —
+    <p>Sign in to play on Somnia Testnet. Reels are seeded by the contract -
        every spin's randomness is published after reveal.</p>
     <p style="color:#fafafa;font-size:13px;">Use the <b>Connect Wallet</b> button in the top right.</p>
     <small>email login → Somnia Global Wallet · no extension required</small>
@@ -94,7 +94,7 @@
       return;
     }
     mounting = true;
-    // Hide the prompt the moment we commit — if mounting fails, we restore it
+    // Hide the prompt the moment we commit - if mounting fails, we restore it
     // in the catch block.
     prompt.style.display = 'none';
     try {
@@ -103,7 +103,7 @@
         mode: 'production',
         initialBalance: playerBalance,
         turbo: true,
-        // Bubbled from api.js's spin() catch — show a toast instead of the
+        // Bubbled from api.js's spin() catch - show a toast instead of the
         // silent revert that leaves the reels in a frozen state.
         onError: ({ kind, message }) => {
           const ttl = kind === 'paused' ? 5000 : 4500;

@@ -10,6 +10,7 @@
 <script src="vendor/privy.bundle.js"></script>
 <script type="module" src="lib/wallet.js"></script>
 <script type="module" src="lib/livedata.js"></script>
+<script type="module" src="lib/agent-activity.js"></script>
 <script type="module" src="lib/docs.js"></script>
 <style>
   .ds-search { position: relative; }
@@ -43,20 +44,28 @@
       </div>
       <div class="ds-group">
         <div class="ds-title">GAMES</div>
-        <a href="#crash">Crash</a>
-        <a href="#slots">Slots</a>
+        <a href="#sugar">Sugar.Lab (cluster pays)</a>
         <a href="#dice">Dice</a>
+        <a href="#crash">Crash</a>
+        <a href="#slots">Vault.7 (slots)</a>
         <a href="#plinko">Plinko</a>
         <a href="#mines">Mines</a>
         <a href="#roulette">Roulette</a>
       </div>
       <div class="ds-group">
+        <div class="ds-title">PERFORMANCE</div>
+        <a href="#latency">Bet placement latency</a>
+        <a href="#presign">Pre-sign pipeline</a>
+        <a href="#realtime">Real-time updates</a>
+      </div>
+      <div class="ds-group">
         <div class="ds-title">SOMNIA AGENTS</div>
         <a href="#agents">Architecture overview</a>
+        <a href="#hm-llm">HM ↔ LLM cron loop</a>
+        <a href="#quorum">Agent quorum verifier</a>
         <a href="#json">JSON API Agent</a>
-        <a href="#llm">LLM Inference Agent</a>
         <a href="#parse">Parse Website Agent</a>
-        <a href="#house">House Manager Agent</a>
+        <a href="#player-agent">Player Agents</a>
       </div>
       <div class="ds-group">
         <div class="ds-title">DEVELOPERS</div>
@@ -64,6 +73,7 @@
         <a href="#contracts">Contract addresses</a>
         <a href="#events">Events &amp; webhooks</a>
         <a href="#fair-details">Provably fair details</a>
+        <a href="#bonus">Bonus mode</a>
         <a href="#audit">Audit / verification</a>
       </div>
     </nav>
@@ -74,141 +84,196 @@
       <a href="#" data-link>Docs</a><span class="sep">/</span><span class="here">Getting started</span>
     </div>
     <header class="docs-head">
-      <div class="eyebrow">v 0.8 · ShinyLuck on Somnia <span data-sl-network-badge>TESTNET</span></div>
+      <div class="eyebrow">v 1.0 · ShinyLuck on Somnia <span data-sl-network-badge>TESTNET</span></div>
       <h1 id="intro">What is ShinyLuck.</h1>
-      <p class="lede">ShinyLuck is a fully on-chain casino on Somnia where the house is a quorum of autonomous AI agents. Every roll, every reel stop, every wheel result is the keccak256 of three numbers anyone can audit — server seed, client seed, and the future blockhash. Money flow is pull-payment; the contract never sends in a callback.</p>
+      <p class="lede">ShinyLuck is a fully on-chain casino on Somnia where the house is a quorum of autonomous AI agents. Every reel stop, every dice roll, every roulette spin is the keccak256 of three numbers anyone can audit - server seed (committed before bet), client seed (player-supplied), and a future blockhash. Money flow is pull-payment; the casino contract never sends in a callback. House RTP is adjusted hourly by an LLM agent invoked via the Somnia Agent Platform - judges can watch that loop happen on the explorer.</p>
     </header>
 
     <div class="docs-callouts">
       <div class="cal cyan">
-        <div class="t">Six games, one contract.</div>
-        <div class="b">Crash, Slots, Dice, Plinko, Mines, Roulette — all settle through Casino.sol. One bankroll, one max-bet cap (1% of free bankroll), one circuit breaker.</div>
+        <div class="t">Seven games, one contract.</div>
+        <div class="b">Sugar.Lab, Dice, Crash, Vault.7, Plinko, Mines, Roulette - all settle through one Casino.sol. Sugar.Lab + Dice are production-quality; the rest are functional in beta (yellow TESTING ribbon).</div>
       </div>
       <div class="cal purple">
-        <div class="t">Sub-second finality.</div>
-        <div class="b">Somnia's ~1.2s block time means your bet is on-chain before the dice finish rolling. No "pending" screens.</div>
+        <div class="t">~2 s bet finality.</div>
+        <div class="b">Privy embedded wallet signs in-iframe; we broadcast through our own RPC. Reveal-bot reacts to BetPlaced via Somnia WebSocket push. Total wall-clock spin → settle: 2.0-2.5 s.</div>
       </div>
       <div class="cal amber">
-        <div class="t">Self-custodial.</div>
-        <div class="b">Funds live in your wallet. The contract escrows stake + max payout only between place and settle, then credits pull-payment for winnings.</div>
+        <div class="t">Self-custodial + agent-native.</div>
+        <div class="b">Funds live in your wallet; the contract escrows stake + max payout only between place and settle. HouseManager is a SomniaEventHandler that reacts to BetSettled and the hourly cron pulse on the reactivity precompile.</div>
       </div>
     </div>
 
     <h2 id="start">Connect and play in 60 seconds.</h2>
     <ol class="docs-list">
-      <li><b>Click "Connect Wallet"</b> in the top-right. MetaMask, Rabby, OKX, Coinbase Wallet, and any EIP-1193 wallet works.</li>
-      <li><b>Switch to Somnia testnet (Shannon).</b> Chain ID <code>50312</code>. The connect modal auto-adds it if missing.</li>
+      <li><b>Click "Connect Wallet"</b> in the top-right. Email login via Privy, or any EIP-1193 wallet (MetaMask, Rabby, OKX, Coinbase).</li>
+      <li><b>Switch to Somnia testnet (Shannon).</b> Chain ID <code>50312</code>. Auto-added by the modal.</li>
       <li><b>Get STT</b> from <a class="cyan" href="https://testnet.somnia.network/faucet" target="_blank" rel="noopener">testnet.somnia.network/faucet</a>.</li>
-      <li><b>Pick a game.</b> Set your stake, hit place bet. The receipt opens when the reveal-bot settles (≈ 4 blocks).</li>
+      <li><b>Pick a game.</b> Sugar.Lab and Dice are the polished demos. Hit place bet - the receipt opens ~1.5 s later when the reveal-bot lands the seed.</li>
     </ol>
 
     <h2 id="wallets">Supported wallets.</h2>
-    <p>Any EIP-1193 injected provider works. We've tested MetaMask, Rabby, OKX Wallet, and Coinbase Wallet on desktop; MetaMask Mobile and Rabby Mobile via WalletConnect on phones. The frontend uses ethers v6 + the SDK in <code>frontend/lib/shinyluck-sdk.js</code>.</p>
+    <p>Primary path is <a class="cyan" href="https://privy.io" target="_blank">Privy</a> embedded wallet - email login, no extension. We split the sign/broadcast: Privy signs in-iframe, our SDK broadcasts via our own RPC (~300 ms saved per bet vs Privy's hosted broadcast). Falls back to any EIP-1193 injected provider (MetaMask, Rabby, OKX, Coinbase, WalletConnect). The frontend SDK is in <code>frontend/lib/shinyluck-sdk.js</code>.</p>
 
     <h2 id="stt">Getting STT testnet tokens.</h2>
     <p>STT is the gas + bet token on Shannon (Somnia testnet). Drip from <a class="cyan" href="https://testnet.somnia.network/faucet" target="_blank" rel="noopener">testnet.somnia.network/faucet</a>; 0.5 STT per request is plenty for hundreds of small bets. On mainnet the symbol becomes SOMI.</p>
 
-    <h2 id="crash">Crash.</h2>
-    <p>Bustabit-style multiplier curve. You pre-commit an auto-cashout in <code>[1.01×, 100×]</code> and stake. The contract uses <code>keccak256(serverSeed || clientSeed || blockhash || nonce)</code> to derive a crashPoint with a 1-in-33 instant-crash baked in (matches the audited Bustabit formula). 3% house edge.</p>
-    <ul class="docs-list">
-      <li><b>Win:</b> autoCashout ≤ crashPoint → payout = stake × autoCashout.</li>
-      <li><b>Lose:</b> autoCashout &gt; crashPoint → stake forfeited.</li>
-      <li>Per-bet max payout is reserved up-front in <code>lockedReserve</code>; the contract never over-commits the bankroll.</li>
-    </ul>
-
-    <h2 id="slots">Slots.</h2>
-    <p>3 reels × 7 symbols. Symbol 0 is the jackpot. Triple-jackpot pays 50×; triple-regular 8×; any pair 1.8×. Empirical RTP ≈ 0.947 → 5.3% house edge. Slot theme (cosmetic only) is rotated by the House Manager Agent every 24 hours.</p>
+    <h2 id="sugar">Sugar.Lab.</h2>
+    <p><b>The flagship.</b> 7×7 cluster-pays grid with cascading wins, multiplier accumulator, "Charge Meter" loyalty progression, and Buy Bonus (100× unit stake → high-variance bonus round). RTP 92.00% baseline; jumps to ~97.4% during Bonus Mode. Math is in <code>contracts/lib/ClusterLib.sol</code>; payout boost constant <code>CLUSTER_PAY_BOOST_X100 = 332</code> (calibrated via 100 k Monte Carlo run in <code>scripts/_rtp-simulation.js</code>).</p>
 
     <h2 id="dice">Dice.</h2>
-    <p>Pick a threshold in <code>[2, 98]</code> and a direction (over / under). Roll = randomness mod 100 + 1. Payout multiplier = (10000 − edge) / (winChance × 100). 1% house edge.</p>
+    <p>Pick a threshold in <code>[2, 98]</code> and a direction (over/under). Roll = <code>randomness mod 100 + 1</code>. Payout multiplier = <code>(10000 − edge) / (winChance × 100)</code>. 1% house edge → 99% RTP, the highest in the lineup.</p>
+
+    <h2 id="crash">Crash.</h2>
+    <p>Bustabit-style multiplier curve. You pre-commit an auto-cashout in <code>[1.01×, 100×]</code> and stake. The contract uses <code>keccak256(serverSeed ‖ clientSeed ‖ blockhash ‖ nonce)</code> to derive crashPoint with a 1-in-33 instant-crash baked in. 3% house edge.</p>
+
+    <h2 id="slots">Vault.7 (slots).</h2>
+    <p>3 reels × 7 symbols, 15-cell payout grid, 5 paylines + scatter. Bonus rounds via Buy Bonus (75× unit). Loyalty Free Spins issued every 50 paid spins. Baseline RTP 92%; Bonus Mode adds +4.5% (paytable boost in <code>_settleBet</code> bumps from 560 → 592). Math IS the edge - there's no <code>houseEdgeBps</code> applied on top.</p>
 
     <h2 id="plinko">Plinko.</h2>
-    <p>16 rows × 17 slots; ball path = 16 bits of randomness (one per peg row). Three risk tiers: low (max 16×), medium (max 110×), high (max 1000×). Tables match standard Stake-style multipliers; 1.5% house edge baked into symbol weights.</p>
+    <p>16 rows × 17 slots; ball path = 16 bits of randomness, one per peg row. Three risk tiers: low (max 16×), medium (max 110×), high (max 1000×). 1.5% house edge baked into symbol weights.</p>
 
     <h2 id="mines">Mines.</h2>
-    <p>5×5 grid. Pick the number of mines in <code>[1, 24]</code>; the House Manager pre-commits the seed before you place, but mine positions are only locked in when the seed is revealed (≥ 4 blocks after place). Multiplier scales as <code>∏ (25-i)/(25-mines-i) × (1 − edge)</code>; 100× cap. 1.2% house edge.</p>
-    <ul class="docs-list">
-      <li><b>Open cell:</b> if it's a mine, the round busts (stake forfeited). Otherwise the multiplier compounds.</li>
-      <li><b>Cashout</b> at any time after opening ≥ 1 cell.</li>
-      <li>Page refresh during a round is safe — frontend reconstructs state from <code>minesState(betId)</code>.</li>
-    </ul>
+    <p>5×5 grid. Pick <code>[1, 24]</code> mines; HouseManager pre-commits the seed before you place, mine positions only lock when seed reveals. Multiplier scales as <code>∏ (25-i)/(25-mines-i) × (1 − edge)</code>; 100× cap. 1.2% house edge.</p>
 
     <h2 id="roulette">Roulette.</h2>
-    <p>European single-zero wheel. 10 bet kinds — straight (35:1), red/black/even/odd/1-18/19-36 (1:1), dozens (2:1). Result = randomness mod 37; multiplier 36 for straight, 3 for dozen, 2 for the others. 2.70% house edge.</p>
+    <p>American double-zero wheel. 10 bet kinds - straight (35:1), red/black/even/odd/1-18/19-36 (1:1), dozens (2:1). Result = <code>randomness mod 38</code>. <b>5.26% house edge</b> (standard American wheel; matches industry quote).</p>
 
-    <h2 id="agents">Architecture · the agent quorum.</h2>
-    <p>Every settled bet emits a <code>BetSettled</code> event. The <a class="cyan" href="#" data-sl-agent-link="verifier">AgentQuorumVerifier</a> contract independently asks 4 Somnia LLM Inference workers to re-derive the same keccak256; their signatures are recorded as a <code>QuorumResult</code> event. <b>Money never depends on the quorum signal</b> — randomness is on-chain via blockhash. The quorum is a defence-in-depth liveness check on the agent layer.</p>
-
-    <div class="agent-grid-doc">
-      <div class="ad"><span class="dot cyan"></span> JSON API Agent<br/><span class="id" data-sl-agent-id="json">—</span></div>
-      <div class="ad"><span class="dot purple"></span> LLM Inference Agent<br/><span class="id" data-sl-agent-id="llm">—</span></div>
-      <div class="ad"><span class="dot amber"></span> Parse Website Agent<br/><span class="id" data-sl-agent-id="parse">—</span></div>
-      <div class="ad"><span class="dot red"></span> House Manager Agent<br/><span class="id" data-sl-agent-id="hm">—</span></div>
-    </div>
-
-    <h2 id="json">JSON API Agent.</h2>
-    <p>Fetches JSON from public endpoints and extracts specific fields. Reserved for v2 oracle workloads (price feeds, external entropy sources). Not in the money path in v1.</p>
-
-    <h2 id="llm">LLM Inference Agent.</h2>
-    <p>String-in / string-out inference using <code>qwen3-30b</code>. Used by AgentQuorumVerifier for the 3-of-4 redundancy check, and by the HouseManager cron for narrating its decisions (<code>recordReasoning</code> events). Slot themes are also generated here.</p>
-
-    <h2 id="parse">Parse Website Agent.</h2>
-    <p>HTML → structured data scraper. Reserved for v2 (external tournament feeds, social leaderboards). Not yet bound to any v1 contract.</p>
-
-    <h2 id="house">House Manager Agent.</h2>
-    <p>Autonomous cron that:</p>
+    <h2 id="latency">Bet placement latency.</h2>
+    <p>Total wall-clock from click to settled receipt averages <b>2.0-2.5 s</b>; best observed 1.93 s. Breakdown (Sugar.Lab spin):</p>
     <ul class="docs-list">
-      <li>Resizes per-game max-bet to 1% of free bankroll every 5 minutes.</li>
-      <li>Activates <code>BonusMode</code> (house edge × 0.5) when bankroll grows &gt; +10% in an hour.</li>
-      <li>Pauses games when bankroll falls &gt; −20% in an hour (circuit breaker baked into Casino.sol too).</li>
-      <li>Rotates the slot theme every 24 hours via <code>triggerThemeRotation</code>.</li>
-      <li>Logs every decision on-chain via <code>recordReasoning(string)</code> events.</li>
+      <li><b>Populate</b> (parallel RPC for gas + nonce + fees, 5 s TTL cache) - 80-150 ms</li>
+      <li><b>Privy iframe sign</b> (eth_signTransaction, returns raw hex) - 350-500 ms</li>
+      <li><b>Broadcast</b> (eth_sendRawTransaction via our RPC) - 80-150 ms</li>
+      <li><b>1 block to commitBlock + REVEAL_DELAY=1</b> (Somnia ~400 ms/block) - 800 ms</li>
+      <li><b>Reveal-bot settle</b> (WebSocket push, leading-edge debounced 150 ms) - 400-600 ms</li>
     </ul>
 
-    <h2 id="sdk">JS SDK.</h2>
-    <p>The frontend SDK is published under <code>frontend/lib/shinyluck-sdk.js</code>. Embed any ShinyLuck game in a dApp:</p>
+    <h2 id="presign">Pre-sign pipeline (Sugar-only).</h2>
+    <p>While the cascade animation plays (1-3 s), the SDK speculatively pre-signs the <em>next</em> spin in the Privy iframe. On the user's next click only the broadcast round-trip remains (~150 ms). Reservation safety:</p>
+    <ul class="docs-list">
+      <li>Pre-sign expires after 25 s (fee-data TTL window)</li>
+      <li>Stake mismatch between presign + click → drop + re-sign</li>
+      <li>Broadcast error → invalidate + force chain-nonce resync (no mempool gap)</li>
+      <li>Nonce mutex serialises concurrent presign + auto-claim populate calls</li>
+    </ul>
+    <p>Extending the pattern to Vault.7 / Plinko is one-liner once the animation hook lands; see <code>frontend/lib/shinyluck-sdk.js</code> <code>presignClusterSpin</code>.</p>
+
+    <h2 id="realtime">Real-time updates.</h2>
+    <p>Every game page subscribes to <code>BetSettled</code> for the connected player via Somnia WebSocket (<code>wss://api.infra.testnet.somnia.network/ws</code> - the canonical infra endpoint used by every first-party Somnia example). The lobby + leaderboard + account aggregate <code>BetSettled</code> across <em>all historical Casino deployments</em> (the redeploy-survivable history list is in <code>frontend/lib/config.js</code> as <code>historicalCasinos</code>). For the explorer/log scans we use the <a class="cyan" href="https://shannon-explorer.somnia.network/api" target="_blank">Shannon Explorer REST indexer</a> - one HTTP call per contract per event type vs hundreds of chunked <code>eth_getLogs</code> RPC calls (~100× faster cold start).</p>
+
+    <h2 id="agents">Architecture · the agent quorum.</h2>
+    <p>ShinyLuck uses three orthogonal autonomous agent paths, all settled on-chain via Somnia primitives:</p>
+    <div class="agent-grid-doc">
+      <div class="ad"><span class="dot red"></span> House Manager Agent (LLM)<br/><span class="id" data-sl-agent-id="hm">-</span></div>
+      <div class="ad"><span class="dot purple"></span> LLM Inference Agent (qwen3-30b)<br/><span class="id" data-sl-agent-id="llm">-</span></div>
+      <div class="ad"><span class="dot cyan"></span> JSON API Agent<br/><span class="id" data-sl-agent-id="json">-</span></div>
+      <div class="ad"><span class="dot amber"></span> Parse Website Agent<br/><span class="id" data-sl-agent-id="parse">-</span></div>
+    </div>
+    <ul class="docs-list">
+      <li><b>HM ↔ LLM hourly loop</b> - autonomous RTP adjustment via <a href="#hm-llm">Somnia Agent Platform</a></li>
+      <li><b>Agent Quorum Verifier</b> - 3-of-4 redundant randomness re-derivation per settled bet (defence-in-depth)</li>
+      <li><b>Player Agents</b> - relayer-executed strategies with vault-isolated funds + on-chain limits</li>
+    </ul>
+
+    <h2 id="hm-llm">HM ↔ JSON API ↔ LLM autonomous chain.</h2>
+    <p>This is the <b>agent-first design</b> story. Every hour Somnia's Reactivity precompile (<code>0x0100</code>) fires a Schedule event → <code>HouseManager._onEvent</code> wakes up → dispatches a 2-stage agent chain via <code>IAgentRequester.createRequest</code> on the Somnia Agent Platform.</p>
+    <p><b>Stage 1 - JSON API Agent</b> (id <code>13174292974160097713</code>, price 0.03 STT × 3 workers) fetches the live <em>ShinyLuck Competitor RTP Research</em> feed and extracts the <code>slots_rtp_avg_bps</code> / <code>cluster_rtp_avg_bps</code> field. Three Somnia validators independently hit the URL, reach Majority consensus on byte-identical output, and the platform calls back with the number.</p>
     <pre class="code-block">
-<span class="dim">// import the SDK</span>
+<span class="dim">// Stage 1 payload - what the JSON API Agent receives</span>
+fetchUint(<span class="str">"https://jsonblob.com/api/jsonBlob/019e555c-25db-7e74-a62d-31c135e87539"</span>,
+          <span class="str">"slots_rtp_avg_bps"</span>, <span class="num">0</span>)
+<span class="dim">// → returns uint256(9533) → casino RTP avg of 95.33% across competitors</span>
+</pre>
+    <p><b>Stage 2 - LLM Inference Agent</b> (id <code>12847293847561029384</code>, Qwen3-30B with temp=0, price 0.07 STT × 3 workers) receives a prompt built on-chain by <code>_buildDecisionPrompt</code> and replies with one of <code>[LOWER, HOLD, RAISE, BIG_BONUS]</code> via <code>inferString</code> + <code>allowedValues</code> (guaranteed parseable).</p>
+    <pre class="code-block">
+<span class="dim">// Stage 2 prompt - actual on-chain construction</span>
+<span class="str">"Decide RTP for VAULT.7 slots. Our RTP: 92.00%.
+Competitor average RTP (live from research feed): 95.33%.
+Free bankroll: 50 STT. 1h bankroll change: +0.00%.
+Action: RAISE = +1.5% RTP. LOWER = -1.5% RTP. HOLD = no change.
+BIG_BONUS = activate 60min Bonus Mode."</span>
+</pre>
+    <p>Majority consensus across 3 LLM workers → <code>handleResponse</code> applies via <code>casino.adjustSlotRTP(game, newRtp, "LLM consensus via Somnia Agent Platform")</code>. The whole chain is on-chain - no off-chain script, no admin key, no oracle middleware. Each hour costs ~0.72 STT (2× JSON 0.12 + 2× LLM 0.24); HM holds 48 STT buffer = ~2.5 days unattended runway. Events to watch on Shannon Explorer: <code>CompetitorRtpRequested → CompetitorRtpResolved → RtpAnalysisRequested → RtpAnalysisResolved → casino.RtpAdjusted</code>.</p>
+
+    <h2 id="quorum">Agent quorum verifier.</h2>
+    <p><code>AgentQuorumVerifier.sol</code> asks 4 LLM workers to independently re-derive the <code>keccak256(serverSeed ‖ clientSeed ‖ blockhash ‖ nonce)</code> for a settled bet. The signature count (3-of-4 = OK, 2-of-4 = warning, ≤1 = critical) lands in a <code>QuorumResult</code> event. <b>Money never depends on this</b> - randomness is on-chain via blockhash. Quorum is defence-in-depth on the agent layer.</p>
+
+    <h2 id="json">JSON API Agent.</h2>
+    <p>Live-fetches the <em>ShinyLuck Competitor RTP Research</em> feed from a public JSON endpoint (currently <code>jsonblob.com</code>; owner-replaceable via <code>setCompetitorFeedUrl</code>). The feed is manually curated from public casino-review aggregators (askgamblers.com, casinoguru.com, gambling.com) - sample of Stake.us, BC.game, Wink.com slot/cluster RTPs. The agent extracts a JSONPath selector (<code>slots_rtp_avg_bps</code> or <code>cluster_rtp_avg_bps</code>) and 3 validators reach Majority consensus on the integer value.</p>
+
+    <h2 id="parse">Parse Website Agent.</h2>
+    <p>HTML → structured data scraper. Reserved for v2 (news-driven Bonus Mode - e.g. "Bitcoin halving today" → activate generous payout window). Not yet bound to the v1 contracts but the agent ID is registered + the platform fee model is wired the same way as the LLM Inference Agent.</p>
+
+    <h2 id="player-agent">Player Agents.</h2>
+    <p><code>PlayerAgentRegistry.sol</code> + <code>AgentVault.sol</code>. Each player registers once, gets a fresh AgentVault, and grants an off-chain relayer the right to place bets on their behalf within stake / game / daily / total limits. The relayer (<code>agent-service/relayer.js</code>) places bets that look identical on-chain to user-placed bets but pull funds from the vault. Strategy text is natural-language; the LLM Inference Agent compiles it to executor params (Phase 2). Supports: Dice, Vault.7, Plinko, Crash (round-aware), Roulette (round-aware), Sugar.Lab.</p>
+
+    <h2 id="bonus">Bonus Mode.</h2>
+    <p>HouseManager triggers <code>activateBonusMode(durationMinutes, reasoning)</code> on Casino when 1-hour bankroll growth exceeds +10%. Effects per game:</p>
+    <ul class="docs-list">
+      <li><b>Dice / Crash / Mines / Plinko / Roulette</b> - house edge halved (e.g. Dice 1% → 0.5%, Roulette 5.26% → 2.63%)</li>
+      <li><b>Vault.7 (slots)</b> - pay-table boost +32 points (560 → 592 X100), ~+4.5% RTP (92% → 96.5%)</li>
+      <li><b>Sugar.Lab (cluster)</b> - pay-table boost +18 points (332 → 350 X100), ~+5.4% RTP (92% → 97.4%)</li>
+    </ul>
+    <p>The "<code>bps / 2</code>" branch in <code>houseEdgeBps</code> alone was a no-op for the zero-edge slot games (math IS the edge); the additive boost in <code>_settleBet</code> makes Bonus Mode actually meaningful there.</p>
+
+    <h2 id="sdk">JS SDK.</h2>
+    <p>Embed any ShinyLuck game in a dApp via <code>frontend/lib/shinyluck-sdk.js</code>:</p>
+    <pre class="code-block">
+<span class="dim">// import the SDK + ethers</span>
 <span class="kw">import</span> { ShinyLuck, CHAINS } <span class="kw">from</span> <span class="str">"./lib/shinyluck-sdk.js"</span>;
 
 <span class="kw">const</span> sl = <span class="kw">new</span> <span class="cls">ShinyLuck</span>({
-  casino:   <span class="str">"0x8B43…E219"</span>,
-  registry: <span class="str">"0x0947…E21a"</span>,
+  casino:   <span class="str">"0x447b5989CaFD94204872924e4B5f684C6484c21d"</span>,
+  registry: <span class="str">"0x8765f7C605110b2AA50c6c720416c49c665E5b9b"</span>,
   network:  CHAINS.somniaTestnet,
 });
 <span class="kw">await</span> sl.<span class="fn">connect</span>();
-<span class="kw">const</span> { betId, txHash } = <span class="kw">await</span> sl.<span class="fn">placeCrash</span>(<span class="num">2.0</span>, <span class="str">"0.1"</span>);
+
+<span class="dim">// Sugar.Lab spin (with auto pre-sign of the next one)</span>
+<span class="kw">const</span> { betId, txHash } = <span class="kw">await</span> sl.<span class="fn">placeCluster</span>(<span class="str">"0.1"</span>);
 <span class="kw">const</span> settled = <span class="kw">await</span> sl.<span class="fn">waitForSettle</span>(betId);
 <span class="kw">if</span> (settled.won) console.<span class="fn">log</span>(<span class="str">"+"</span>, settled.payout);
+
+<span class="dim">// Pre-sign the next spin during the cascade animation</span>
+sl.<span class="fn">presignClusterSpin</span>(<span class="str">"0.1"</span>);
 </pre>
 
     <h2 id="contracts">Contract addresses.</h2>
     <table class="docs-table">
       <thead><tr><th>Contract</th><th>Network</th><th>Address</th></tr></thead>
       <tbody>
-        <tr><td>Casino.sol</td><td>Somnia testnet (Shannon)</td><td class="cyan" data-sl-contract="casino">—</td></tr>
-        <tr><td>HouseManager.sol</td><td>Somnia testnet (Shannon)</td><td class="cyan" data-sl-contract="hm">—</td></tr>
-        <tr><td>PlayerAgentRegistry.sol</td><td>Somnia testnet (Shannon)</td><td class="cyan" data-sl-contract="registry">—</td></tr>
-        <tr><td>AgentQuorumVerifier.sol</td><td>Somnia testnet (Shannon)</td><td class="cyan" data-sl-contract="verifier">—</td></tr>
+        <tr><td>Casino.sol</td><td>Somnia testnet (Shannon)</td><td class="cyan" data-sl-contract="casino">-</td></tr>
+        <tr><td>HouseManager.sol</td><td>Somnia testnet (Shannon)</td><td class="cyan" data-sl-contract="hm">-</td></tr>
+        <tr><td>PlayerAgentRegistry.sol</td><td>Somnia testnet (Shannon)</td><td class="cyan" data-sl-contract="registry">-</td></tr>
+        <tr><td>AgentQuorumVerifier.sol</td><td>Somnia testnet (Shannon)</td><td class="cyan" data-sl-contract="verifier">-</td></tr>
+        <tr><td>SomniaAgentPlatform</td><td>Somnia testnet (Shannon)</td><td class="cyan">0x037B…6776</td></tr>
+        <tr><td>SomniaReactivityPrecompile</td><td>(precompile)</td><td class="cyan">0x0100</td></tr>
       </tbody>
     </table>
+    <p>All four ShinyLuck contracts are <a href="https://shannon-explorer.somnia.network/" class="cyan" target="_blank">verified on Shannon Explorer</a> - source readable from the address page.</p>
 
     <h2 id="events">Events &amp; webhooks.</h2>
-    <p>All public state changes are emitted as Solidity events on the Casino contract:</p>
+    <p>All public state changes are emitted as Solidity events on the Casino + HouseManager contracts:</p>
     <ul class="docs-list">
-      <li><code>BetPlaced(betId, player, game, amount, clientSeed, commitBlock, seedIdx, params)</code></li>
-      <li><code>BetSettled(betId, player, game, won, payout, randomness, serverSeed, clientSeed, blockHash, nonce, resultData)</code></li>
-      <li><code>BetRefunded(betId, player, amount, reason)</code> — emitted when the blockhash window expires.</li>
-      <li><code>WithdrawalCredited / WithdrawalClaimed</code> — pull-payment ledger.</li>
-      <li><code>BonusModeActivated / ReasoningLog</code> — HM Agent traces.</li>
-      <li><code>QuorumResult</code> — AgentQuorumVerifier signers' agreement level.</li>
+      <li><code>Casino.BetPlaced(betId, player, game, amount, clientSeed, commitBlock, seedIdx, params)</code></li>
+      <li><code>Casino.BetSettled(betId, player, game, won, payout, randomness, serverSeed, clientSeed, blockHash, nonce, resultData)</code></li>
+      <li><code>Casino.BetRefunded(betId, player, amount, reason)</code> - emitted when the blockhash window expires</li>
+      <li><code>Casino.WithdrawalCredited / WithdrawalClaimed</code> - pull-payment ledger</li>
+      <li><code>Casino.BonusModeActivated(until, reasoning)</code> - HM autonomous decision</li>
+      <li><code>Casino.RtpAdjusted(game, oldRtpBps, newRtpBps, reasoning)</code> - RTP flex (LLM or rule-based)</li>
+      <li><code>Casino.ReasoningLog(thought, timestamp)</code> - HM narrates its decisions</li>
+      <li><code>HouseManager.ReactiveBetSettledHandled(newMaxBet, freeBankroll)</code> - per-bet reflex</li>
+      <li><code>HouseManager.ReactiveHourlyTick(freeBankrollNow, changeBps)</code> - cron pulse via precompile</li>
+      <li><code>HouseManager.RtpAnalysisRequested / RtpAnalysisResolved</code> - LLM agent chain</li>
+      <li><code>AgentQuorumVerifier.QuorumResult(betId, requestId, expected, signers, totalWorkers, level, status, sampleResponse)</code></li>
     </ul>
 
     <h2 id="fair-details">Provably fair · how the math works.</h2>
-    <p>For every bet, randomness = <code>keccak256(serverSeed ‖ clientSeed ‖ blockhash(commitBlock + 3) ‖ nonce)</code>. The server seed's hash is committed before any bet binds to its slot; the blockhash is unknowable at commit time and only finalises 3 blocks later. The browser-side verifier on the <a class="cyan" href="fair.html" data-link>Provably Fair</a> page re-derives this exactly and compares against the on-chain value.</p>
+    <p>For every bet: <code>randomness = keccak256(serverSeed ‖ clientSeed ‖ blockhash(commitBlock + REVEAL_DELAY) ‖ nonce)</code>. <code>REVEAL_DELAY = 1</code> block. The server seed's hash is committed before any bet binds to its slot (see <code>provisionSeedHashes</code>); the blockhash is unknowable at commit time and only finalises 1 block later. The browser-side verifier on the <a class="cyan" href="fair.html" data-link>Provably Fair</a> page re-derives this exactly and compares against the on-chain value. The Agent Quorum Verifier asks 4 independent LLM workers to do the same - a 3-of-4 majority is the soft confirmation, but the money path doesn't wait on it.</p>
 
     <h2 id="audit">Audit / verification.</h2>
-    <p>The Casino contract on the explorer has its source verified. The CommitReveal library matches the formulation above (single file, ≈ 70 lines). Bug bounty: anything that lets a player or the operator deviate from the published RTPs is in scope; report to <span class="cyan">security@shinyluck.gg</span>.</p>
+    <p>All four contracts have source verified on the Shannon Explorer. CommitReveal library matches the formulation above (single file, ≈ 80 lines). RTP claims for slot games are independently checkable: <code>scripts/_rtp-simulation.js</code> runs a 100 k Monte Carlo against <code>ClusterLib</code> / <code>Vault7Lib</code> and prints actual vs claimed. Bug bounty: anything that lets a player or the operator deviate from the published RTPs is in scope; report to <span class="cyan">security@shinyluck.gg</span>.</p>
 
     <div class="next-prev">
       <a class="np prev" href="#intro">← What is ShinyLuck</a>
@@ -220,9 +285,12 @@
     <div class="toc-title">ON THIS PAGE</div>
     <a class="on" href="#intro">What is ShinyLuck</a>
     <a href="#start">Connect and play</a>
-    <a href="#agents">The agent quorum</a>
+    <a href="#sugar">Sugar.Lab</a>
+    <a href="#latency">Bet latency</a>
+    <a href="#agents">Agent quorum</a>
+    <a href="#hm-llm">HM ↔ LLM loop</a>
     <a href="#sdk">JS SDK</a>
-    <a href="#contracts">Contract addresses</a>
+    <a href="#contracts">Contracts</a>
     <a href="#fair-details">Provably fair</a>
     <div class="toc-foot">
       <div class="t">Was this helpful?</div>

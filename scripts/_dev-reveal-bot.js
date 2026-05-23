@@ -17,7 +17,7 @@ if (!fs.existsSync(seedsDir)) {
 }
 
 // Filter: only files named `${NET}-<digits>.json` (the seed batches written
-// by deploy.js / topup-seeds.js). EXCLUDE `${NET}-pool.json` — that's the
+// by deploy.js / topup-seeds.js). EXCLUDE `${NET}-pool.json` - that's the
 // shared HM-cron pool file which gets new mtimes every topup, so it would
 // otherwise outrank the actual batch files.
 const candidates = fs.readdirSync(seedsDir)
@@ -39,6 +39,11 @@ const env = {
   ...process.env,
   SEEDS_FILE: seedsFile,
   SEED_POOL_FILE: poolFile,
+  // Default OFF for dev:play - crash/roulette keepalive spams revert tx
+  // when those games aren't in scope for the current test (Sugar/Vault7
+  // perf work). Burns RPC budget and clutters logs. Override with
+  // ROUND_KEEPALIVE=1 if you actually want those rounds bootstrapped.
+  ROUND_KEEPALIVE: process.env.ROUND_KEEPALIVE != null ? process.env.ROUND_KEEPALIVE : "0",
 };
 
 // Use async spawn so the wrapper stays alive as long as the child runs.

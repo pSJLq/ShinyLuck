@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 /// @title Vault7Lib
-/// @notice The on-chain resolver for VAULT.7 — the 5×3 / 20-payline slot
+/// @notice The on-chain resolver for VAULT.7 - the 5×3 / 20-payline slot
 ///         with WILD substitution + SCATTER → free-spin trigger. Mirrors the
 ///         engine in `slots/engine.js` exactly:
 ///           • 9 concrete symbols + WILD + SCATTER (11 IDs total)
@@ -233,7 +233,7 @@ library Vault7Lib {
         // Each reel picks a starting index into its 40-cell strip from 8 bits
         // of randomness. Total entropy used: 5 × 8 bits = 40 bits.
         // (start+row is computed in uint256 to avoid uint8+uint8 overflow when
-        //  start = 255 — reelSymbol takes the final value mod 40 internally.)
+        //  start = 255 - reelSymbol takes the final value mod 40 internally.)
         for (uint8 c = 0; c < 5; c++) {
             uint256 start = (r >> (c * 8)) & 0xFF;
             for (uint8 row = 0; row < 3; row++) {
@@ -253,7 +253,7 @@ library Vault7Lib {
         if (freeSpinMultX100 > 100) {
             payout = (payout * freeSpinMultX100) / 100;
         }
-        // Scatter "anywhere" pay — flat × stake, NOT multiplied by free-spin
+        // Scatter "anywhere" pay - flat × stake, NOT multiplied by free-spin
         // multiplier (matches engine.js behaviour).
         scatterPayX100Out = scatterPayX100(scatterCount);
         if (scatterPayX100Out > 0) {

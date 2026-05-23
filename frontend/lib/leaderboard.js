@@ -1,16 +1,16 @@
 // Aggregates BetPlaced + BetSettled events into a per-player leaderboard
-// (wagered, P&L, bet count, favourite game). Pure on-chain — no DB.
+// (wagered, P&L, bet count, favourite game). Pure on-chain - no DB.
 //
 // Uses raw eth_getLogs (lib/rpc.js) so it survives Somnia's missing
 // `removed` field on log records.
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { CONFIG } from "./config.js";
 import { provider, fetchLogs, fetchDeploymentBlock } from "./rpc.js";
 
 const GAME_NAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.LAB"];
 const ZERO = "0x0000000000000000000000000000000000000000";
-// 20k blocks ≈ 7 hours on Somnia — same as feed. fetchDeploymentBlock
+// 20k blocks ≈ 7 hours on Somnia - same as feed. fetchDeploymentBlock
 // further clamps to contract-age so cold-start scan stays under ~2s.
 const LOOKBACK = 20_000;
 
@@ -18,7 +18,7 @@ let sortBy = "wagered";
 let aggregate = [];
 let myAddr = null;
 
-// Pagination — 20 rows per page across all three sort modes.
+// Pagination - 20 rows per page across all three sort modes.
 const LB_PAGE_SIZE = 20;
 let _lbPage = 0;
 
@@ -61,33 +61,59 @@ async function loadEvents() {
     "event BetPlaced(uint256 indexed betId,address indexed player,uint8 indexed game,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
     "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
   ];
-  const c = new ethers.Contract(CONFIG.casino, abi, provider());
-  const dep = await fetchDeploymentBlock();
   const head = await provider().getBlockNumber();
-  // Clamp to contract age — never scan blocks that predate the deploy.
-  const from = dep > 0 ? Math.max(dep, head - LOOKBACK) : (head - LOOKBACK);
-  // Parallel scan placed + settled (was sequential — halves cold-start time).
-  const [placed, settled] = await Promise.all([
-    fetchLogs(c, "BetPlaced", from, head),
-    fetchLogs(c, "BetSettled", from, head),
-  ]);
-  return { placed, settled };
+
+  // Aggregate across every historical casino so the leaderboard reflects
+  // lifetime activity, not just the latest redeploy's window. Each contract
+  // gets one Shannon Explorer call per event type (parallel via Promise.all)
+  // scoped to that contract's lifetime range.
+  const list = Array.isArray(CONFIG.historicalCasinos) ? CONFIG.historicalCasinos : [];
+  const withCurrent = [...list];
+  if (!list.some((e) => e.address.toLowerCase() === CONFIG.casino.toLowerCase())) {
+    withCurrent.push({ address: CONFIG.casino, deploymentBlock: 0 });
+  }
+  withCurrent.sort((a, b) => a.deploymentBlock - b.deploymentBlock);
+
+  const aggPlaced = [], aggSettled = [];
+  const fetches = [];
+  withCurrent.forEach((entry, i) => {
+    const c = new ethers.Contract(entry.address, abi, provider());
+    const from = entry.deploymentBlock || 0;
+    const to = (i + 1 < withCurrent.length) ? withCurrent[i + 1].deploymentBlock - 1 : head;
+    fetches.push(
+      fetchLogs(c, "BetPlaced",  from, to).then((evs) => {
+        // Tag each event with its source contract so aggregateEvents can
+        // build collision-free stake/game maps (betId space is per-contract).
+        for (const ev of evs) ev.__addr = entry.address.toLowerCase();
+        aggPlaced.push(...evs);
+      }).catch(() => {}),
+      fetchLogs(c, "BetSettled", from, to).then((evs) => {
+        for (const ev of evs) ev.__addr = entry.address.toLowerCase();
+        aggSettled.push(...evs);
+      }).catch(() => {}),
+    );
+  });
+  await Promise.all(fetches);
+  return { placed: aggPlaced, settled: aggSettled };
 }
 
 function aggregateEvents({ placed, settled }) {
   const stakeByBet = new Map();
   const gameByBet = new Map();
+  // Namespace by source contract address (stored on ev.__addr by loadEvents)
+  // so the same betId from different historical casinos doesn't collide.
   for (const ev of placed) {
-    stakeByBet.set(ev.args.betId.toString(), ev.args.amount);
-    gameByBet.set(ev.args.betId.toString(), Number(ev.args.game));
+    const key = `${ev.__addr || ""}::${ev.args.betId.toString()}`;
+    stakeByBet.set(key, ev.args.amount);
+    gameByBet.set(key, Number(ev.args.game));
   }
   const byPlayer = new Map();
   for (const ev of settled) {
     const player = ev.args.player.toLowerCase();
-    const betId = ev.args.betId.toString();
-    const stake = stakeByBet.get(betId) || 0n;
+    const key = `${ev.__addr || ""}::${ev.args.betId.toString()}`;
+    const stake = stakeByBet.get(key) || 0n;
     const payout = ev.args.payout;
-    const game = gameByBet.get(betId) ?? Number(ev.args.game);
+    const game = gameByBet.get(key) ?? Number(ev.args.game);
     let p = byPlayer.get(player);
     if (!p) {
       p = { addr: ev.args.player, wagered: 0n, payout: 0n, bets: 0, byGame: new Map() };
@@ -107,7 +133,7 @@ function aggregateEvents({ placed, settled }) {
       wagered: p.wagered,
       pnl: p.payout - p.wagered,
       bets: p.bets,
-      favourite: fav >= 0 ? GAME_NAMES[fav] : "—",
+      favourite: fav >= 0 ? GAME_NAMES[fav] : "-",
     });
   }
   return list;
@@ -139,7 +165,7 @@ function render(list) {
     const empty = document.createElement("div");
     empty.className = "lb-row";
     empty.style.opacity = ".4";
-    empty.innerHTML = `<div class="rk">—</div><div class="pl">no settled bets in window</div><div class="fv">—</div><div class="wg">—</div><div class="pl-v">—</div><div class="st">—</div>`;
+    empty.innerHTML = `<div class="rk">-</div><div class="pl">no settled bets in window</div><div class="fv">-</div><div class="wg">-</div><div class="pl-v">-</div><div class="st">-</div>`;
     root.appendChild(empty);
     return;
   }
@@ -181,7 +207,7 @@ function render(list) {
   }
   document.querySelectorAll("[data-sl-lb-count]").forEach((el) => el.textContent = list.length.toString());
   document.querySelectorAll("[data-sl-lb-footer]").forEach((el) => el.textContent =
-    `Showing ${startIdx + 1}–${startIdx + sorted.length} of ${sortedFull.length} · window ${LOOKBACK} blocks · sort: ${sortBy}`);
+    `Showing ${startIdx + 1}-${startIdx + sorted.length} of ${sortedFull.length} · window ${LOOKBACK} blocks · sort: ${sortBy}`);
 
   mountLbPager(sortedFull.length, _lbPage, (idx) => {
     _lbPage = idx;

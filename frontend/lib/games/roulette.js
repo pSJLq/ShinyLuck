@@ -10,7 +10,7 @@
 //   4. spinWheel() animates the wheel with smooth accel + decel, lands on the
 //      result segment under the pointer, then stays there until next round.
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect } from "../wallet.js";
 import { CONFIG } from "../config.js";
 import { provider, fetchRecentLogs } from "../rpc.js";

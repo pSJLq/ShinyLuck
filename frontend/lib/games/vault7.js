@@ -14,7 +14,7 @@
 //     0=E, 1=D, 2=F, 3=A (low) — 4=COIN, 5=BOLT (mid) — 6=CRYS, 7=DIAM (high)
 //     8=WILD, 9=SCAT
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect } from "../wallet.js";
 import { CONFIG } from "../config.js";
 import { provider, fetchRecentLogs } from "../rpc.js";

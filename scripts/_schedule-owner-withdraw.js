@@ -1,8 +1,8 @@
-// Schedule a 50 STT owner-withdraw from Casino. 24h timelock starts NOW —
+// Schedule a 50 STT owner-withdraw from Casino. 24h timelock starts NOW -
 // if we end up redeploying with REVEAL_DELAY=1, we can claim the funds
 // back to deployer and top up the new casino.
 //
-// Safe to run even if we don't end up redeploying — just sits there as
+// Safe to run even if we don't end up redeploying - just sits there as
 // a pending intent until claimOwnerWithdraw() is called.
 const { ethers } = require("hardhat");
 const path = require("path");
@@ -16,7 +16,7 @@ async function main() {
   const free = await casino.freeBankroll();
   const amt = ethers.parseEther(AMOUNT_STT);
   console.log(`[schedule] freeBankroll=${ethers.formatEther(free)} STT, scheduling ${AMOUNT_STT} STT`);
-  if (amt > free) { console.log("[schedule] amount > free — aborting"); return; }
+  if (amt > free) { console.log("[schedule] amount > free - aborting"); return; }
 
   const existing = await casino.ownerWithdrawal();
   if (existing.amount > 0n) {

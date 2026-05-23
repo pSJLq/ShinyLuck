@@ -1,4 +1,4 @@
-/* Shared chrome injector — loader, nav, footer, cursor, page transitions */
+/* Shared chrome injector - loader, nav, footer, cursor, page transitions */
 
 (function injectChrome() {
 
@@ -20,8 +20,8 @@
       import(url).then((m) => { if (m && m.CONFIG) done(m.CONFIG); }).catch(() => {});
       // last-ditch placeholder so the loader never hangs forever
       setTimeout(() => done(window.SL_CONFIG || {
-        network: "somniaTestnet", casino: "—", houseManager: "—", agentVerifier: "—",
-        registry: "—", agentPlatform: "—", agentIds: {},
+        network: "somniaTestnet", casino: "-", houseManager: "-", agentVerifier: "-",
+        registry: "-", agentPlatform: "-", agentIds: {},
       }), 1200);
     });
   }
@@ -66,7 +66,7 @@
   const pctEl = loader.querySelector('.sl-loader-pct');
   const logEl = loader.querySelector('#sl-loader-log');
 
-  const shortAddr = (a) => (a && a.length > 10 ? `${a.slice(0,6)}…${a.slice(-4)}` : (a || "—"));
+  const shortAddr = (a) => (a && a.length > 10 ? `${a.slice(0,6)}…${a.slice(-4)}` : (a || "-"));
 
   function buildLines(cfg) {
     const netLabel = cfg.network === "somniaMainnet" ? "mainnet" : "testnet";
@@ -74,9 +74,9 @@
     return [
       `> connecting to ${netLabel}…`,
       `> resolving agent registry ${shortAddr(cfg.agentPlatform)}`,
-      `> handshake LLM Inference · ${ids.llm || "—"} ✓`,
-      `> handshake JSON API · ${ids.json || "—"} ✓`,
-      `> handshake Parse Website · ${ids.parse || "—"} ✓`,
+      `> handshake LLM Inference · ${ids.llm || "-"} ✓`,
+      `> handshake JSON API · ${ids.json || "-"} ✓`,
+      `> handshake Parse Website · ${ids.parse || "-"} ✓`,
       `> handshake House Manager · autonomous ✓`,
       `> casino contract synced · ${shortAddr(cfg.casino)}`,
       `> reveal-bot live · finality ~1.2s · ready`,
@@ -104,15 +104,41 @@
   // animation that lets the user see the brand), then HOLDS at 90% until
   // livedata.js fires `shinyluck:ready` (sent after the initial feed +
   // stats scans complete). This guarantees the splash covers the slowest
-  // on-chain RPC the page needs — by the time the splash fades, the feed
+  // on-chain RPC the page needs - by the time the splash fades, the feed
   // and ticker are already populated, not "loading…".
   let p = 0, lineIdx = 0;
   let dataReady = false;
   let finishingUp = false;
   document.addEventListener('shinyluck:ready', () => { dataReady = true; }, { once: true });
-  // Safety: if livedata never fires (offline RPC, deploy missing) the splash
-  // should NOT trap the page. Auto-release after 8s.
-  setTimeout(() => { dataReady = true; }, 8000);
+  // Slot pages dispatch `shinyluck:slot-mounted` when their UI is up and
+  // either (a) connected + slot rendered or (b) confirmed unauthenticated
+  // and the connect prompt is shown. Listening for this avoids the flash
+  // where the splash fades early, the connect-prompt appears for a few
+  // hundred ms, and THEN the slot renders. Falls back to the data-ready
+  // event (lobby/leaderboard) or the 8s safety timeout.
+  document.addEventListener('shinyluck:slot-mounted', () => { dataReady = true; }, { once: true });
+
+  // Pages with neither livedata nor a slot dispatch (simple games like
+  // dice/crash) should release on DOMContentLoaded so we don't trap them
+  // for 8s. We detect this structurally - no livedata.js script AND no
+  // [data-slot-root] hook in the page.
+  const hasLivedata = !!document.querySelector('script[src*="livedata"]');
+  const hasSlotRoot = !!document.getElementById('slot-root');
+  if (!hasLivedata && !hasSlotRoot) {
+    const release = () => { dataReady = true; };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', release, { once: true });
+    } else {
+      release();
+    }
+  }
+  // Safety: if neither shinyluck:ready nor shinyluck:slot-mounted fires
+  // (offline RPC, mount crash) the splash should NOT trap the page. Auto-
+  // release after 15s. Slot pages occasionally need 8-10s for the full
+  // Privy bootstrap + balance/chargeMeter chain reads + slot skeleton
+  // render on cold cache, so the previous 8s safety could fire BEFORE
+  // mount completed → empty screen flash between splash and slot UI.
+  setTimeout(() => { dataReady = true; }, 15000);
   const tick = () => {
     const ceiling = dataReady ? 100 : 90;
     p += Math.random() * 6 + 3;
@@ -146,7 +172,7 @@
         <a class="logo" href="../SomniaLuck.html" data-link data-hover>
           <span class="brackets">{</span><span class="name"><b>l</b></span><span class="brackets">}</span>
           <span class="name">ShinyLuck</span>
-          <span class="badge-mainnet" data-sl-network-badge>—</span>
+          <span class="badge-mainnet" data-sl-network-badge>-</span>
         </a>
         <nav class="nav-links">
           <a href="../SomniaLuck.html#games" data-link data-page="games">Games</a>
@@ -164,9 +190,9 @@
   `;
 
   function footerHTMLFor(cfg) {
-    const addrLink = (label, addr) => addr && addr !== "—"
+    const addrLink = (label, addr) => addr && addr !== "-"
       ? `<a href="${explorerBase}/address/${addr}" target="_blank" rel="noopener" data-hover>${label}: <span class="mono">${shortAddr(addr)}</span></a>`
-      : `<span>${label}: —</span>`;
+      : `<span>${label}: -</span>`;
     return `
     <footer>
       <div class="foot-grid">
@@ -175,7 +201,7 @@
             <span class="brackets">{</span><span class="name"><b>l</b></span><span class="brackets">}</span>
             <span>ShinyLuck</span>
           </div>
-          <p class="foot-tag">Provably fair, agent-settled gambling on Somnia. Open contracts, open RNG, open books — every bet auditable from the Genesis block.</p>
+          <p class="foot-tag">Provably fair, agent-settled gambling on Somnia. Open contracts, open RNG, open books - every bet auditable from the Genesis block.</p>
           <div class="foot-socials">
             <a class="social-tag" data-hover href="https://github.com/" target="_blank" rel="noopener">GITHUB</a>
             <a class="social-tag" data-hover href="https://discord.com/" target="_blank" rel="noopener">DISCORD</a>
@@ -229,7 +255,7 @@
 
   // ---------- INSERT INTO PAGE ----------
   function fixRelative(html) {
-    // Template paths use `../X.html` — that's correct from `/games/X.html`
+    // Template paths use `../X.html` - that's correct from `/games/X.html`
     // (1 dir deep). For root pages we strip the `../` since it's irrelevant.
     // For nested game pages `/games/sugar/index.html` (2 dirs deep) we
     // PREFIX an extra `../` per extra level.
@@ -267,7 +293,28 @@
       link.href = '/favicon.ico';
       document.head.appendChild(link);
     }
-    if (!document.querySelector('.amb')) {
+    // TESTING ribbon on beta game pages - every game except Sugar + Dice.
+    // pointer-events:none in CSS means the user can still click through to
+    // the place-bet UI underneath; this is just a visual "warning, rough
+    // edges" marker. The two stable games (sugar/dice) are explicitly
+    // excluded so the lobby's most-promoted titles look polished.
+    const path = (location.pathname || "").toLowerCase();
+    const isGamePage = /\/games\//.test(path);
+    const isStableGame = /\/games\/(sugar|dice)/.test(path);
+    if (isGamePage && !isStableGame && !document.querySelector('.sl-testing-ribbon')) {
+      const ribbon = document.createElement('div');
+      ribbon.className = 'sl-testing-ribbon';
+      ribbon.innerHTML = '<span>TESTING</span>';
+      ribbon.title = 'This game is in beta - sugar/dice are the polished demos';
+      document.body.appendChild(ribbon);
+    }
+    // Slot pages hide the ambient orb layer in CSS - there's no point
+    // running the parallax RAF loop on them since the effect is invisible
+    // and the per-frame setProperty triggers style recalc on the whole
+    // .amb subtree. Detect by checking the slot-root hook before mounting
+    // the ambient layer at all on those pages.
+    const isSlotPage = !!document.getElementById('slot-root');
+    if (!document.querySelector('.amb') && !isSlotPage) {
       const amb = document.createElement('div');
       amb.className = 'amb';
       amb.innerHTML = `
@@ -280,23 +327,51 @@
       `;
       document.body.insertBefore(amb, document.body.firstChild);
       let tx = 0, ty = 0, cx = 0, cy = 0;
+      let lastMx = 0, lastMy = 0;
       addEventListener('mousemove', e => {
         tx = (e.clientX / innerWidth - .5) * 24;
         ty = (e.clientY / innerHeight - .5) * 24;
-      });
-      (function p(){
-        cx += (tx - cx) * 0.04;
-        cy += (ty - cy) * 0.04;
-        amb.style.setProperty('--mx', cx.toFixed(2) + 'px');
-        amb.style.setProperty('--my', cy.toFixed(2) + 'px');
+      }, { passive: true });
+      // Throttle the parallax to ~30 Hz and only write the CSS var when the
+      // value actually moved more than 0.5 px. The CSS rule sets an 0.8s
+      // transition on .amb's transform, so the browser smooths between
+      // updates anyway - driving setProperty at 60 Hz did NOT make the
+      // motion smoother but DID force a style recalc on the entire .amb
+      // subtree every frame (3 blurred orbs, scanline, noise). That recalc
+      // was the dominant main-thread cost responsible for the visible
+      // cursor lag on the lobby (the cursor RAF runs in the same frame
+      // budget and starved). Skipping ~50% of frames + skipping no-ops
+      // gives the cursor RAF most of its frame back.
+      let lastTick = 0;
+      (function p(now){
+        if (now - lastTick >= 32) {
+          lastTick = now;
+          cx += (tx - cx) * 0.08;  // 2x lerp coefficient since we tick at 30 Hz
+          cy += (ty - cy) * 0.08;
+          if (Math.abs(cx - lastMx) > 0.5 || Math.abs(cy - lastMy) > 0.5) {
+            amb.style.setProperty('--mx', cx.toFixed(1) + 'px');
+            amb.style.setProperty('--my', cy.toFixed(1) + 'px');
+            lastMx = cx; lastMy = cy;
+          }
+        }
         requestAnimationFrame(p);
-      })();
+      })(0);
     }
     const navMount = document.querySelector('[data-mount="nav"]');
     const footMount = document.querySelector('[data-mount="footer"]');
     if (navMount) navMount.outerHTML = fixRelative(navHTML);
     const cfg = await expectConfig();
     if (footMount) footMount.outerHTML = fixRelative(footerHTMLFor(cfg));
+    // Update the TESTNET/MAINNET badge text - used to be done by livedata.js,
+    // but Sugar/Vault7 don't include livedata so the badge stayed as "-".
+    // Set it here from the cfg we already have, so every page has it.
+    const isMainnet = cfg.network === "somniaMainnet";
+    const label = isMainnet ? "MAINNET" : "TESTNET";
+    document.querySelectorAll('[data-sl-network-badge]').forEach((el) => {
+      el.textContent = label;
+      el.classList.toggle("is-testnet", !isMainnet);
+      el.classList.toggle("is-mainnet", isMainnet);
+    });
     const active = document.body.dataset.activePage;
     if (active) {
       document.querySelectorAll('[data-page]').forEach(a => {
@@ -311,7 +386,7 @@
   else document.addEventListener('DOMContentLoaded', mount);
 
   // ---------- PAGE TRANSITIONS ----------
-  // Was a 520ms setTimeout fade — felt laggy. Now: navigate immediately, the
+  // Was a 520ms setTimeout fade - felt laggy. Now: navigate immediately, the
   // overlay shows for ~120ms while the new page is fetching (visual courtesy).
   document.addEventListener('click', (e) => {
     const a = e.target.closest('a[data-link], a[href]');
@@ -325,6 +400,9 @@
   });
 
   // ---------- CURSOR ----------
+  // Original RAF spring-lerp cursor - same code path on every page.
+  // The Sugar page now has all its heavy CSS animations disabled, so
+  // the main thread has enough budget to tick this loop at 60 fps.
   const dot = document.createElement('div');
   const ring = document.createElement('div');
   dot.className = 'cursor-dot';

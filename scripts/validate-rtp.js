@@ -1,6 +1,6 @@
 /* eslint-disable */
 /**
- * validate-rtp.js — empirical RTP for SUGAR.LAB (cluster) and VAULT.7 (lines).
+ * validate-rtp.js - empirical RTP for SUGAR.LAB (cluster) and VAULT.7 (lines).
  *
  * Runs the pure-JS math from `slots-from-design/slots/cluster-engine.js` and
  * `slots-from-design/slots/engine.js`, simulating N spins per game at a fixed
@@ -28,10 +28,10 @@ const STAKE = 1.0;
 const SEED = process.env.SEED || `sim-${Date.now()}`;
 
 // ============================================================================
-// SUGAR.LAB — cluster engine (mirrors slots-from-design/slots/cluster-engine.js)
+// SUGAR.LAB - cluster engine (mirrors slots-from-design/slots/cluster-engine.js)
 // ============================================================================
 
-// RTP tuning constants — STATS.md pay tables intrinsically deliver only
+// RTP tuning constants - STATS.md pay tables intrinsically deliver only
 // ~40% RTP for SUGAR and ~30% RTP for VAULT. We multiply the final pay-table
 // output by these boosts to land within the STATS.md ~92% target.
 // MUST stay in sync with `slots-from-design/slots/cluster-engine.js`,
@@ -265,7 +265,7 @@ class ClusterSim {
 }
 
 // ============================================================================
-// VAULT.7 — line engine (mirrors slots-from-design/slots/engine.js)
+// VAULT.7 - line engine (mirrors slots-from-design/slots/engine.js)
 // ============================================================================
 
 const V_SYMBOLS = {
@@ -448,6 +448,6 @@ console.log(`SUGAR.LAB: ${pct(rtpSugar)}   target ~92%   ${rtpSugar >= 0.90 && r
 console.log(`VAULT.7:   ${pct(rtpVault)}   target ~92%   ${rtpVault >= 0.90 && rtpVault <= 0.94 ? 'OK' : 'OUT-OF-BAND'}`);
 
 if (rtpSugar < 0.85 || rtpSugar > 1.05 || rtpVault < 0.85 || rtpVault > 1.05) {
-  console.error('\nWARNING: RTP outside sanity band — investigate engine before contract redeploy.');
+  console.error('\nWARNING: RTP outside sanity band - investigate engine before contract redeploy.');
   process.exitCode = 1;
 }

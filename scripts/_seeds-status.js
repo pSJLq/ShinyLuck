@@ -7,10 +7,10 @@ async function main() {
   const casino = await ethers.getContractAt("Casino", dep.addresses.casino);
   const nextIdx = await casino.nextHashIndex();
   const totalBets = await casino.totalBets();
-  // seedHashes is an array; we can't read length without a getter — try anyway
+  // seedHashes is an array; we can't read length without a getter - try anyway
   let len = -1n;
   try {
-    // seedHashes is public array — we can read it by index until it reverts
+    // seedHashes is public array - we can read it by index until it reverts
     // but that's slow. Instead, try to fetch the last seed by index via probing.
     // Casino exposes `seedHashesLength()` if it has one.
     len = await casino.seedHashesLength();

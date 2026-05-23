@@ -1,8 +1,8 @@
 // Sets up the on-chain reactivity subscriptions for HouseManager:
 //   1. Funds HM with >= 32 STT (precompile owner-balance check).
-//   2. Calls hm.bootstrapReactivity() — schedules the first hourly cron tick.
+//   2. Calls hm.bootstrapReactivity() - schedules the first hourly cron tick.
 //      The HM handler re-schedules itself every fire, so this is one-shot.
-//   3. Calls hm.subscribeToBetSettled(casino, topic0) — registers an event
+//   3. Calls hm.subscribeToBetSettled(casino, topic0) - registers an event
 //      subscription so that every BetSettled emission from Casino triggers
 //      HM._onEvent on the same block via the reactivity precompile (0x0100).
 //
@@ -22,7 +22,12 @@ const { ethers, network } = require("hardhat");
 const fs  = require("fs");
 const path = require("path");
 
-const MIN_OWNER_BALANCE = ethers.parseEther("32"); // SomniaExtensions.SUBSCRIPTION_OWNER_MINIMUM_BALANCE
+// Reactivity precompile floor is 32 STT. We add extra headroom so the hourly
+// agent chain (JSON API @ 0.12 STT + LLM SLOTS @ 0.24 + LLM CLUSTER @ 0.24 =
+// ~0.60 STT/hour, ~14.4 STT/day) doesn't drain back below the floor for at
+// least a week unattended.
+const MIN_OWNER_BALANCE  = ethers.parseEther("32");
+const TOPUP_TARGET_TOTAL = ethers.parseEther("48"); // 32 floor + 16 agent buffer
 
 async function main() {
   const [deployer] = await ethers.getSigners();
@@ -43,9 +48,9 @@ async function main() {
 
   // ── 1. FUND HM ─────────────────────────────────────────────────────────
   const hmBalance = await ethers.provider.getBalance(hmAddr);
-  console.log(`[setup-reactivity] HM balance = ${ethers.formatEther(hmBalance)} STT`);
-  if (hmBalance < MIN_OWNER_BALANCE) {
-    const topUp = MIN_OWNER_BALANCE - hmBalance + ethers.parseEther("0.5"); // 0.5 STT margin
+  console.log(`[setup-reactivity] HM balance = ${ethers.formatEther(hmBalance)} STT (target: ${ethers.formatEther(TOPUP_TARGET_TOTAL)} STT for floor + agent-call buffer)`);
+  if (hmBalance < TOPUP_TARGET_TOTAL) {
+    const topUp = TOPUP_TARGET_TOTAL - hmBalance;
     const deployerBalance = await ethers.provider.getBalance(deployer.address);
     if (deployerBalance < topUp + ethers.parseEther("1")) {
       throw new Error(`Deployer balance ${ethers.formatEther(deployerBalance)} STT too low to top up HM by ${ethers.formatEther(topUp)} STT`);
@@ -70,7 +75,7 @@ async function main() {
       console.log(`[setup-reactivity] hourly cron scheduled: subId=${subId}, tx=${receipt.hash}`);
     } catch (e) {
       console.error(`[setup-reactivity] bootstrapReactivity failed:`, e.shortMessage || e.message);
-      // Don't crash — let event-sub still try to register.
+      // Don't crash - let event-sub still try to register.
     }
   }
 

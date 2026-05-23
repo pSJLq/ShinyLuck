@@ -1,4 +1,4 @@
-// Toast + confirm + prompt — replaces window.alert / confirm / prompt with
+// Toast + confirm + prompt - replaces window.alert / confirm / prompt with
 // a styled, on-brand dialog. Lazy-injects its own CSS once on first use.
 //
 // API:
@@ -72,7 +72,7 @@ export function injectStylesOnce() {
     .sl-modal-row button.danger   { border-color: var(--red, #dc2626); color: var(--red, #dc2626); }
     .sl-modal-row button.danger:hover { background: var(--red, #dc2626); color: #000; }
 
-    /* Inputs in panels — share the look (used by account.html send-stt form) */
+    /* Inputs in panels - share the look (used by account.html send-stt form) */
     .sl-styled-input {
       width: 100%; box-sizing: border-box;
       padding: 9px 12px;
@@ -98,7 +98,7 @@ function ensureToastWrap() {
   return wrap;
 }
 
-// Auto-inject when loaded — keeps `.sl-styled-input` etc. styles available
+// Auto-inject when loaded - keeps `.sl-styled-input` etc. styles available
 // even before the first toast/confirm fires (used by account.html send-stt).
 if (typeof document !== "undefined") {
   if (document.readyState === "loading") {

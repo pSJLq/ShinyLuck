@@ -1,7 +1,7 @@
-// Wallet wiring — Privy is the DEFAULT and only path shown to normal users.
+// Wallet wiring - Privy is the DEFAULT and only path shown to normal users.
 // MetaMask is hidden behind the URL flag `?devWallet=metamask` (dev only) so
 // production demo users see exactly one option: email login → Somnia Global
-// Wallet. This is what makes the hackathon UX "no extension required" — and
+// Wallet. This is what makes the hackathon UX "no extension required" - and
 // it's the path docs.somnia.network recommends for partner apps.
 //
 //   1) Privy (default): cross-app login to the Somnia Provider App via email
@@ -20,13 +20,13 @@
 //   - else if devWallet=metamask AND user previously chose MetaMask → auto-MM
 //   - else → wait for an explicit "Connect Wallet" click
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { ShinyLuck, CHAINS } from "./shinyluck-sdk.js";
 import { CONFIG } from "./config.js";
 import { PrivySigner } from "./privy-signer.js";
 
 // MetaMask path is opt-in via URL. Use a function so it's re-evaluated on
-// each `connect()` call — easier to flip during dev without a reload.
+// each `connect()` call - easier to flip during dev without a reload.
 function devWalletEnabled() {
   try {
     const p = new URLSearchParams(window.location.search);
@@ -45,7 +45,7 @@ export const SL = new ShinyLuck({
 let connected = false;
 let backend = null;          // "privy" | "metamask"
 let lastConnectedAddr = null; // remembered for late chrome injection (nav loads after autoConnect)
-const STORAGE_KEY = "shinyluck.autoConnect"; // "metamask" — Privy persists its own session
+const STORAGE_KEY = "shinyluck.autoConnect"; // "metamask" - Privy persists its own session
 
 export function shortAddr(a) {
   if (!a) return "";
@@ -93,7 +93,7 @@ function attachPrivySigner() {
   }
   const ro = new ethers.JsonRpcProvider(network.rpcUrls[0]);
   // Aggressive polling: 500ms. WaitForSettle also races a WS subscription
-  // when available, so the HTTP path is the fallback — but if the gateway
+  // when available, so the HTTP path is the fallback - but if the gateway
   // rejects WS, we want this to be as tight as Somnia's RPS budget allows.
   // 500ms is comfortably under the 1.2s block time, so we never miss a
   // single-block-old event.
@@ -102,10 +102,18 @@ function attachPrivySigner() {
   SL.signer = new PrivySigner(auth.address, ro);
   SL.address = auth.address;
   SL._rebuildContracts();
+
+  // Pre-warm nonce + fee data in the background so the first spin doesn't
+  // pay the 3-RPC populate cost on its critical path. Successive spins
+  // re-use locally-incremented nonce + cached fee data, dropping the
+  // populate step to ~0ms.
+  if (typeof SL.signer.prewarm === "function") {
+    SL.signer.prewarm();
+  }
 }
 
 // Show the deposit modal automatically when a freshly-connected Privy wallet
-// has zero STT — guides the user through funding the embedded wallet.
+// has zero STT - guides the user through funding the embedded wallet.
 async function maybePromptDeposit() {
   if (backend !== "privy") return;
   if (!SL.address || !SL.provider) return;
@@ -132,9 +140,9 @@ document.addEventListener("shinyluck:connected", (ev) => {
 
 async function connectPrivy() {
   const auth = window.ShinyLuckAuth;
-  if (!auth) throw new Error("Privy bundle not loaded — check that /vendor/privy.bundle.js is served");
+  if (!auth) throw new Error("Privy bundle not loaded - check that /vendor/privy.bundle.js is served");
   if (!auth.ready) {
-    // Wait for the bundle to bootstrap (max 8s) — first paint can race auth.
+    // Wait for the bundle to bootstrap (max 8s) - first paint can race auth.
     await new Promise((resolve, reject) => {
       const t = setTimeout(() => { document.removeEventListener("shinyluck:auth-state", on); reject(new Error("Privy bootstrap timeout")); }, 8000);
       function on() {
@@ -154,7 +162,7 @@ async function connectPrivy() {
   // Wait for authenticated AND a resolved embedded address. The address may
   // populate AFTER authenticated=true (Privy creates the embedded wallet
   // asynchronously, especially when migrating from a cached cross-app session).
-  // AuthBridge in privy-entry.jsx self-heals via useCreateWallet() — we just
+  // AuthBridge in privy-entry.jsx self-heals via useCreateWallet() - we just
   // wait for the auth-state event with both fields set.
   if (!window.ShinyLuckAuth.authenticated || !window.ShinyLuckAuth.address) {
     await new Promise((resolve, reject) => {
@@ -227,7 +235,7 @@ async function tryAutoConnect() {
     } catch (e) { console.warn("[wallet] privy auto-restore failed:", e.message); }
   }
 
-  // 2. MetaMask auto-restore — only if the dev opted in via `?devWallet=metamask`
+  // 2. MetaMask auto-restore - only if the dev opted in via `?devWallet=metamask`
   //    AND a prior session stored the preference. Otherwise we never touch
   //    window.ethereum (no silent fallback that would surprise normal users).
   if (!devWalletEnabled()) return;
@@ -317,7 +325,7 @@ function showConnectModal() {
       <div class="sl-conn-box">
         <button class="sl-conn-close" data-close>close ✕</button>
         <h3>Connect to ShinyLuck</h3>
-        <p>Sign in by email to get a Somnia Global Wallet — the same wallet
+        <p>Sign in by email to get a Somnia Global Wallet - the same wallet
            works across every Somnia-partner app, no extension required.</p>
         <div data-stage="root">
           <button class="sl-conn-btn primary" data-action="email">📧 Continue with Email (Privy)</button>

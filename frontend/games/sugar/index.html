@@ -11,17 +11,140 @@
      without redirecting `/games/sugar` → `/games/sugar/` (trailing slash). -->
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/games/sugar/styles.css">
+
+<!-- Critical-path: ESM modules are otherwise discovered only after the inline
+     <script type="module"> below starts evaluating. Preloading them in <head>
+     lets the browser fetch all of them in parallel with the 4.6 MB Privy
+     bundle, instead of serializing into a waterfall. -->
+<link rel="modulepreload" href="/lib/wallet.js">
+<link rel="modulepreload" href="/lib/shinyluck-sdk.js">
+<link rel="modulepreload" href="/lib/slot-decoders.js">
+<link rel="modulepreload" href="/lib/casino-limits.js">
+<link rel="modulepreload" href="/lib/ui.js">
+<link rel="modulepreload" href="/lib/config.js">
+<link rel="modulepreload" href="/games/sugar/api.js?v=fast1">
+<link rel="preload" href="/vendor/privy.bundle.js" as="script">
+
+<!-- Evaluate config.js BEFORE privy.bundle.js mounts. Module scripts and
+     defer scripts run after parsing in document order, so placing this in
+     <head> ahead of the privy <script defer> tag guarantees that
+     window.SHINYLUCK_CONFIG (set by config.js's top-level side-effect block)
+     exists by the time PrivyProvider reads it. Without this the Privy
+     bundle throws "Cannot initialize the Privy provider with an invalid
+     Privy app ID" on cold load. -->
+<script type="module" src="/lib/config.js"></script>
 <style>
-  /* Use native OS cursor on slot pages — the shared custom cursor's
+  /* Use native OS cursor on slot pages - the shared custom cursor's
      trailing ring can lag behind the cascade animation on lower-end
      hardware. Also kill the heaviest decorations (ambient orbs + marquee
-     scroll) for the same reason — they're pure decoration. */
-  html, body { cursor: auto !important; }
-  .cursor-dot, .cursor-ring { display: none !important; }
+     scroll) for the same reason - they're pure decoration. */
+  /* Custom cursor is back - partials.js now throttles its RAF to mouse-
+     active periods only, so the previous laggy feel is gone. We keep the
+     native cursor hidden in favour of the dot+ring composite. */
+  html, body { cursor: none !important; }
   .sugar-shell .ambient,
   .sugar-shell .ambient-orb { display: none !important; }
   .sugar-shell .marquee .scroll,
   .sugar-shell .marquee .track { animation: none !important; }
+  /* FPS hardening - Performance trace showed Rendering+Painting ate ~10%
+     of frame budget even when idle. Root causes:
+       1. `will-change: transform` on all 49 .sym cells created 49 GPU
+          compositing layers held in VRAM permanently - bandwidth hog.
+       2. `contain: layout paint` on every .panel multiplied that.
+       3. Background-position infinite animations (brand-shift, charge-sheen,
+          rim-shift) ran continuously and forced layer repaints.
+     This block disables idle-only decorative animations and removes the
+     blanket will-change. The cascade animator (animation.js) adds
+     will-change locally for symbols that ARE moving each frame. */
+  .sugar-shell .sym.idle { animation: none !important; }
+  .sugar-shell .charge-bar.hot { animation: none !important; filter: none !important; }
+  .sugar-shell .stars,
+  .sugar-shell .star-field { animation: none !important; }
+  /* Continuous gradient-shift decorations - kill them when idle. */
+  .sugar-shell h1, .sugar-shell h2, .sugar-shell h3,
+  .sugar-shell .brand, .sugar-shell .charge-bar .fill,
+  .sugar-shell .rim, .sugar-shell .frame::before,
+  .sugar-shell .spin-halo, .sugar-shell .tier-shimmer { animation: none !important; }
+  /* `.game-hero h1 .grad` is a -webkit-background-clip:text gradient with
+     `animation: brand-shift 5s infinite` - every frame the text
+     re-rasterizes with the gradient shifted. Paint-flashing showed each
+     letter of "Sugar Lab" repainting. The text looks fine static. */
+  .sugar-shell .game-hero h1 .grad,
+  .sugar-shell .game-hero h1,
+  .sugar-shell .grad { animation: none !important; background-position: 0 50% !important; }
+  /* Brute-force across the top strip (hero + marquee + charge-rail) -
+     every visual flourish in that band runs an infinite keyframe + text-
+     shadow combination that triggers repaint of the strip on every scroll
+     or composite event. Nothing in this band needs idle motion. */
+  .sugar-shell .marquee *,
+  .sugar-shell .charge-rail *,
+  .sugar-shell .game-hero * { animation: none !important; transition: none !important; }
+  /* The charge-rail band was the last paint-flashing zone. The .charge-bar
+     itself had an inline `animation: charge-pulse 2.5s infinite` on the
+     bar (not just .fill child), plus a soft box-shadow that hovers in the
+     band. Brute-disable both so the entire 50 px strip becomes
+     paint-stable except when the user actually changes charge state.
+     KEEP the `right` transition on .fill - it's a single property tween
+     when the meter updates (not idle motion), gives smooth fill-up. */
+  .sugar-shell .charge-rail,
+  .sugar-shell .charge-rail .charge-bar,
+  .sugar-shell .charge-rail .charge-bar .ticks { animation: none !important; transition: none !important; box-shadow: none !important; }
+  .sugar-shell .charge-rail .charge-bar .fill { animation: none !important; box-shadow: none !important; }
+  /* Universal `*` selectors do NOT match pseudo-elements. .charge-rail::before
+     has `animation: charge-sheen 5s linear infinite` - an animated gradient
+     overlay covering the entire charge-rail strip. That was the remaining
+     paint-flash culprit. */
+  .sugar-shell .charge-rail::before,
+  .sugar-shell .marquee::before,
+  .sugar-shell .marquee::after,
+  .sugar-shell .game-hero::before,
+  .sugar-shell .panel::before,
+  .sugar-shell .panel::after { animation: none !important; transition: none !important; }
+  /* GLOW-RIM was the actual culprit for the "whole grid area repaints"
+     Paint-flashing result. It sits behind .grid-frame with
+     filter: blur(8px) on an animated 200%-wide gradient (rim-shift). Every
+     frame: shift bg position → re-rasterize 8px gaussian blur over the
+     entire ring rect → forces composite of everything stacked above it
+     (the 49 cells). Disable the animation AND the blur; the gradient
+     itself still shows as a subtle border halo without the per-frame cost. */
+  .sugar-shell .glow-rim { animation: none !important; filter: none !important; opacity: .25 !important; }
+  /* Scatter cells pulse-glow continuously - only ~1 visible at a time, but
+     each is a paint-heavy radial-gradient repaint. Switch to a static glow. */
+  .sugar-shell .sym[data-sym="SCAT"] { animation: none !important; }
+  /* DON'T promote every grid cell. The cascade animator adds will-change
+     for symbols that are moving on a given frame - blanket promotion just
+     hoarded VRAM. */
+  .sugar-shell { contain: layout paint; }
+
+  /* ============== FINAL FPS KILLER: backdrop-filter ==============
+     This is the single biggest reason Sugar felt heavier than the lobby:
+     three elements (nav-bar, .panel, .win-hud) had `backdrop-filter:
+     blur(18px) saturate(140%)`. Backdrop-filter is the MOST expensive
+     CSS property in modern browsers - it forces the browser to re-blur
+     the background of the element on EVERY composite frame. Move the
+     cursor anywhere over Sugar → cursor layer composites → all three
+     blur regions repaint. With 5 .panel elements, that's 5 simultaneous
+     gaussian blurs per frame.
+     The visual loss is minor: the panel/nav backgrounds were already
+     translucent gradients; without the blur they just look like solid
+     dark panels with the same gradient. The Sugar pages now match the
+     lobby's smoothness. */
+  .sugar-shell .nav-bar,
+  .sugar-shell .panel,
+  .sugar-shell .win-hud,
+  .sugar-shell .frame { backdrop-filter: none !important; }
+  /* `.frame::before` and similar used `filter: blur(8px)` for a glow ring
+     behind the grid - also per-frame composite work. Drop to a solid
+     gradient that costs zero per-frame budget. */
+  .sugar-shell .frame::before,
+  .sugar-shell .glow-rim { filter: none !important; }
+  /* Charge bar pulses with a box-shadow keyframe (charge-pulse 2.5s
+     infinite) - the bar is always visible, so this was a continuous
+     box-shadow repaint of the meter area. */
+  .sugar-shell .charge-bar .fill { animation: none !important; }
+  /* Tiny .pip indicators in every panel header blink with opacity -
+     each is a small repaint but several run in parallel. */
+  .sugar-shell .pip { animation: none !important; }
 
   .sl-connect-prompt {
     position: fixed; inset: 0; display: flex; align-items: center;
@@ -57,16 +180,21 @@
 <div class="sl-connect-prompt" id="connect-prompt">
   <div class="card">
     <h2>SUGAR.LAB · Cluster Cascade</h2>
-    <p>Sign in to play on Somnia Testnet. Bets settle on-chain — every
+    <p>Sign in to play on Somnia Testnet. Bets settle on-chain - every
        cluster grid is provably fair and the seed is published after reveal.</p>
     <p style="color:#fafafa;font-size:13px;">Use the <b>Connect Wallet</b> button in the top right.</p>
     <small>email login → Somnia Global Wallet · no extension required</small>
   </div>
 </div>
 
-<script src="/vendor/privy.bundle.js"></script>
+<!-- Privy bundle is ~4.6 MB. `defer` lets the HTML parser finish before
+     executing it instead of blocking at the <script> tag. The bundle's own
+     mount() listens to DOMContentLoaded, so deferring doesn't change behavior.
+     livedata.js (used on the lobby/account pages for the news ticker and
+     stats grid) has zero data-sl-* hooks on this page - removed to drop a
+     29 KB module load + its RPC chatter from the cold-start path. -->
+<script src="/vendor/privy.bundle.js" defer></script>
 <script src="/partials.js" defer></script>
-<script type="module" src="/lib/livedata.js"></script>
 
 <script type="module">
   import { SugarSlot } from '/games/sugar/api.js?v=fast1';
@@ -102,35 +230,57 @@
       return;
     }
     mounting = true;
-    // Hide the prompt the moment we commit — if mounting fails, we restore it
+    console.log('[sugar] mountProduction: starting, SL.address=', SL.address);
+    // Hide the prompt the moment we commit - if mounting fails, we restore it
     // in the catch block. This prevents the prompt from sticking around while
     // a slow SugarSlot constructor runs.
     prompt.style.display = 'none';
     try {
-      const playerBalance = await SL.getNativeBalance();
-      let chargeMeter = { current: 0, threshold: 240 };
-      try {
-        const raw = await SL.casino.getChargeMeter(SL.address);
-        chargeMeter = { current: Number(raw.current) / 100, threshold: Number(raw.threshold) / 100 };
-      } catch (e) { console.warn('[sugar] getChargeMeter failed:', e.message); }
+      // Parallelize the two reads - they're independent, doing them
+      // sequentially costs one extra RPC round-trip (~150-300ms).
+      console.log('[sugar] fetching balance + chargeMeter…');
+      const [playerBalance, chargeMeter] = await Promise.all([
+        SL.getNativeBalance(),
+        SL.casino.getChargeMeter(SL.address)
+          .then(raw => {
+            // Fresh-casino case: brand-new player has all zeroes. Threshold=0
+            // would make the visible-fill helper divide by 1 forever, leaving
+            // the meter looking stuck. Use the sane default 240 instead so
+            // the UI shows a real-looking unfilled bar.
+            const cur = Number(raw.current) / 100;
+            const thr = Number(raw.threshold) / 100;
+            return { current: cur, threshold: thr > 0 ? thr : 240 };
+          })
+          .catch(e => { console.warn('[sugar] getChargeMeter failed:', e.message); return { current: 0, threshold: 240 }; }),
+      ]);
+      console.log('[sugar] balance=', playerBalance, 'chargeMeter=', chargeMeter);
 
       currentSlot = new SugarSlot(root, {
         mode: 'production',
         initialBalance: playerBalance,
         initialChargeMeter: { current: chargeMeter.current, threshold: chargeMeter.threshold },
-        turbo: true,
+        // turbo defaults to OFF - the lightning-bolt button toggles it.
+        // Forcing turbo=true on every page made the cascade animation run at
+        // the fast speed even when the user wanted the leisurely default.
+        turbo: false,
         // Surface typed contract reverts as toasts (paused / bankroll-low /
         // generic) instead of swallowing them silently.
         onError: ({ kind, message }) => {
+          // Network hiccups are not "errors" - they're transient and the
+          // user can immediately retry. Use a less alarming toast style
+          // and shorter TTL so it doesn't linger over the next spin.
+          if (kind === 'network') {
+            toast(message, { kind: 'info', ttl: 2500 });
+            return;
+          }
           const ttl = kind === 'paused' ? 5000 : 4500;
           toast(message, { kind: 'warn', ttl });
         },
 
         onSpinRequest: async (stakeWei) => {
           // Per-step timing log so you can see exactly where the wait is.
-          // Output looks like:  [sugar] spin total 5234ms  (clamp 87ms · place 1432ms · wait 3520ms · receipt 195ms)
+          // Output looks like:  [sugar] spin total 3050ms  (clamp 87ms · place 1432ms · wait 1505ms · receiptBg fire-forget)
           const tStart = performance.now();
-          const tag = (label, t0) => `${label} ${(performance.now() - t0).toFixed(0)}ms`;
 
           const t1 = performance.now();
           const stake = await clampOrToast(stakeWei, 'cluster');
@@ -144,18 +294,42 @@
           const settled = await SL.waitForSettle(placeRes.betId);
           const waitMs = performance.now() - t3;
 
-          const t4 = performance.now();
-          let chargeEvent = null;
+          // Update the Provably-fair side panel with the actual on-chain
+          // values from this exact spin - client seed (we generated), server
+          // seed (revealed by the reveal-bot tx), bet id, link to explorer.
           try {
-            const rec = await SL.provider.getTransactionReceipt(settled.txHash);
-            chargeEvent = extractChargeMeterEvent(SL.casino, rec?.logs || []);
+            if (currentSlot && typeof currentSlot.updateFair === 'function') {
+              currentSlot.updateFair({
+                clientSeed: settled.clientSeed,
+                serverSeed: settled.serverSeed,
+                betId: settled.id ?? placeRes.betId,
+                txHash: settled.txHash,
+              });
+            }
           } catch (_) {}
-          const receiptMs = performance.now() - t4;
+
+          // Receipt fetch is only used for the optional "+X charge" badge
+          // animation. The chargeMeter total is refreshed authoritatively
+          // by onSpinCompleted (getChargeMeter direct read). Move this OFF
+          // the critical path - it was costing ~200ms on every spin for a
+          // cosmetic flourish. We fire-and-forget; if the receipt arrives
+          // before the slot animation finishes, the badge appears; if not,
+          // no visible difference.
+          SL.provider.getTransactionReceipt(settled.txHash)
+            .then((rec) => {
+              const ev = extractChargeMeterEvent(SL.casino, rec?.logs || []);
+              if (ev && currentSlot && typeof currentSlot.applyChargeEvent === 'function') {
+                try { currentSlot.applyChargeEvent(ev); } catch (_) {}
+              }
+            })
+            .catch(() => {});
 
           const totalMs = performance.now() - tStart;
-          console.log(`[sugar] spin total ${totalMs.toFixed(0)}ms  (clamp ${clampMs.toFixed(0)}ms · place ${placeMs.toFixed(0)}ms · wait ${waitMs.toFixed(0)}ms · receipt ${receiptMs.toFixed(0)}ms)`);
+          console.log(`[sugar] spin total ${totalMs.toFixed(0)}ms  (clamp ${clampMs.toFixed(0)}ms · place ${placeMs.toFixed(0)}ms · wait ${waitMs.toFixed(0)}ms · receipt fire-forget)`);
 
-          return decodeSugarLabResult({ settled, stakeWei: stake, chargeEvent, isBuyBonus: false });
+          // chargeEvent=null → no immediate "+X" badge on this spin; the
+          // running total still updates correctly via onSpinCompleted.
+          return decodeSugarLabResult({ settled, stakeWei: stake, chargeEvent: null, isBuyBonus: false });
         },
 
         onBuyBonusRequest: async (stakeWei) => {
@@ -184,27 +358,143 @@
         },
 
         onSpinCompleted: async () => {
-          try {
-            const bal = await SL.getNativeBalance();
-            currentSlot.updateBalance(bal);
-            const cm = await SL.casino.getChargeMeter(SL.address);
-            currentSlot.updateChargeMeter(Number(cm.current) / 100, Number(cm.threshold) / 100);
-          } catch (e) { console.warn('[sugar] post-spin refresh failed:', e.message); }
+          // Background tasks that should NOT block the UI - chain reads to
+          // refresh visible numbers + auto-claim winnings + pre-sign next spin.
+          //
+          // AUTO-CLAIM: Casino's settle path credits payout to
+          // pendingWithdrawals[player] (pull pattern, classic Solidity
+          // security). Without auto-claim, every win sits there invisible
+          // and the wallet balance never grows. We claim() in the background
+          // so the user sees the wallet balance update within ~1-2s of the
+          // spin landing, without any "withdraw" button to press.
+          // Auto-claim removed by user request - winnings sit in
+          // pendingWithdrawals[player] and are claimed manually from the
+          // Account page. This keeps the signer's populate-mutex free
+          // between spins for fastest possible click→spin latency.
+          // Quick balance + charge refresh - chain reads only, no tx.
+          (async () => {
+            try {
+              const [bal, cm] = await Promise.all([
+                SL.getNativeBalance(),
+                SL.casino.getChargeMeter(SL.address).catch(() => null),
+              ]);
+              currentSlot.updateBalance(bal);
+              if (cm) currentSlot.updateChargeMeter(Number(cm.current) / 100, Number(cm.threshold) / 100);
+            } catch (e) { console.warn('[sugar] post-spin refresh failed:', e.message); }
+          })();
+          // Pre-sign the next cluster spin in the background. ~600-800ms of
+          // Privy iframe sign latency runs while the cascade animation is
+          // playing - by the time the user clicks SPIN again, the signed
+          // tx is sitting locally ready to broadcast (~150-200ms only).
+          //
+          // IMPORTANT: pre-sign must use the CLAMPED stake (same as the
+          // live spin path). Otherwise the contract reverts with
+          // BetTooLarge on the eth_estimateGas call during sign, and we
+          // burn the iframe roundtrip with nothing to show for it.
+          (async () => {
+            try {
+              const rawStake = currentSlot.stakeWei;
+              const { stake } = await clampStake(rawStake, 'cluster');
+              const stakeStt = (Number(stake) / 1e18).toString();
+              await SL.presignClusterSpin(stakeStt);
+            } catch (_) { /* presign is best-effort */ }
+          })();
         },
       });
-      if (currentSlot.animator) currentSlot.animator.setTurbo(true);
-      currentSlot.turbo = true;
+      // Leave turbo OFF by default - the lightning-bolt button in the UI
+      // toggles it. (Previously force-enabled here; removed because users
+      // who want the slower, more readable cascade had no way to get it.)
       window.slot = currentSlot;
+
+      // REAL-TIME push subscriptions - subscribe directly to chain WS so
+      // balance + charge meter update the moment the chain emits, not after
+      // animation finishes. Filters by player address (topic[2]) so we only
+      // react to our own bets, not every player on the network.
+      try {
+        const { wsProvider } = await import('/lib/rpc.js');
+        const ws = wsProvider && wsProvider();
+        if (ws) {
+          const topicSettled = SL.casino.interface.getEvent('BetSettled').topicHash;
+          const paddedAddr = '0x' + SL.address.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+          ws.on({ address: SL.casino.target, topics: [topicSettled, null, paddedAddr] }, async () => {
+            // Fire-and-forget refresh - never blocks UI. Triggers within
+            // ~50-150ms of the chain confirming the settle.
+            try {
+              const [bal, cm] = await Promise.all([
+                SL.getNativeBalance(),
+                SL.casino.getChargeMeter(SL.address).catch(() => null),
+              ]);
+              currentSlot.updateBalance(bal);
+              if (cm) currentSlot.updateChargeMeter(Number(cm.current) / 100, Number(cm.threshold) / 100);
+            } catch (_) {}
+          });
+          console.log('[sugar] realtime WS subs active (BetSettled for own player)');
+        }
+      } catch (e) { console.warn('[sugar] realtime WS sub failed:', e?.message || e); }
+
+      // Live RTP from contract - Sugar's hero/marquee shows 92% by default
+      // but the LLM agent flexes it via casino.adjustSlotRTP. Pull once on
+      // mount + subscribe to RtpAdjusted so any agent-driven change shows
+      // up without a refresh. Cluster = game id 6.
+      async function refreshRtp() {
+        try {
+          const rtp = await SL.casino.getReportedRTP(6);
+          if (!rtp) return;
+          const pct = (Number(rtp) / 100).toFixed(2) + '%';
+          document.querySelectorAll('[data-sl-cluster-rtp]').forEach((el) => { el.textContent = pct; });
+        } catch (_) {}
+      }
+      refreshRtp();
+      try {
+        const { wsProvider } = await import('/lib/rpc.js');
+        const ws2 = wsProvider && wsProvider();
+        if (ws2) {
+          const topicRtp = SL.casino.interface.getEvent('RtpAdjusted').topicHash;
+          // topic[1] is the indexed `game` (uint8 → padded). We could filter
+          // strictly but the handler is cheap - refresh on any RtpAdjusted.
+          ws2.on({ address: SL.casino.target, topics: [topicRtp] }, refreshRtp);
+        }
+      } catch (_) {}
+
+      // Live wallet balance refresh - own bets get refreshed via the
+      // BetSettled WS sub above, but an EXTERNAL deposit (faucet drip,
+      // friend sends STT) doesn't fire any Casino event we can listen to.
+      // Cheap poll every 8s on top of the WS path. Cleared on page unload.
+      const balPoll = setInterval(async () => {
+        try {
+          const bal = await SL.getNativeBalance();
+          if (currentSlot?.updateBalance) currentSlot.updateBalance(bal);
+        } catch (_) {}
+      }, 8000);
+      addEventListener('beforeunload', () => clearInterval(balPoll));
+
+      // Tell the global splash that the slot is fully rendered. partials.js
+      // listens for this and only THEN fades the splash. Prevents the brief
+      // "Sign in to play" flash when the splash fades too early.
+      document.dispatchEvent(new CustomEvent('shinyluck:slot-mounted'));
     } catch (e) {
       console.error('[sugar] mount failed:', e);
       // Restore the prompt so the user isn't staring at a blank screen.
       prompt.style.display = '';
       currentSlot = null;
       toast('Mount failed: ' + (e.message || e), { kind: 'error', ttl: 5000 });
+      // Surface the failure so the splash doesn't trap the page either -
+      // user sees the connect prompt + the toast.
+      document.dispatchEvent(new CustomEvent('shinyluck:slot-mounted'));
     } finally {
       mounting = false;
     }
   }
+
+  // If Privy reports "ready but NOT authenticated", we know mount won't
+  // happen until the user logs in. Release the splash so they see the
+  // connect prompt without sitting through the safety timeout.
+  document.addEventListener('shinyluck:auth-state', (e) => {
+    const d = e.detail || {};
+    if (d.ready && !d.authenticated) {
+      document.dispatchEvent(new CustomEvent('shinyluck:slot-mounted'));
+    }
+  });
 
   // Mount-trigger is a polling loop instead of a single event listener.
   // Rationale: when navigating from another page, Privy bootstraps + restores
@@ -212,24 +502,43 @@
   // our listener attaches or AFTER `SL.address` is populated. The poller
   // catches both cases and survives a slow Privy bootstrap.
   let pollHandle = null;
-  function tryMount() {
+  let lastDiagAt = 0;
+  function tryMount(source) {
     if (currentSlot || mounting) return true;
-    if (!SL.address || !SL.signer) return false;
-    mountProduction().catch(() => {});
+    if (!SL.address || !SL.signer) {
+      // Throttle the diag log - we get called every 80 ms. Print once a
+      // second so it's easy to spot a stuck state in DevTools.
+      const now = Date.now();
+      if (now - lastDiagAt > 1000) {
+        lastDiagAt = now;
+        const auth = window.ShinyLuckAuth || {};
+        console.log('[sugar] not-ready:',
+          'SL.address=', SL.address || 'null',
+          'SL.signer=', !!SL.signer,
+          'privy.ready=', !!auth.ready,
+          'privy.auth=', !!auth.authenticated,
+          'privy.addr=', auth.address || 'null',
+          'source=', source || 'poll');
+      }
+      return false;
+    }
+    console.log('[sugar] tryMount kicking off, source=', source || 'poll',
+      'SL.casino=', SL.casino?.target || SL.casino?.address);
+    mountProduction().catch(e => console.error('[sugar] mountProduction rejected:', e));
     return true;
   }
-  document.addEventListener('shinyluck:connected', tryMount);
-  document.addEventListener('shinyluck:auth-state', tryMount);
-  // Poll every 250ms for up to 30s. Cleared as soon as a mount starts or the
-  // page is closed. We intentionally do NOT show an error if we time out —
-  // the prompt is already visible, the user just needs to connect.
+  document.addEventListener('shinyluck:connected', () => tryMount('shinyluck:connected'));
+  document.addEventListener('shinyluck:auth-state', () => tryMount('shinyluck:auth-state'));
+  // Poll every 80ms for up to 30s. Tighter than the previous 250ms because on
+  // a warm Privy session the address can populate within ~100ms - a quarter-
+  // second poll wastes up to that interval. Cleared as soon as a mount starts.
   pollHandle = setInterval(() => {
-    if (tryMount()) clearInterval(pollHandle);
-  }, 250);
+    if (tryMount('poll')) clearInterval(pollHandle);
+  }, 80);
   setTimeout(() => { if (pollHandle) clearInterval(pollHandle); }, 30000);
   // Run once immediately for the case where the wallet was already connected
   // before this script's listeners attached (typical page-to-page navigation).
-  tryMount();
+  tryMount('initial');
 </script>
 </body>
 </html>

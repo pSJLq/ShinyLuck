@@ -1,5 +1,5 @@
 /* ============================================================================
- * sugar/sound.js — synthesized audio (Web Audio, no external assets)
+ * sugar/sound.js - synthesized audio (Web Audio, no external assets)
  * ES module. Lazy init on first user gesture.
  * ============================================================================ */
 

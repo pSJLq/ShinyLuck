@@ -12,7 +12,7 @@ async function main() {
   if (pw.amount === 0n) { console.log("[claim] no pending owner withdrawal"); return; }
   if (now < pw.readyAt) {
     const wait = (Number(pw.readyAt) - Number(now)) / 3600;
-    console.log(`[claim] not ready — ${ethers.formatEther(pw.amount)} STT, ready in ${wait.toFixed(1)} hours`);
+    console.log(`[claim] not ready - ${ethers.formatEther(pw.amount)} STT, ready in ${wait.toFixed(1)} hours`);
     return;
   }
   const before = await ethers.provider.getBalance(signer.address);

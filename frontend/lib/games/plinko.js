@@ -5,7 +5,7 @@
 // (0 = left, 1 = right). The contract already enforces this mapping, so we
 // can replay it deterministically on the frontend and watch the ball drop.
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect } from "../wallet.js";
 import {
   $, $$, setText, fmtSTTfromString, readStakeStr, injectKeyframes,

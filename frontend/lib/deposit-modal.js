@@ -1,5 +1,5 @@
 /* ============================================================================
- * deposit-modal.js — show address+QR+balance-poll modal for empty wallets.
+ * deposit-modal.js - show address+QR+balance-poll modal for empty wallets.
  *
  * Usage:
  *   import { showDepositModal } from "./deposit-modal.js";
@@ -8,10 +8,10 @@
  * Returns when balance crosses minBalance OR user clicks close.
  *
  * QR codes are generated client-side via a tiny inline implementation
- * (no external CDN/package dependency — keeps the modal working offline).
+ * (no external CDN/package dependency - keeps the modal working offline).
  * ========================================================================= */
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 
 let _modalEl = null;
 
@@ -36,7 +36,7 @@ export async function showDepositModal({ address, provider, minBalance, network 
       <p class="sl-dep-hint">Get testnet STT from Somnia faucet · transfer from another wallet · network: <b>${escape(network?.chainName || "Somnia Testnet")}</b></p>
       <div class="sl-dep-bal">
         <span class="lbl">Balance</span>
-        <span class="val" data-bal>—</span>
+        <span class="val" data-bal>-</span>
         <span class="dot" data-dot></span>
       </div>
     </div>
@@ -44,7 +44,7 @@ export async function showDepositModal({ address, provider, minBalance, network 
   document.body.appendChild(m);
   _modalEl = m;
 
-  // QR render — pure JS, no CDN
+  // QR render - pure JS, no CDN
   renderQrCode(m.querySelector("[data-qr-mount]"), address);
 
   const balEl  = m.querySelector("[data-bal]");
@@ -71,7 +71,7 @@ export async function showDepositModal({ address, provider, minBalance, network 
     } catch (_) {}
   });
 
-  // Balance poll — every 2s. Returns when balance crosses minBalance.
+  // Balance poll - every 2s. Returns when balance crosses minBalance.
   return new Promise((resolve) => {
     async function tick() {
       if (stopped) return;
@@ -98,7 +98,7 @@ export async function showDepositModal({ address, provider, minBalance, network 
 }
 
 // ---------------------------------------------------------------------------
-// Pure-JS QR encoder — tiny implementation of a fixed Version 6 / EC-M QR
+// Pure-JS QR encoder - tiny implementation of a fixed Version 6 / EC-M QR
 // suitable for a 42-char Ethereum address. Output: <canvas> drawn into mount.
 // ---------------------------------------------------------------------------
 

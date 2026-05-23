@@ -1,11 +1,11 @@
-// Admin panel — owner-only. Renders treasury, bonus mode, per-game controls,
+// Admin panel - owner-only. Renders treasury, bonus mode, per-game controls,
 // HM reasoning log, player-agent leaderboard, and aggregate stats.
 //
 // All writes route through the casino owner key (the connected wallet must
 // equal casino.owner()); reads are public. If you connect with a non-owner
 // wallet, the panel is hidden and an "ACCESS DENIED" splash is shown.
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
+import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect, shortAddr } from "./wallet.js";
 import { CONFIG } from "./config.js";
 import { provider, fetchLogs, fetchRecentLogs, fetchDeploymentBlock } from "./rpc.js";
@@ -85,7 +85,7 @@ async function gateAccess() {
     $("[data-sl-adm-connected]").textContent = shortAddr(SL.address);
     isOwner = SL.address.toLowerCase() === casinoOwner;
   } else {
-    $("[data-sl-adm-connected]").textContent = "—";
+    $("[data-sl-adm-connected]").textContent = "-";
     isOwner = false;
   }
   $("[data-sl-adm-denied]").style.display = isOwner ? "none" : "block";
@@ -124,7 +124,7 @@ async function refreshBonus() {
     const [active, until] = await Promise.all([c.bonusModeActive(), c.bonusModeUntil()]);
     $("[data-sl-adm-bonus-status]").textContent = active ? "ACTIVE" : "OFF";
     $("[data-sl-adm-bonus-status]").style.color = active ? "var(--green)" : "var(--fg-mute)";
-    $("[data-sl-adm-bonus-until]").textContent = Number(until) > 0 ? new Date(Number(until) * 1000).toLocaleString() : "—";
+    $("[data-sl-adm-bonus-until]").textContent = Number(until) > 0 ? new Date(Number(until) * 1000).toLocaleString() : "-";
   } catch (_) {}
 }
 
@@ -187,7 +187,7 @@ async function refreshReasoning() {
   try {
     const events = await fetchRecentLogs(casino(), "ReasoningLog", { minCount: 20, maxLookback: 100_000 });
     if (events.length === 0) {
-      root.innerHTML = `<div class="m" style="opacity:.4;">no reasoning yet — start hm-cron</div>`;
+      root.innerHTML = `<div class="m" style="opacity:.4;">no reasoning yet - start hm-cron</div>`;
       return;
     }
     root.innerHTML = "";

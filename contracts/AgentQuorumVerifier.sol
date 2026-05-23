@@ -119,7 +119,7 @@ contract AgentQuorumVerifier is Ownable, ReentrancyGuard, IAgentRequesterHandler
             payload,
             subcommitteeSize,
             threshold,
-            ConsensusType.EXACT,
+            ConsensusType.Majority,
             timeoutSeconds
         );
 
@@ -143,7 +143,7 @@ contract AgentQuorumVerifier is Ownable, ReentrancyGuard, IAgentRequesterHandler
     /// @notice Platform callback. Counts how many of the subcommittee workers
     ///         produced the on-chain randomness as their answer and emits
     ///         `QuorumResult` with the signer count + a discrete level.
-    ///         Mismatch never reverts — money path is unaffected by this check.
+    ///         Mismatch never reverts - money path is unaffected by this check.
     function handleResponse(
         uint256 requestId,
         Response[] memory responses,
@@ -162,7 +162,7 @@ contract AgentQuorumVerifier is Ownable, ReentrancyGuard, IAgentRequesterHandler
         string memory sample;
         for (uint256 i; i < responses.length; i++) {
             string memory text;
-            // Defensive decode — a malformed worker result must not blow up the loop.
+            // Defensive decode - a malformed worker result must not blow up the loop.
             try this.tryDecodeString(responses[i].result) returns (string memory s) { text = s; }
             catch { text = ""; }
             if (i == 0) sample = text;
@@ -170,7 +170,7 @@ contract AgentQuorumVerifier is Ownable, ReentrancyGuard, IAgentRequesterHandler
         }
 
         uint8 level;
-        if (status != ResponseStatus.SUCCESS || total == 0)             level = 0; // critical
+        if (status != ResponseStatus.Success || total == 0)             level = 0; // critical
         else if (signers * 4 >= total * 3)                              level = 2; // ok (≥75%)
         else if (signers * 2 >= total)                                  level = 1; // warning (≥50%)
         else                                                            level = 0; // critical

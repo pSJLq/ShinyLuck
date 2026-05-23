@@ -24,7 +24,7 @@ fs.mkdirSync(outDir, { recursive: true });
   const result = await esbuild.build({
     entryPoints: [entry],
     bundle: true,
-    format: 'iife',           // immediately-invoked — runs on <script> load
+    format: 'iife',           // immediately-invoked - runs on <script> load
     target: 'es2022',
     platform: 'browser',
     jsx: 'automatic',

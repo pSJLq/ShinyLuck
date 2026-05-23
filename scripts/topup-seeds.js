@@ -21,7 +21,7 @@ async function main() {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "deployments", `${network.name}.json`), "utf8"));
   const casino = await ethers.getContractAt("Casino", manifest.addresses.casino);
 
-  // Probe the contract for its current seed cursor — new hashes land at
+  // Probe the contract for its current seed cursor - new hashes land at
   // indices [nextHashIndex, nextHashIndex + COUNT). We must persist seeds
   // keyed by their ABSOLUTE on-chain index, otherwise the reveal-bot can't
   // map seedIdx=500 → pool[500] (shape-1 contiguous arrays start at 0).
@@ -54,7 +54,7 @@ async function main() {
     try {
       const raw = JSON.parse(fs.readFileSync(poolPath, "utf8"));
       if (Array.isArray(raw.seeds)) {
-        // Legacy shape 1 — convert to sparse map (assumes indices 0..N).
+        // Legacy shape 1 - convert to sparse map (assumes indices 0..N).
         raw.seeds.forEach((s, i) => { if (s) pool[String(i)] = s; });
       } else if (raw && typeof raw === "object") {
         pool = raw;

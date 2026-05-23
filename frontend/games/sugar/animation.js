@@ -1,5 +1,5 @@
 /* ============================================================================
- * sugar/animation.js — data-driven renderer. NO RNG. NO MATH.
+ * sugar/animation.js - data-driven renderer. NO RNG. NO MATH.
  * Consumes ResultData (from engine OR contract) and animates the DOM.
  * Exports class SugarAnimator.
  * ============================================================================ */
@@ -63,7 +63,7 @@ export class SugarAnimator {
 
   // ---------- optimistic-spin marker: only flip on .spinning so the rim
   // glow brightens. The user wants the symbols to STAY STILL until the
-  // real cascade animation begins — no more glyph shuffle during the
+  // real cascade animation begins - no more glyph shuffle during the
   // 3.6s on-chain reveal. The rim-glow is enough of a "waiting" signal.
   startSpinning() {
     if (!this.frameEl) return;
@@ -87,12 +87,12 @@ export class SugarAnimator {
 
   // ---------- main: play a full ResultData ----------
   async play(result) {
-    // Hard guard (per claude-design recommendation): play() must only run
-    // when api.js's spin() asked for it. If anything else calls in — a
+    // Hard guard (per design recommendation): play() must only run
+    // when api.js's spin() asked for it. If anything else calls in - a
     // stray promise resolution, a stale wallet event, a duplicate
-    // page-script — refuse and log a trace so we can find the caller.
+    // page-script - refuse and log a trace so we can find the caller.
     if (!this._userInitiated) {
-      console.warn('[SugarSlot] play() called outside of a user-initiated spin — ignored.');
+      console.warn('[SugarSlot] play() called outside of a user-initiated spin - ignored.');
       console.trace('[SugarSlot] play() unauthorized call');
       return;
     }
@@ -100,7 +100,7 @@ export class SugarAnimator {
     this.frameEl.classList.add('spinning');
     this.hudEl.classList.remove('show');
 
-    // shake & dim before spin — kept very short in turbo. Each ms here is
+    // shake & dim before spin - kept very short in turbo. Each ms here is
     // dead time before the first cell drops in.
     $$('.sym', this.root).forEach(s => { s.classList.remove('idle'); s.style.transform = 'scale(.92)'; });
     SFX.startReelLoop();

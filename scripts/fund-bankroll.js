@@ -1,4 +1,4 @@
-// Quick utility — sends STT from the deployer key to the casino bankroll via
+// Quick utility - sends STT from the deployer key to the casino bankroll via
 // a plain native transfer (Casino's receive() emits BankrollDeposited). Run:
 //   AMOUNT_STT=5 npx hardhat run scripts/fund-bankroll.js --network somniaTestnet
 
@@ -19,7 +19,7 @@ async function main() {
     value: ethers.parseEther(amount),
     gasLimit: 100000,
   });
-  console.log(`[fund] tx submitted ${tx.hash} — sending ${amount} STT`);
+  console.log(`[fund] tx submitted ${tx.hash} - sending ${amount} STT`);
   await tx.wait();
   const after = await ethers.provider.getBalance(casinoAddr);
   console.log(`[fund] balance after:  ${ethers.formatEther(after)} STT`);

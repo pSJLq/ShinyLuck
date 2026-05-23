@@ -20,7 +20,7 @@
   <div class="container">
     <div class="eyebrow"><span class="dot"></span> PROVABLY FAIR · v0.7.4</div>
     <h1>Every roll, every flip, every<br/>spin is <span class="accent">verifiable</span>.</h1>
-    <p class="lede">No "trust the dealer". No black-box RNG. Every outcome on ShinyLuck is the keccak256 of three values you can audit yourself — server seed, client seed, and a monotonic nonce. We commit to the server seed before you bet, and reveal it after.</p>
+    <p class="lede">No "trust the dealer". No black-box RNG. Every outcome on ShinyLuck is the keccak256 of three values you can audit yourself - server seed, client seed, and a monotonic nonce. We commit to the server seed before you bet, and reveal it after.</p>
   </div>
 </section>
 
@@ -30,29 +30,29 @@
       <div class="flow-step">
         <div class="step-num">01</div>
         <h3>Commit</h3>
-        <p>The House Manager Agent pre-commits 200 server-seed hashes at a time. Each hash is keccak256(serverSeed) — published <b>before</b> any bet binds to it. The seed itself stays sealed until reveal.</p>
-        <div class="code-line">hash · <span class="cyan" data-sl-fair-hash>—</span></div>
+        <p>The House Manager Agent pre-commits 200 server-seed hashes at a time. Each hash is keccak256(serverSeed) - published <b>before</b> any bet binds to it. The seed itself stays sealed until reveal.</p>
+        <div class="code-line">hash · <span class="cyan" data-sl-fair-hash>-</span></div>
       </div>
       <div class="flow-arrow">→</div>
       <div class="flow-step">
         <div class="step-num">02</div>
         <h3>Bet</h3>
-        <p>You sign your bet with your own 32-byte client seed. Pick anything — we suggest random bytes. Stake + seed + chosen slot is binding the moment the tx confirms.</p>
-        <div class="code-line">client · <span class="cyan" data-sl-fair-client>—</span></div>
+        <p>You sign your bet with your own 32-byte client seed. Pick anything - we suggest random bytes. Stake + seed + chosen slot is binding the moment the tx confirms.</p>
+        <div class="code-line">client · <span class="cyan" data-sl-fair-client>-</span></div>
       </div>
       <div class="flow-arrow">→</div>
       <div class="flow-step">
         <div class="step-num">03</div>
         <h3>Agent quorum</h3>
-        <p>Randomness is computed on-chain via keccak256(serverSeed‖clientSeed‖blockhash‖nonce). Four Somnia agents independently re-derive it as a redundancy check — money never depends on this signal; it tracks agent health.</p>
-        <div class="code-line">redundancy · <span class="green" data-sl-quorum-latest>—</span></div>
+        <p>Randomness is computed on-chain via keccak256(serverSeed‖clientSeed‖blockhash‖nonce). Four Somnia agents independently re-derive it as a redundancy check - money never depends on this signal; it tracks agent health.</p>
+        <div class="code-line">redundancy · <span class="green" data-sl-quorum-latest>-</span></div>
       </div>
       <div class="flow-arrow">→</div>
       <div class="flow-step">
         <div class="step-num">04</div>
         <h3>Reveal</h3>
-        <p>Server seed becomes public on settlement. Anyone can re-hash and verify — there is no version of the seed that could have produced a different outcome.</p>
-        <div class="code-line">tx · <a class="cyan" data-sl-fair-tx href="#" target="_blank" rel="noopener">—</a></div>
+        <p>Server seed becomes public on settlement. Anyone can re-hash and verify - there is no version of the seed that could have produced a different outcome.</p>
+        <div class="code-line">tx · <a class="cyan" data-sl-fair-tx href="#" target="_blank" rel="noopener">-</a></div>
       </div>
     </div>
   </div>
@@ -62,11 +62,11 @@
   <div class="container">
     <div class="receipt-shell">
       <div class="receipt-head">
-        <span class="live-pill"><span class="dot"></span> <span data-sl-receipt-title>RECEIPT — latest settled bet</span></span>
-        <span class="rh-meta" data-sl-receipt-meta>—</span>
+        <span class="live-pill"><span class="dot"></span> <span data-sl-receipt-title>RECEIPT - latest settled bet</span></span>
+        <span class="rh-meta" data-sl-receipt-meta>-</span>
       </div>
       <div data-sl-quorum-banner style="padding: 10px 16px; margin: 0 0 8px; font-family: var(--mono); font-size: 12px; letter-spacing: 1px; border-left: 3px solid var(--fg-mute); display:none;">
-        <span data-sl-quorum-status>—</span>
+        <span data-sl-quorum-status>-</span>
         <span style="color: var(--fg-mute); margin-left: 12px;">Randomness verified on-chain via blockhash. Agent quorum is a redundancy check.</span>
       </div>
       <pre class="receipt" data-sl-receipt><span class="dim">loading latest receipt…</span></pre>
@@ -86,17 +86,17 @@
         </div>
         <div style="border-left: 2px solid var(--cyan); padding-left: 12px; margin-bottom: 16px;">
           <div style="color:var(--cyan); margin-bottom: 6px;">STEP 1 · INPUTS</div>
-          <pre data-sl-verify-inputs style="font-size:11px; white-space:pre-wrap; word-break:break-all; color:var(--fg);">—</pre>
+          <pre data-sl-verify-inputs style="font-size:11px; white-space:pre-wrap; word-break:break-all; color:var(--fg);">-</pre>
         </div>
         <div style="border-left: 2px solid var(--purple-2); padding-left: 12px; margin-bottom: 16px;">
           <div style="color:var(--purple-2); margin-bottom: 6px;">STEP 2 · RE-DERIVE LOCALLY</div>
           <div style="margin-bottom:6px;">expected = keccak256(serverSeed ‖ clientSeed ‖ blockHash ‖ nonce)</div>
-          <pre data-sl-verify-expected style="font-size:11px; white-space:pre-wrap; word-break:break-all; color:var(--purple-2);">—</pre>
+          <pre data-sl-verify-expected style="font-size:11px; white-space:pre-wrap; word-break:break-all; color:var(--purple-2);">-</pre>
         </div>
         <div style="border-left: 2px solid var(--green); padding-left: 12px; margin-bottom: 16px;">
           <div style="color:var(--green); margin-bottom: 6px;">STEP 3 · COMPARE WITH ON-CHAIN</div>
-          <pre data-sl-verify-onchain style="font-size:11px; white-space:pre-wrap; word-break:break-all; color:var(--green);">—</pre>
-          <div data-sl-verify-match style="margin-top: 8px;">—</div>
+          <pre data-sl-verify-onchain style="font-size:11px; white-space:pre-wrap; word-break:break-all; color:var(--green);">-</pre>
+          <div data-sl-verify-match style="margin-top: 8px;">-</div>
         </div>
       </div>
     </div>
@@ -109,15 +109,15 @@
     <div class="faq-grid">
       <div class="faq-card">
         <h4>How is randomness generated?</h4>
-        <p>For each bet the casino derives <span class="mono cyan">keccak256(serverSeed ‖ clientSeed ‖ blockhash(commitBlock+3) ‖ nonce)</span>. No LLM is in the money path — Somnia agents only re-derive the same hash off-chain as a redundancy check.</p>
+        <p>For each bet the casino derives <span class="mono cyan">keccak256(serverSeed ‖ clientSeed ‖ blockhash(commitBlock+3) ‖ nonce)</span>. No LLM is in the money path - Somnia agents only re-derive the same hash off-chain as a redundancy check.</p>
       </div>
       <div class="faq-card">
         <h4>Can the operator cheat?</h4>
-        <p>No — keccak256(serverSeed) is committed on-chain <b>before</b> any bet binds to that slot. A different revealed seed would produce a different hash, which the contract rejects.</p>
+        <p>No - keccak256(serverSeed) is committed on-chain <b>before</b> any bet binds to that slot. A different revealed seed would produce a different hash, which the contract rejects.</p>
       </div>
       <div class="faq-card">
         <h4>What is the agent quorum?</h4>
-        <p>A 3-of-4 redundancy check across the LLM Inference Agent's workers. Even if one signer drops, three must agree; <b>money does not depend on this signal</b> — it's a liveness/health indicator for the agent layer.</p>
+        <p>A 3-of-4 redundancy check across the LLM Inference Agent's workers. Even if one signer drops, three must agree; <b>money does not depend on this signal</b> - it's a liveness/health indicator for the agent layer.</p>
       </div>
       <div class="faq-card">
         <h4>What happens if the seed is never revealed?</h4>
@@ -125,7 +125,7 @@
       </div>
       <div class="faq-card">
         <h4>Can I change my client seed?</h4>
-        <p>Yes — every bet generates a fresh 32-byte client seed in your browser. You can also supply your own via the SDK.</p>
+        <p>Yes - every bet generates a fresh 32-byte client seed in your browser. You can also supply your own via the SDK.</p>
       </div>
       <div class="faq-card">
         <h4>Where's the source?</h4>
@@ -133,10 +133,10 @@
       </div>
     </div>
     <div class="contracts">
-      <div class="ct"><span class="l">Casino.sol</span><span class="a" data-sl-contract="casino">—</span></div>
-      <div class="ct"><span class="l">HouseManager.sol</span><span class="a" data-sl-contract="hm">—</span></div>
-      <div class="ct"><span class="l">PlayerAgentRegistry.sol</span><span class="a" data-sl-contract="registry">—</span></div>
-      <div class="ct"><span class="l">AgentQuorumVerifier.sol</span><span class="a" data-sl-contract="verifier">—</span></div>
+      <div class="ct"><span class="l">Casino.sol</span><span class="a" data-sl-contract="casino">-</span></div>
+      <div class="ct"><span class="l">HouseManager.sol</span><span class="a" data-sl-contract="hm">-</span></div>
+      <div class="ct"><span class="l">PlayerAgentRegistry.sol</span><span class="a" data-sl-contract="registry">-</span></div>
+      <div class="ct"><span class="l">AgentQuorumVerifier.sol</span><span class="a" data-sl-contract="verifier">-</span></div>
     </div>
   </div>
 </section>

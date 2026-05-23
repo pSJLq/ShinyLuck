@@ -1,24 +1,20 @@
 /* ==========================================================
-   ShinyLuck — premium dark casino, AI-agent powered
+   ShinyLuck - premium dark casino, AI-agent powered
    ========================================================== */
 
-/* Page-load gate: account.js / leaderboard.js / etc. add `data-loading`
-   to body until their first refresh resolves, then remove. While present,
-   the page shell is held at opacity:0 (splash covers everything) so the
-   user never sees a flash of dashed-placeholders before real data lands. */
-body[data-loading] [data-page-shell] {
-  opacity: 0;
-  pointer-events: none;
-}
-[data-page-shell] {
-  opacity: 1;
-  transition: opacity 240ms ease;
-}
+/* Progressive page load: previously body[data-loading] held the whole
+   page at opacity:0 until ALL data loaded - fine when history was 2 h
+   of blocks, but with full-history scans (~700K blocks) it kept the
+   user staring at a blank page for 10+ seconds. Now the shell is always
+   visible; cells show "-" placeholders, and account.js fills them in
+   as parallel RPC fetches return. Splash loader (partials.js) is the
+   single source of "page is initialising" feedback. */
+[data-page-shell] { opacity: 1; }
 
 /* Per-game color palette for the inline tag chips used in tables (feed,
    account, leaderboard, recent bets). Apply via `.game-tag.g-<id>` where
    <id> is the contract GameType enum value 0..6. The neutral .game-tag
-   styling lives further down — these classes only override the border /
+   styling lives further down - these classes only override the border /
    text color so the chips read at a glance. */
 .game-tag.g-0 { color: #f87171; border-color: rgba(248,113,113,0.55); }   /* DICE      red       */
 .game-tag.g-1 { color: #c084fc; border-color: rgba(192,132,252,0.55); }   /* CRASH     purple    */
@@ -111,13 +107,43 @@ a, button, input, [data-hover] { cursor: none; }
 ::-webkit-scrollbar-thumb:hover { background: var(--purple-deep); }
 
 /* ============== CURSOR ============== */
+/* Hide the native cursor EVERYWHERE - universal selector + every interactive
+   pseudo-class + all browser-default cursor shapes (finger, text, resize,
+   move, help, wait, scroll wheel, all-scroll). The previous narrow rule
+   covered click-targets but missed text-cursor over inputs/textareas, the
+   ↕ scroll cursor when middle-click-dragging, ⤡ resize cursors on panel
+   corners (textarea resize handle), text-select cursor over <code>/<pre>.
+   `*, *::before, *::after` catches injected pseudo-elements too.
+   `:hover, :focus, :active` blocks browsers from re-instating their default
+   over the active element. */
+*,
+*::before,
+*::after,
+*:hover,
+*:focus,
+*:active { cursor: none !important; }
+html, body { cursor: none !important; }
+/* Disable the textarea resize grip in the bottom-right corner - it shows
+   the ⤡ system cursor on hover and the custom cursor can't override that
+   particular UA pseudo-element. */
+textarea { resize: none; }
+
 .cursor-dot, .cursor-ring {
   position: fixed;
   top: 0; left: 0;
   pointer-events: none;
   z-index: 10000;
-  mix-blend-mode: screen;
+  /* mix-blend-mode: screen was the visible-on-dark-bg trick, but it's
+     GPU-expensive - every cursor frame forced the browser to re-blend
+     against everything underneath the ring (gradients, panel shadows,
+     49-cell grid). On heavy pages like Sugar the ring visibly lagged
+     behind the dot. Purple + glow already looks bright enough without
+     blending; trade the slight desaturation for steady cursor FPS. */
   will-change: transform;
+  /* contain: strict moves the cursor onto its own GPU layer and tells
+     the browser nothing else needs to repaint when the cursor moves -
+     the killer optimisation for slot pages. */
+  contain: strict;
 }
 .cursor-dot {
   width: 6px; height: 6px;
@@ -232,8 +258,117 @@ a, button, input, [data-hover] { cursor: none; }
 .sl-loader { z-index: 99999; }
 .sl-transition { z-index: 99998; }
 
-/* Ambient reacts to cursor */
-.amb { transform: translate3d(var(--mx, 0), var(--my, 0), 0); transition: transform .8s cubic-bezier(.2,.7,.2,1); }
+/* Ambient reacts to cursor. The 0.8s transition was fighting the JS RAF
+   lerp - every setProperty restarted the transition mid-flight, doubling
+   the compositor work per cursor move. The JS already smooths the delta;
+   transition removed so the browser composites in one pass per update. */
+.amb { transform: translate3d(var(--mx, 0), var(--my, 0), 0); }
+
+/* ============== TESTING RIBBON ==============
+   Yellow/black hazard tape pinned to the top-right of "beta" game pages
+   (everything except Sugar + Dice). Animated diagonal stripes scroll
+   left→right; the label rotates 25° and sits over them.
+
+   pointer-events: none - the user CAN still click through the ribbon to
+   place bets / use the panel underneath. We're warning, not gating. */
+.sl-testing-ribbon {
+  position: fixed;
+  top: 78px;     /* clear of the nav bar */
+  right: -68px;  /* let the ribbon hang off the edge so the rotation reads cleaner */
+  width: 280px;
+  height: 38px;
+  background:
+    repeating-linear-gradient(
+      45deg,
+      #0a0a0a 0 18px,
+      #f59e0b 18px 36px
+    );
+  background-size: 51px 51px;
+  animation: sl-test-stripes 1.4s linear infinite;
+  transform: rotate(28deg);
+  transform-origin: center;
+  z-index: 9998;       /* above ambient, below splash loader (99999) */
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: #0a0a0a;
+  text-shadow: 0 0 6px rgba(245,158,11,.95), 0 0 12px rgba(245,158,11,.7);
+  /* outer-glow border using box-shadow so it works through the rotation */
+  box-shadow:
+    0 0 0 2px #0a0a0a,
+    0 2px 18px rgba(245,158,11,.45),
+    0 0 32px rgba(245,158,11,.25);
+  user-select: none;
+}
+.sl-testing-ribbon span {
+  background: rgba(245,158,11,.92);
+  padding: 2px 14px;
+  border: 1px solid #0a0a0a;
+  border-radius: 2px;
+}
+@keyframes sl-test-stripes {
+  from { background-position: 0 0; }
+  to   { background-position: 51px 0; }
+}
+/* Optional pulse so the ribbon catches the eye on first visit */
+.sl-testing-ribbon::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 2px solid rgba(245,158,11,.55);
+  border-radius: 4px;
+  animation: sl-test-pulse 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes sl-test-pulse {
+  0%, 100% { opacity: .35; transform: scale(1); }
+  50%      { opacity: .85; transform: scale(1.05); }
+}
+
+/* Small BETA sticker on lobby game cards (beta games only). Sits over
+   the top-left of the card preview so it doesn't overlap the existing
+   `game-corner-tag` on the top-right. pointer-events:none keeps the
+   card clickable through the sticker. */
+.sl-beta-card-sticker {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+  padding: 4px 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #0a0a0a;
+  background:
+    repeating-linear-gradient(
+      45deg,
+      #f59e0b 0 8px,
+      #0a0a0a 8px 16px
+    );
+  background-size: 22.6px 22.6px;
+  animation: sl-test-stripes 1.4s linear infinite;
+  border: 1px solid #0a0a0a;
+  box-shadow: 0 0 0 1px rgba(245,158,11,.7), 0 2px 8px rgba(245,158,11,.35);
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sl-beta-card-sticker > span {
+  background: rgba(245,158,11,.95);
+  padding: 1px 6px;
+  border: 1px solid #0a0a0a;
+  text-shadow: 0 0 4px rgba(245,158,11,.9);
+}
+/* Card needs position:relative so the absolutely-positioned sticker anchors
+   to it. .game already establishes a stacking context but be defensive. */
+.game { position: relative; }
 
 /* Built-on strip */
 .built-on {

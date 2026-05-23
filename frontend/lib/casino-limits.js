@@ -1,5 +1,5 @@
 /* ============================================================================
- * casino-limits.js — read the live `effective max bet` from Casino and clamp
+ * casino-limits.js - read the live `effective max bet` from Casino and clamp
  * stake inputs across all game pages.
  *
  * Effective cap = min(gameMaxBet[g], freeBankroll * maxBetBps / 10000)
@@ -9,9 +9,15 @@
  * just won) doesn't flip a borderline stake into BetTooLarge revert territory.
  * ========================================================================= */
 
-import { ethers } from "https://esm.sh/ethers@6.13.2";
-import { CONFIG, CASINO_ADDRESS } from "./config.js";
+import { ethers } from "/vendor/ethers.bundle.js";
+// scripts/deploy.js auto-writes config.js with only a CONFIG export - no
+// standalone CASINO_ADDRESS const. Pulling the address off CONFIG keeps the
+// single source of truth and avoids the linker-time crash this used to throw
+// after every redeploy ("does not provide an export named 'CASINO_ADDRESS'").
+import { CONFIG } from "./config.js";
 import { provider } from "./rpc.js";
+
+const CASINO_ADDRESS = CONFIG.casino;
 
 const CASINO_ABI = [
   "function freeBankroll() view returns (uint256)",
@@ -19,7 +25,7 @@ const CASINO_ABI = [
   "function gameMaxBet(uint8) view returns (uint256)",
 ];
 
-// Numeric ids — must match contracts/Casino.sol::GameType enum order.
+// Numeric ids - must match contracts/Casino.sol::GameType enum order.
 export const GAME = {
   dice: 0, crash: 1, slots: 2, mines: 3, plinko: 4, roulette: 5, cluster: 6,
 };
@@ -30,24 +36,32 @@ export const GAME = {
 // For each game: maxPayout = stake * capX100 / 100. The contract requires
 // `maxPayout - amount <= free + amount` ⇒ `amount <= free / (capX100/100 - 2)`.
 // Games without a static cap (DICE depends on win-chance, CRASH/PLINKO on
-// internal multipliers, ROULETTE on bet kind) are not clamped here — their
+// internal multipliers, ROULETTE on bet kind) are not clamped here - their
 // own pre-submit logic computes payout directly.
 const PAYOUT_CAP_X100 = {
-  [GAME.slots]:   200000,  // VAULT.7  — 2000×
-  [GAME.cluster]: 250000,  // SUGAR.LAB — 2500×
+  [GAME.slots]:   200000,  // VAULT.7  - 2000×
+  [GAME.cluster]: 250000,  // SUGAR.LAB - 2500×
   [GAME.mines]:    10000,  // 100×
   // dice, crash, plinko, roulette: no constant cap → omit
 };
 
-const TTL_MS = 10_000;
+// Bankroll moves slowly relative to a single spin (5% safetyMargin in
+// `safeStake` absorbs typical drift), so a 30s TTL is conservative even when
+// other players are settling concurrently. Callers can also force a refresh
+// after their own BetSettled lands via `invalidateMaxBetCache()`.
+const TTL_MS = 30_000;
 const cache = new Map(); // key=game id → { maxBet: bigint, ts: number }
+
+/** Drop all cached maxBet values. Call after the player's own BetSettled
+ *  fires so the next spin reads the post-settle bankroll. */
+export function invalidateMaxBetCache() { cache.clear(); }
 
 function getCasino() {
   return new ethers.Contract(CASINO_ADDRESS, CASINO_ABI, provider());
 }
 
 /**
- * Return the *effective* max bet (wei) for the named game — the min of the
+ * Return the *effective* max bet (wei) for the named game - the min of the
  * game-specific hardcap and the bankroll-relative bps cap. Cached for 10s
  * so a page that shows the slider on every render doesn't hammer the RPC.
  *
@@ -114,7 +128,7 @@ export function safeStake(rawStakeWei, maxBetWei) {
  * Read max + clamp + present a friendly toast if user asked for too much.
  * Returns the clamped value (wei) AND a boolean telling the caller whether
  * the value was reduced (so the UI can flash the input). Throws if the
- * clamped value is below `minStakeWei` — meaning the casino can't even cover
+ * clamped value is below `minStakeWei` - meaning the casino can't even cover
  * the minimum payout right now (rare, but possible if bankroll drained).
  *
  * @param {bigint} stakeWei
@@ -126,7 +140,7 @@ export async function clampStake(stakeWei, game, minStakeWei = 100_000_000_000_0
   const maxBet = await readMaxBet(game);
   const stake = safeStake(stakeWei, maxBet);
   if (stake < minStakeWei) {
-    const err = new Error("Casino restocking — try smaller stake or come back soon");
+    const err = new Error("Casino restocking - try smaller stake or come back soon");
     err.code = "CASINO_BANKROLL_LOW";
     throw err;
   }
@@ -157,7 +171,7 @@ export async function clampStakeStr(stakeStr, game) {
     return out;
   } catch (e) {
     const { toast } = await import("./ui.js");
-    toast(e?.message || "Casino is restocking — try a smaller stake", { kind: "warn", ttl: 4500 });
+    toast(e?.message || "Casino is restocking - try a smaller stake", { kind: "warn", ttl: 4500 });
     return null;
   }
 }

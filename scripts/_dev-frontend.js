@@ -1,5 +1,5 @@
 // Serve the static `frontend/` directory on port 8080 using Node's built-in
-// http module — no extra npm package required (`serve`, `http-server`, etc.
+// http module - no extra npm package required (`serve`, `http-server`, etc.
 // add a dependency we'd rather not carry).
 //
 // Logs each request so the user can see Privy bundle / module loads in the
@@ -9,9 +9,17 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const url = require("url");
+const zlib = require("zlib");
 
-const PORT = parseInt(process.env.FRONTEND_PORT || "8080", 10);
+const PORT = parseInt(process.env.FRONTEND_PORT || process.env.PORT || "8080", 10);
 const ROOT = path.join(__dirname, "..", "frontend");
+
+// In-memory cache for compressed text assets, keyed by file path + encoding.
+// We're a dev server, files change rarely between hits; an mtime check
+// invalidates the entry. Saves re-gzipping the 4.6MB Privy bundle on every
+// page-reload.
+const COMPRESS_CACHE = new Map();
+const COMPRESSIBLE_EXT = new Set([".js", ".mjs", ".css", ".html", ".json", ".svg", ".txt", ".md", ".map"]);
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -55,35 +63,93 @@ const server = http.createServer((req, res) => {
       filePath += ".html";
     }
   }
-  fs.readFile(filePath, (err, body) => {
+  fs.stat(filePath, (statErr, stat) => {
     const ts = new Date().toISOString().slice(11, 23);
-    if (err) {
+    if (statErr || !stat) {
       console.log(`[${ts}] 404  ${req.method} ${parsed.pathname}`);
       res.statusCode = 404;
       res.setHeader("content-type", "text/plain; charset=utf-8");
       return res.end("not found: " + parsed.pathname);
     }
-    const ext = path.extname(filePath).toLowerCase();
-    res.statusCode = 200;
-    res.setHeader("content-type", MIME[ext] || "application/octet-stream");
-    // FORCE no-store on JS/CSS/HTML — browsers were serving stale
-    // animation.js even after the user did Ctrl+Shift+R. `no-cache` only
-    // asks the browser to revalidate; `no-store` forbids storage entirely.
-    if (ext === ".js" || ext === ".mjs" || ext === ".css" || ext === ".html") {
-      res.setHeader("cache-control", "no-store, no-cache, must-revalidate, max-age=0");
-      res.setHeader("pragma", "no-cache");
-      res.setHeader("expires", "0");
-    } else {
-      res.setHeader("cache-control", "no-cache");
-    }
-    console.log(`[${ts}] 200  ${req.method} ${parsed.pathname}  (${body.length} B)`);
-    res.end(body);
+    fs.readFile(filePath, (err, body) => {
+      if (err) {
+        console.log(`[${ts}] 500  ${req.method} ${parsed.pathname}`);
+        res.statusCode = 500;
+        return res.end("read error");
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      res.statusCode = 200;
+      res.setHeader("content-type", MIME[ext] || "application/octet-stream");
+      // FORCE no-store on JS/CSS/HTML - browsers were serving stale
+      // animation.js even after the user did Ctrl+Shift+R. `no-cache` only
+      // asks the browser to revalidate; `no-store` forbids storage entirely.
+      //
+      // EXCEPTION: /vendor/ files are pre-built bundles (ethers, privy) that
+      // never change at runtime. Forcing no-store on them meant every nav
+      // re-downloaded the 372 KB ethers bundle - visible as cursor lag on
+      // the first second of every page (the main-thread JSON.parse hit).
+      // Cache for 1h so navigation between lobby/account/game pages reuses
+      // the parsed module from disk cache without going back to the wire.
+      const isVendor = /^\/vendor\//.test(parsed.pathname || "");
+      if (isVendor && (ext === ".js" || ext === ".mjs" || ext === ".map")) {
+        res.setHeader("cache-control", "public, max-age=3600");
+      } else if (ext === ".js" || ext === ".mjs" || ext === ".css" || ext === ".html") {
+        res.setHeader("cache-control", "no-store, no-cache, must-revalidate, max-age=0");
+        res.setHeader("pragma", "no-cache");
+        res.setHeader("expires", "0");
+      } else {
+        res.setHeader("cache-control", "no-cache");
+      }
+      // Content-Encoding negotiation. Privy bundle compresses 4.6 MB → ~1.1 MB
+      // (gzip) → ~900 KB (brotli). For most files the win is smaller but
+      // every JS/CSS module the slot page pulls benefits.
+      const acceptEnc = String(req.headers["accept-encoding"] || "").toLowerCase();
+      const wantBr = acceptEnc.includes("br");
+      const wantGz = acceptEnc.includes("gzip");
+      const compressible = COMPRESSIBLE_EXT.has(ext) && body.length > 1024;
+      let outBody = body;
+      let outEnc = null;
+      if (compressible && (wantBr || wantGz)) {
+        const enc = wantBr ? "br" : "gzip";
+        const cacheKey = `${filePath}::${enc}::${stat.mtimeMs}`;
+        const cached = COMPRESS_CACHE.get(cacheKey);
+        if (cached) {
+          outBody = cached;
+          outEnc = enc;
+        } else {
+          try {
+            outBody = enc === "br"
+              ? zlib.brotliCompressSync(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } })
+              : zlib.gzipSync(body, { level: 6 });
+            outEnc = enc;
+            // Cap memory: drop oldest if cache grows past 50 entries.
+            if (COMPRESS_CACHE.size > 50) {
+              const firstKey = COMPRESS_CACHE.keys().next().value;
+              COMPRESS_CACHE.delete(firstKey);
+            }
+            COMPRESS_CACHE.set(cacheKey, outBody);
+          } catch (_) {
+            outBody = body;
+            outEnc = null;
+          }
+        }
+      }
+      if (outEnc) {
+        res.setHeader("content-encoding", outEnc);
+        res.setHeader("vary", "accept-encoding");
+      }
+      const sizeLog = outEnc
+        ? `${outBody.length} B / ${body.length} B raw, ${outEnc}`
+        : `${body.length} B`;
+      console.log(`[${ts}] 200  ${req.method} ${parsed.pathname}  (${sizeLog})`);
+      res.end(outBody);
+    });
   });
 });
 
 server.on("error", (e) => {
   if (e.code === "EADDRINUSE") {
-    console.error(`[dev-frontend] port ${PORT} already in use — is another dev:all running?`);
+    console.error(`[dev-frontend] port ${PORT} already in use - is another dev:all running?`);
     process.exit(1);
   }
   console.error("[dev-frontend] error:", e);
