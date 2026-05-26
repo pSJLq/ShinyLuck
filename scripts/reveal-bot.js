@@ -50,14 +50,44 @@ async function rawGetLogs(provider, address, topic0, fromBlock, toBlock) {
 }
 
 // Seed accessor: combines the original SEEDS_FILE (indexed array from deploy
-// time) and the shared HM-cron pool file (sparse { idx: seed } map). The pool
-// file is reread before every lookup so refills land without a restart.
-function makeSeedStore({ initialSeedsFile, poolFile }) {
+// time), the shared HM-cron pool file (sparse { idx: seed } map), AND an
+// optional deterministic derivation fallback keyed by SEED_MASTER_KEY.
+//
+// Resolution order on get(idx):
+//   1. pool file (latest topup, sparse map)
+//   2. initial deploy seeds file (legacy, indices 0..199)
+//   3. deterministic deriveSeed(masterKey, idx) - infinite supply, no state
+//
+// The deterministic branch is what makes the bot survive container restarts
+// AND removes the manual-topup burden: as long as SEED_MASTER_KEY is set in
+// the env, the bot can produce seed[i] for any i, and the auto-topup loop
+// in main() will provision matching hash[i] = keccak256(abi.encode(seed[i]))
+// on-chain whenever the pool runs low.
+function deriveSeed(masterKey, idx) {
+  // Match Casino.requireSeedMatches: hash = keccak256(abi.encode(bytes32 seed)).
+  // For seed itself, any 32-byte derivation keyed by masterKey is fine - we
+  // use solidityPacked(["bytes32","uint256"], [master, idx]) which is the
+  // shortest unambiguous encoding (no struct padding).
+  return ethers.keccak256(
+    ethers.solidityPacked(["bytes32", "uint256"], [masterKey, BigInt(idx)]),
+  );
+}
+
+function hashSeed(seed) {
+  return ethers.keccak256(
+    ethers.AbiCoder.defaultAbiCoder().encode(["bytes32"], [seed]),
+  );
+}
+
+function makeSeedStore({ initialSeedsFile, poolFile, masterKey }) {
   const initial = initialSeedsFile && fs.existsSync(initialSeedsFile)
     ? JSON.parse(fs.readFileSync(initialSeedsFile, "utf8")).seeds || []
     : [];
   console.log(`[reveal-bot] loaded ${initial.length} initial seeds from ${initialSeedsFile}`);
   if (poolFile) console.log(`[reveal-bot] watching pool file: ${poolFile}`);
+  if (masterKey) console.log(`[reveal-bot] deterministic fallback active (SEED_MASTER_KEY set)`);
+  else           console.log(`[reveal-bot] no SEED_MASTER_KEY - seeds limited to file+pool, manual topup required`);
+
   // Pool format supports both shapes:
   //   1. { seeds: [...], hashes: [...] }  - written by deploy.js / topup-seeds.js
   //   2. { "0": "0x...", "37": "0x...", ... }  - sparse map written by hm-cron.js
@@ -91,16 +121,29 @@ function makeSeedStore({ initialSeedsFile, poolFile }) {
       const i = Number(idx);
       if (poolArray[i]) return poolArray[i];
       if (i < initial.length) return initial[i];
+      if (masterKey) return deriveSeed(masterKey, i);
       return null;
     },
     refresh: refreshPool,
+    hasMaster: !!masterKey,
   };
 }
 
 async function main() {
   const seedsFile = process.env.SEEDS_FILE;
   const poolFile = path.join(__dirname, "..", "deployments", "seeds", `${network.name}-pool.json`);
-  const seedStore = makeSeedStore({ initialSeedsFile: seedsFile, poolFile });
+  // Optional deterministic-fallback master key. When present, the bot can
+  // produce seed[i] for any i without storing it - and the auto-topup loop
+  // will commit matching hashes on-chain when the pool runs low. Must be
+  // a 32-byte 0x-prefixed hex string. Generate once with
+  //   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  // and pin it as SEED_MASTER_KEY in the deploy env - changing it later
+  // breaks all unrevealed bets that point at hashes derived from the old key.
+  const masterKey = process.env.SEED_MASTER_KEY || null;
+  if (masterKey && !/^0x[0-9a-fA-F]{64}$/.test(masterKey)) {
+    throw new Error(`SEED_MASTER_KEY must be a 32-byte 0x-prefixed hex string (got length ${masterKey.length})`);
+  }
+  const seedStore = makeSeedStore({ initialSeedsFile: seedsFile, poolFile, masterKey });
 
   const manifestPath = path.join(__dirname, "..", "deployments", `${network.name}.json`);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
@@ -117,6 +160,54 @@ async function main() {
     crashRoundStarted:   casino.interface.getEvent("CrashRoundStarted").topicHash,
     rouletteRoundStarted:casino.interface.getEvent("RouletteRoundStarted").topicHash,
   };
+
+  // ────────────────────── AUTO-TOPUP (deterministic seeds) ──────────────────
+  // When SEED_MASTER_KEY is set, the bot can produce seed[i] for any i. To
+  // keep the on-chain pool from running dry, it watches seedPoolStatus and
+  // pre-commits the next batch of hashes whenever available drops below
+  // SEED_TOPUP_THRESHOLD. Each hash is keccak256(abi.encode(deriveSeed(i)))
+  // - the exact same construction Casino.requireSeedMatches expects.
+  //
+  // The reveal-bot signer here is the deployer (Casino owner), so
+  // provisionSeedHashes is allowed by the `msg.sender == houseManager ||
+  // msg.sender == owner()` gate.
+  const SEED_TOPUP_THRESHOLD = parseInt(process.env.SEED_TOPUP_THRESHOLD || "100", 10);
+  const SEED_TOPUP_BATCH     = parseInt(process.env.SEED_TOPUP_BATCH     || "500", 10);
+  const SEED_TOPUP_CHECK_MS  = parseInt(process.env.SEED_TOPUP_CHECK_MS  || "60000", 10);
+  // Chunk on-chain provision so a single tx doesn't blow the block gas limit.
+  const SEED_TOPUP_CHUNK     = 200;
+  let seedTopupBusy = false;
+  async function maybeAutoTopupSeeds() {
+    if (seedTopupBusy) return;
+    if (!seedStore.hasMaster) return; // no master key → no auto-topup
+    seedTopupBusy = true;
+    try {
+      const [total, consumed] = await casino.seedPoolStatus();
+      const available = Number(total - consumed);
+      if (available >= SEED_TOPUP_THRESHOLD) return;
+      const startIdx = Number(total); // next provisioned hash lands here
+      console.log(`[reveal-bot] seed auto-topup: available=${available} < threshold=${SEED_TOPUP_THRESHOLD}, deriving ${SEED_TOPUP_BATCH} hashes at indices ${startIdx}..${startIdx + SEED_TOPUP_BATCH - 1}`);
+      const hashes = new Array(SEED_TOPUP_BATCH);
+      for (let i = 0; i < SEED_TOPUP_BATCH; i++) {
+        hashes[i] = hashSeed(deriveSeed(masterKey, startIdx + i));
+      }
+      for (let i = 0; i < hashes.length; i += SEED_TOPUP_CHUNK) {
+        const slice = hashes.slice(i, i + SEED_TOPUP_CHUNK);
+        const tx = await casino.provisionSeedHashes(slice);
+        console.log(`[reveal-bot] seed auto-topup chunk ${i}..${i + slice.length} tx=${tx.hash}`);
+        await tx.wait();
+      }
+      console.log(`[reveal-bot] seed auto-topup done. pool now has ${SEED_TOPUP_BATCH + available} seeds`);
+    } catch (e) {
+      console.warn(`[reveal-bot] seed auto-topup failed: ${e.shortMessage || e.message}`);
+    } finally {
+      seedTopupBusy = false;
+    }
+  }
+  // Run once on startup so a freshly-deployed casino with low pool gets
+  // backfilled before the first user spin. Then periodically.
+  maybeAutoTopupSeeds().catch(() => {});
+  setInterval(() => { maybeAutoTopupSeeds().catch(() => {}); }, SEED_TOPUP_CHECK_MS);
 
   const currentBlock0 = await provider.getBlockNumber();
 

@@ -8,8 +8,8 @@
   "trailingSlash": false,
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/u/:addr",  "destination": "/account.html" },
-    { "source": "/u/:addr/", "destination": "/account.html" }
+    { "source": "/u/:addr",  "destination": "/account" },
+    { "source": "/u/:addr/", "destination": "/account" }
   ],
   "redirects": [
     { "source": "/SomniaLuck.html", "destination": "/", "permanent": true },
