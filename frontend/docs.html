@@ -173,7 +173,7 @@
     <ul class="docs-list">
       <li><b>HM ↔ LLM hourly loop</b> - autonomous RTP adjustment via <a href="#hm-llm">Somnia Agent Platform</a></li>
       <li><b>Agent Quorum Verifier</b> - 3-of-4 redundant randomness re-derivation per settled bet (defence-in-depth)</li>
-      <li><b>Player Agents</b> - relayer-executed strategies with vault-isolated funds + on-chain limits</li>
+      <li><b>Player Agents</b> - on-chain LLM-driven strategies dispatched by HouseManager every hour, vault-isolated funds, vault-funded LLM ticks + per-user daily/total/per-game limits</li>
     </ul>
 
     <h2 id="hm-llm">HM ↔ JSON API ↔ LLM autonomous chain.</h2>
@@ -206,7 +206,7 @@ BIG_BONUS = activate 60min Bonus Mode."</span>
     <p>HTML → structured data scraper. Reserved for v2 (news-driven Bonus Mode - e.g. "Bitcoin halving today" → activate generous payout window). Not yet bound to the v1 contracts but the agent ID is registered + the platform fee model is wired the same way as the LLM Inference Agent.</p>
 
     <h2 id="player-agent">Player Agents.</h2>
-    <p><code>PlayerAgentRegistry.sol</code> + <code>AgentVault.sol</code>. Each player registers once, gets a fresh AgentVault, and grants an off-chain relayer the right to place bets on their behalf within stake / game / daily / total limits. The relayer (<code>agent-service/relayer.js</code>) places bets that look identical on-chain to user-placed bets but pull funds from the vault. Strategy text is natural-language; the LLM Inference Agent compiles it to executor params (Phase 2). Supports: Dice, Vault.7, Plinko, Crash (round-aware), Roulette (round-aware), Sugar.Lab.</p>
+    <p><code>PlayerAgentRegistry.sol</code> + <code>AgentVault.sol</code>. Each player registers once, gets a fresh AgentVault, and authorises HouseManager (and an optional off-chain fallback relayer) to place bets on their behalf within stake / game / daily / total limits. Every hourly Reactivity tick, HouseManager iterates active players and fires a per-player <b>Somnia LLM Inference Agent</b> request (Qwen3-30B, 3-of-3 majority, <code>allowedValues = [SKIP, DICE_0.1, DICE_0.5, SLOTS_0.5, CLUSTER_0.5, PLINKO_0.5, ROULETTE_0.5]</code> filtered by the user's mask). Callback applies the decision via <code>registry.executeBet</code> from the vault. <b>The ~0.24 STT LLM cost is pulled from the player's vault</b> via <code>registry.collectAgentFee</code> right before dispatch - empty vaults are skipped, so spam costs the casino zero. Owner can flip the split via <code>setAgentDecisionSubsidyBps</code> (0 = user pays 100%, 5000 = 50/50, 10000 = casino pays). Supports: Dice, Vault.7, Plinko, Roulette, Sugar.Lab.</p>
 
     <h2 id="bonus">Bonus Mode.</h2>
     <p>HouseManager triggers <code>activateBonusMode(durationMinutes, reasoning)</code> on Casino when 1-hour bankroll growth exceeds +10%. Effects per game:</p>
@@ -266,6 +266,9 @@ sl.<span class="fn">presignClusterSpin</span>(<span class="str">"0.1"</span>);
       <li><code>HouseManager.ReactiveBetSettledHandled(newMaxBet, freeBankroll)</code> - per-bet reflex</li>
       <li><code>HouseManager.ReactiveHourlyTick(freeBankrollNow, changeBps)</code> - cron pulse via precompile</li>
       <li><code>HouseManager.RtpAnalysisRequested / RtpAnalysisResolved</code> - LLM agent chain</li>
+      <li><code>HouseManager.PlayerDecisionRequested(requestId, player, vaultBalance, spentTodayWei, dailyLimitWei)</code> - per-user LLM decision dispatched</li>
+      <li><code>HouseManager.PlayerDecisionResolved(requestId, player, decision, game, stakeWei, betId, placed)</code> - LLM picked SKIP or a game+stake, executed via vault</li>
+      <li><code>PlayerAgentRegistry.BetExecuted / AgentVault.AgentFeePaid</code> - executor placed a vault-funded bet / vault paid its share of the LLM call</li>
       <li><code>AgentQuorumVerifier.QuorumResult(betId, requestId, expected, signers, totalWorkers, level, status, sampleResponse)</code></li>
     </ul>
 

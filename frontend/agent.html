@@ -22,7 +22,7 @@
   <div class="game-hero">
     <div>
       <h1>Player <span class="accent">A</span>gent.</h1>
-      <p class="lede">Describe a strategy in plain English. The LLM Inference Agent quotes a setup fee + complexity rating. Once you accept, an off-chain runner places bets within your daily / total / per-game limits - funds stay in your <b>AgentVault</b>.</p>
+      <p class="lede">Set your permitted games + daily / total / per-game limits. Once per hour, HouseManager fires a Somnia <b>LLM Inference Agent</b> (Qwen3-30B, 3-of-3 majority) on your behalf - it picks <code>SKIP</code> or a game+stake from your allow-list and executes via your <b>AgentVault</b>. Each LLM tick (~0.24 STT) is pulled from your vault before dispatch - keep it funded or your agent will be skipped.</p>
     </div>
     <div class="game-hero-meta">
       <div class="m">Status<b class="cyan" data-sl-agent-status>NOT REGISTERED</b></div>

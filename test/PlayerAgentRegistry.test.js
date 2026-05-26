@@ -117,7 +117,7 @@ describe("PlayerAgentRegistry + AgentVault", function () {
       );
       const data = casinoIface.encodeFunctionData("placeDiceBet", [50, true, ethers.hexlify(ethers.randomBytes(32))]);
       await expect(registry.connect(alice).executeBet(alice.address, DICE, ethers.parseEther("0.1"), data))
-        .to.be.revertedWithCustomError(registry, "NotRelayer");
+        .to.be.revertedWithCustomError(registry, "NotExecutor");
     });
 
     it("relayer places a bet via the vault", async function () {

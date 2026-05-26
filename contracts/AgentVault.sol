@@ -87,4 +87,21 @@ contract AgentVault is ReentrancyGuard {
         emit WithdrawnToPlayer(amt);
         payable(player).sendValue(amt);
     }
+
+    event AgentFeePaid(address indexed to, uint256 amount);
+
+    /// @notice Registry-only: pay `amount` to `to` (HouseManager) to cover
+    ///         this player's share of an LLM Inference call. Charged BEFORE
+    ///         the request is sent to the Somnia Agent Platform, so if the
+    ///         vault is too low the dispatch is skipped and no STT is burned.
+    function payAgentFee(uint256 amount, address payable to)
+        external
+        onlyRegistry
+        nonReentrant
+    {
+        if (amount == 0) return;
+        if (amount > address(this).balance) revert InsufficientBalance();
+        emit AgentFeePaid(to, amount);
+        to.sendValue(amount);
+    }
 }

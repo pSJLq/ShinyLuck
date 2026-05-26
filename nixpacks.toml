@@ -1,0 +1,17 @@
+# Nixpacks build plan for the reveal-bot service on Railway.
+# Two Node 20 phases: install root deps (hardhat + ethers + commit-reveal libs),
+# compile contracts once at build time so the deploy phase boots in seconds,
+# then run our bootstrap wrapper which decodes the seeds-from-env and execs
+# the canonical scripts/reveal-bot.js.
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "git"]
+
+[phases.install]
+cmds = ["npm ci --no-audit --no-fund"]
+
+[phases.build]
+cmds = ["npx hardhat compile --quiet"]
+
+[start]
+cmd = "node scripts/_reveal-bot-bootstrap.js"

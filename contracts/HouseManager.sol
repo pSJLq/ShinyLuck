@@ -121,6 +121,11 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
     ///         also be in registry.executors (set via registry.addExecutor).
     address public playerRegistry;
     uint8   public maxPlayersPerTick = 5;
+    /// @notice Share of the per-player LLM-call cost that the casino subsidises.
+    ///         0 = user pays 100% (default; spam-proof). 5000 = 50/50 split
+    ///         (promo periods). 10000 = casino pays 100% (legacy demo mode).
+    ///         Anything above 10000 is rejected by the setter.
+    uint16  public agentDecisionSubsidyBps = 0;
     /// @notice requestId → packed (player address << 8) | gameOptionsCount.
     ///         Stored so handleResponse routes correctly without scanning.
     mapping(uint256 => address) public pendingPlayerDecision;
@@ -809,6 +814,11 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         maxPlayersPerTick = n;
     }
 
+    function setAgentDecisionSubsidyBps(uint16 bps) external onlyOwner {
+        require(bps <= 10000, "max 100%");
+        agentDecisionSubsidyBps = bps;
+    }
+
     /// @notice Fire one Somnia LLM Inference request for the given player.
     ///         The agent picks ONE of {SKIP, DICE_0.1, SLOTS_0.5, CLUSTER_0.5,
     ///         PLINKO_0.5, ROULETTE_0.5} given the player's permittedGamesMask
@@ -822,8 +832,17 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             return;
         }
         uint256 cost = quoteLlmCost();
-        if (address(this).balance < cost + SomniaExtensions.SUBSCRIPTION_OWNER_MINIMUM_BALANCE) {
-            emit AgentRequestSkipped("player-decision", "insufficient-balance");
+        // Split the cost. userShare comes from the player's vault BEFORE
+        // we hit the agent platform - spam-proof: a player with an empty
+        // vault simply gets skipped and the casino burns nothing.
+        uint256 casinoShare = (cost * agentDecisionSubsidyBps) / 10000;
+        uint256 userShare = cost - casinoShare;
+        // HM still needs to hold the FULL `cost` at the moment of createRequest
+        // (we forward the combined value). After collectAgentFee, the vault
+        // tops HM up by `userShare`; we just need HM to already cover
+        // `casinoShare` + the Reactivity floor.
+        if (address(this).balance < casinoShare + SomniaExtensions.SUBSCRIPTION_OWNER_MINIMUM_BALANCE) {
+            emit AgentRequestSkipped("player-decision", "insufficient-casino-share");
             return;
         }
 
@@ -835,6 +854,10 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             return;
         }
         uint256 vaultBal = vault.balance;
+        if (vaultBal < userShare) {
+            emit AgentRequestSkipped("player-decision", "insufficient-vault-budget");
+            return;
+        }
         uint256 remainingDaily = dailyLimit > spentToday ? dailyLimit - spentToday : 0;
 
         string memory prompt = _buildPlayerPrompt(mask, remainingDaily, dailyLimit, spentTotal, totalLimit, vaultBal);
@@ -849,6 +872,18 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             false,
             allowed
         );
+
+        // Collect the user's share from their vault BEFORE firing the
+        // request. If the call reverts (vault drained mid-tick, weird
+        // proxy issue) we skip silently rather than burning the casino's
+        // share on a request we can't fully fund.
+        if (userShare > 0) {
+            try IPlayerAgentRegistryMin(playerRegistry).collectAgentFee(player, userShare) {}
+            catch {
+                emit AgentRequestSkipped("player-decision", "collect-fee-failed");
+                return;
+            }
+        }
 
         uint256 requestId = agentPlatform.createRequest{value: cost}(
             llmAgentId,
@@ -1001,4 +1036,8 @@ interface IPlayerAgentRegistryMin {
     function getActivePlayers(uint256 offset, uint256 limit)
         external view returns (address[] memory);
     function activePlayerCount() external view returns (uint256);
+    /// @notice Pulls `amount` STT from the player's AgentVault into the
+    ///         caller's balance to cover the user's share of the LLM cost.
+    ///         Caller must be in registry.executors.
+    function collectAgentFee(address player, uint256 amount) external;
 }

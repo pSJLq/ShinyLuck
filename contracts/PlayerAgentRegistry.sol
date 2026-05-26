@@ -244,6 +244,19 @@ contract PlayerAgentRegistry is Ownable, ReentrancyGuard {
         emit AgentResumed(msg.sender);
     }
 
+    /// @notice Executor-only: pull `amount` STT from the player's AgentVault
+    ///         and forward it to the executor (HouseManager) to pay for the
+    ///         user's share of an LLM Inference Agent call. Charged BEFORE
+    ///         the agent request fires so a low-vault user simply gets
+    ///         skipped instead of having the casino subsidise the whole tick.
+    function collectAgentFee(address player, uint256 amount) external onlyExecutor nonReentrant {
+        Permission storage p = permissions[player];
+        if (p.player == address(0)) revert NotRegistered();
+        if (amount == 0) return;
+        // Vault.payAgentFee enforces the same balance + nonreentrancy checks.
+        p.vault.payAgentFee(amount, payable(msg.sender));
+    }
+
     /// @notice Executor-only: place a bet on Casino on behalf of `player` from
     ///         the player's vault, charging stake/game/daily/total limits.
     ///         "Executors" can be the off-chain relayer OR an on-chain

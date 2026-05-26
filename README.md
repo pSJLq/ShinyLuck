@@ -5,7 +5,7 @@
 > The house is a quorum of autonomous AI agents. Every reel stop, every dice roll, every roulette spin is the `keccak256` of three numbers anyone can audit. House RTP is adjusted hourly by an LLM agent that pulls live competitor data via Somnia's JSON API Agent - no off-chain script, no admin key, fully on-chain.
 
 **Live testnet:** http://localhost:8080 (run `npm run dev:play`)
-**Explorer:** [HouseManager on Shannon Explorer](https://shannon-explorer.somnia.network/address/0x082c7E9297Cc2D9a011Ebb2720ee17276F173617) - watch `RtpAnalysisRequested` / `RtpAnalysisResolved` / `PlayerDecisionRequested` / `PlayerDecisionResolved` events fire hourly
+**Explorer:** [HouseManager on Shannon Explorer](https://shannon-explorer.somnia.network/address/0xd59C635698c7b368f4b6922c78f589869C8032b7) - watch `RtpAnalysisRequested` / `RtpAnalysisResolved` / `PlayerDecisionRequested` / `PlayerDecisionResolved` events fire hourly
 
 ---
 
@@ -23,7 +23,7 @@ The whole loop is on Somnia - no Python keeper, no off-chain cron, no oracle mid
 Plus:
 
 - **Agent Quorum Verifier** - independent 3-of-4 LLM committee re-derives the `keccak256` for every settled bet (defence-in-depth on the randomness layer)
-- **Player Agents** - users register an `AgentVault` + permitted-games mask + daily/total limits. Every hourly tick HouseManager iterates active players and fires a per-user Somnia LLM Inference request: agent reads the user's mask + remaining budget + vault balance and replies one of `[SKIP, DICE_0.1, SLOTS_0.5, CLUSTER_0.5, PLINKO_0.5, ROULETTE_0.5]`. Callback applies via `registry.executeBet` from the vault. Fully on-chain - no off-chain bot required.
+- **Player Agents** - users register an `AgentVault` + permitted-games mask + daily/total limits. Every hourly tick HouseManager iterates active players and fires a per-user Somnia LLM Inference request: agent reads the user's mask + remaining budget + vault balance and replies one of `[SKIP, DICE_0.1, SLOTS_0.5, CLUSTER_0.5, PLINKO_0.5, ROULETTE_0.5]`. Callback applies via `registry.executeBet` from the vault. Fully on-chain - no off-chain bot required. **Each LLM tick (~0.24 STT) is pulled from the user's own vault** before dispatch via `registry.collectAgentFee` - an empty vault means the request is skipped and zero STT burned, so spam attacks (1000 empty agents) cost the casino nothing. Owner can subsidise via `setAgentDecisionSubsidyBps` (0 = user pays 100%, 5000 = 50/50, 10000 = casino pays).
 - **7 provably-fair games** in one `Casino.sol` - Dice, Crash, Vault.7 (slots), Mines, Plinko, Roulette, Sugar.Lab (cluster pays)
 - **~2 s bet latency** - Privy embedded wallet signs in-iframe, we broadcast through our own RPC, reveal-bot reacts via Somnia WebSocket push (no polling)
 - **Lifetime stats across redeploys** - frontend aggregates `BetSettled` events across all historical Casino contracts (auto-rotated on each `npm run deploy:testnet`)
@@ -123,10 +123,10 @@ All contracts verified on Shannon Explorer.
 
 | Contract              | Address                                                            |
 | --------------------- | ------------------------------------------------------------------ |
-| Casino                | [`0x9a5D25cBc00178D3051a897568F62F1EA4540C24`](https://shannon-explorer.somnia.network/address/0x9a5D25cBc00178D3051a897568F62F1EA4540C24) |
-| HouseManager          | [`0x082c7E9297Cc2D9a011Ebb2720ee17276F173617`](https://shannon-explorer.somnia.network/address/0x082c7E9297Cc2D9a011Ebb2720ee17276F173617) |
-| AgentQuorumVerifier   | [`0xDac4DCaAb3D9F193f05FF649b48787075DBcfE10`](https://shannon-explorer.somnia.network/address/0xDac4DCaAb3D9F193f05FF649b48787075DBcfE10) |
-| PlayerAgentRegistry   | [`0x914D9Cd6e23dD3a78E2E34334d55106C218CC5D9`](https://shannon-explorer.somnia.network/address/0x914D9Cd6e23dD3a78E2E34334d55106C218CC5D9) |
+| Casino                | [`0xb17CE5D7bf4eCa28580368FaD1548C99D5a2545C`](https://shannon-explorer.somnia.network/address/0xb17CE5D7bf4eCa28580368FaD1548C99D5a2545C) |
+| HouseManager          | [`0xd59C635698c7b368f4b6922c78f589869C8032b7`](https://shannon-explorer.somnia.network/address/0xd59C635698c7b368f4b6922c78f589869C8032b7) |
+| AgentQuorumVerifier   | [`0xfAe5Fe90252b3b43eE967EaCD9985789fA5BDE77`](https://shannon-explorer.somnia.network/address/0xfAe5Fe90252b3b43eE967EaCD9985789fA5BDE77) |
+| PlayerAgentRegistry   | [`0x3e1dA686c239B95b3d5CbfAE88AD2443c3752D75`](https://shannon-explorer.somnia.network/address/0x3e1dA686c239B95b3d5CbfAE88AD2443c3752D75) |
 | SomniaAgentPlatform   | [`0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776`](https://shannon-explorer.somnia.network/address/0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776) |
 | Reactivity precompile | `0x0000000000000000000000000000000000000100`                       |
 
@@ -202,7 +202,7 @@ MIT
 > Дом - это автономный AI-агент. Каждая остановка барабана, каждый бросок кубика, каждый спин рулетки - это `keccak256` от трёх чисел, которые любой может проверить. RTP казик каждый час подбирает LLM-агент, который через JSON API Agent тащит реальные RTP конкурентов с публичного research-фида - никакого off-chain скрипта, никакого админского ключа, всё на цепи.
 
 **Локальный демо:** http://localhost:8080 (запустить `npm run dev:play`)
-**Explorer:** [HouseManager на Shannon Explorer](https://shannon-explorer.somnia.network/address/0x8451c7fEc5Ee412B14db756437eCFe1cEA8226bB) - каждый час летят `RtpAnalysisRequested` / `RtpAnalysisResolved`
+**Explorer:** [HouseManager на Shannon Explorer](https://shannon-explorer.somnia.network/address/0xd59C635698c7b368f4b6922c78f589869C8032b7) - каждый час летят `RtpAnalysisRequested` / `RtpAnalysisResolved`
 
 ---
 
@@ -220,7 +220,7 @@ MIT
 Плюс:
 
 - **Agent Quorum Verifier** - независимый комитет 3-из-4 LLM-воркеров переcчитывает `keccak256` для каждой ставки (защита в глубину на randomness-слое)
-- **Player Agents** - `PlayerAgentRegistry` + `AgentVault` позволяют пользователю отдать relayer'у право делать ставки в строгих дневных/тотальных лимитах, средства изолированы в vault-контракте
+- **Player Agents** - `PlayerAgentRegistry` + `AgentVault` позволяют пользователю отдать relayer'у (или прямо HouseManager'у через on-chain LLM) право делать ставки в строгих дневных/тотальных лимитах, средства изолированы в vault-контракте. **Каждый LLM-tick (~0.24 STT) списывается из vault'а самого юзера** через `registry.collectAgentFee` до отправки запроса в Agent Platform - пустой vault значит запрос скипнут и ноль сожжённых STT, поэтому спам-атака (1000 пустых агентов) стоит казино ноль. Owner может субсидировать через `setAgentDecisionSubsidyBps` (0 = юзер платит 100%, 5000 = 50/50, 10000 = казино платит)
 - **7 provably-fair игр** в одном `Casino.sol` - Dice, Crash, Vault.7 (слоты), Mines, Plinko, Roulette, Sugar.Lab (cluster pays)
 - **~2 сек задержка ставки** - Privy embedded-wallet подписывает в iframe, мы броадкастим через свой RPC, reveal-bot реагирует на Somnia WebSocket push (никакого polling)
 - **Lifetime статистика переживает редеплои** - фронтенд аггрегирует `BetSettled` события по всем историческим casino-контрактам (`historicalCasinos` ротируется автоматом на каждом `npm run deploy:testnet`)
@@ -231,10 +231,10 @@ MIT
 
 | Контракт              | Адрес                                                              |
 | --------------------- | ------------------------------------------------------------------ |
-| Casino                | [`0x9a5D25cBc00178D3051a897568F62F1EA4540C24`](https://shannon-explorer.somnia.network/address/0x9a5D25cBc00178D3051a897568F62F1EA4540C24) |
-| HouseManager          | [`0x082c7E9297Cc2D9a011Ebb2720ee17276F173617`](https://shannon-explorer.somnia.network/address/0x082c7E9297Cc2D9a011Ebb2720ee17276F173617) |
-| AgentQuorumVerifier   | [`0xDac4DCaAb3D9F193f05FF649b48787075DBcfE10`](https://shannon-explorer.somnia.network/address/0xDac4DCaAb3D9F193f05FF649b48787075DBcfE10) |
-| PlayerAgentRegistry   | [`0x914D9Cd6e23dD3a78E2E34334d55106C218CC5D9`](https://shannon-explorer.somnia.network/address/0x914D9Cd6e23dD3a78E2E34334d55106C218CC5D9) |
+| Casino                | [`0xb17CE5D7bf4eCa28580368FaD1548C99D5a2545C`](https://shannon-explorer.somnia.network/address/0xb17CE5D7bf4eCa28580368FaD1548C99D5a2545C) |
+| HouseManager          | [`0xd59C635698c7b368f4b6922c78f589869C8032b7`](https://shannon-explorer.somnia.network/address/0xd59C635698c7b368f4b6922c78f589869C8032b7) |
+| AgentQuorumVerifier   | [`0xfAe5Fe90252b3b43eE967EaCD9985789fA5BDE77`](https://shannon-explorer.somnia.network/address/0xfAe5Fe90252b3b43eE967EaCD9985789fA5BDE77) |
+| PlayerAgentRegistry   | [`0x3e1dA686c239B95b3d5CbfAE88AD2443c3752D75`](https://shannon-explorer.somnia.network/address/0x3e1dA686c239B95b3d5CbfAE88AD2443c3752D75) |
 | SomniaAgentPlatform   | [`0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776`](https://shannon-explorer.somnia.network/address/0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776) |
 | Reactivity precompile | `0x0000000000000000000000000000000000000100`                       |
 
