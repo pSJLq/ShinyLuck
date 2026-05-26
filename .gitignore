@@ -57,8 +57,12 @@ TODO.md
 # seeds revealed off-chain — must NEVER be committed
 deployments/seeds/
 
-# generated copy of the deployment manifest for the static frontend
-frontend/deployments/
+# generated copy of the deployment manifest for the static frontend.
+# Excluded for hardhat local runs (they overwrite with chainId 31337); the
+# testnet manifest IS committed because Vercel needs it served as a static
+# asset at /deployments/somniaTestnet.json.
+frontend/deployments/hardhat.json
+frontend/deployments/localhost.json
 
 
 # Dependencies

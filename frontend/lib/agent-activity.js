@@ -451,17 +451,21 @@ function subscribeRealtime() {
     ? new ethers.Contract(CONFIG.agentVerifier, VERIFIER_ABI, ws)
     : null;
 
-  // Subscribe to each event topic explicitly. ethers handles the dispatch.
+  // Subscribe to each event topic via the CONTRACT instance, not the raw
+  // provider. ethers v6 only accepts ProviderEvent-shaped filters on
+  // provider.on() (string name | {address, topics}); a DeferredTopicFilter
+  // from contract.filters[name]() must be passed to contract.on() instead -
+  // otherwise it throws INVALID_ARGUMENT "unknown ProviderEvent".
   const subscribeHm = (name) => {
     try {
-      const filter = hm.filters[name]();
-      ws.on(filter, (...args) => {
-        const ev = args[args.length - 1]; // log payload
+      hm.on(name, (...args) => {
+        const ev = args[args.length - 1]; // EventPayload, has .log + .args
         try {
-          const parsed = hm.interface.parseLog(ev);
-          const synthetic = { name: parsed.name, args: parsed.args, blockNumber: ev.blockNumber };
+          const log = ev.log || ev;
+          const parsedArgs = ev.args || hm.interface.parseLog(log).args;
+          const synthetic = { name, args: parsedArgs, blockNumber: log.blockNumber };
           pushEvent("hm", Date.now(), hmLabelFor(synthetic));
-          if (parsed.name === "ReasoningRequested") state.hm.reasoningCount24h++;
+          if (name === "ReasoningRequested") state.hm.reasoningCount24h++;
           renderAll();
           updateHmStats();
         } catch (e) { /* parse fail; ignore */ }
@@ -474,15 +478,15 @@ function subscribeRealtime() {
 
   if (ver) {
     try {
-      const filter = ver.filters.QuorumResult();
-      ws.on(filter, (...args) => {
+      ver.on("QuorumResult", (...args) => {
         const ev = args[args.length - 1];
         try {
-          const parsed = ver.interface.parseLog(ev);
-          const synthetic = { name: parsed.name, args: parsed.args, blockNumber: ev.blockNumber };
+          const log = ev.log || ev;
+          const parsedArgs = ev.args || ver.interface.parseLog(log).args;
+          const synthetic = { name: "QuorumResult", args: parsedArgs, blockNumber: log.blockNumber };
           pushEvent("llm", Date.now(), llmLabelFor(synthetic));
           state.llm.totalQuorum++;
-          if (Number(parsed.args.level) === 2) state.llm.okQuorum++;
+          if (Number(parsedArgs.level) === 2) state.llm.okQuorum++;
           renderAll();
           updateLlmStats();
         } catch (e) { /* ignore */ }
@@ -497,14 +501,14 @@ function subscribeRealtime() {
     const casino = new ethers.Contract(CONFIG.casino, CASINO_REASONING_ABI, ws);
     const subscribeCasino = (name) => {
       try {
-        const filter = casino.filters[name]();
-        ws.on(filter, (...args) => {
+        casino.on(name, (...args) => {
           const ev = args[args.length - 1];
           try {
-            const parsed = casino.interface.parseLog(ev);
-            const synthetic = { name: parsed.name, args: parsed.args, blockNumber: ev.blockNumber };
+            const log = ev.log || ev;
+            const parsedArgs = ev.args || casino.interface.parseLog(log).args;
+            const synthetic = { name, args: parsedArgs, blockNumber: log.blockNumber };
             pushEvent("hm", Date.now(), casinoLabelFor(synthetic));
-            if (parsed.name === "ReasoningLog") state.hm.reasoningCount24h++;
+            if (name === "ReasoningLog") state.hm.reasoningCount24h++;
             renderAll();
             updateHmStats();
           } catch (_) {}

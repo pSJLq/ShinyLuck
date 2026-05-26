@@ -1,0 +1,21 @@
+{
+  "network": "somniaTestnet",
+  "chainId": "50312",
+  "deployer": "0x3fFa302E620492C8Fb43426a0e54E537C0d937A6",
+  "deploymentBlock": 390697989,
+  "addresses": {
+    "casino": "0xb17CE5D7bf4eCa28580368FaD1548C99D5a2545C",
+    "houseManager": "0xd59C635698c7b368f4b6922c78f589869C8032b7",
+    "agentQuorumVerifier": "0xfAe5Fe90252b3b43eE967EaCD9985789fA5BDE77",
+    "playerAgentRegistry": "0x3e1dA686c239B95b3d5CbfAE88AD2443c3752D75"
+  },
+  "agents": {
+    "platform": "0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776",
+    "llmAgentId": "12847293847561029384"
+  },
+  "seedBatch": {
+    "size": 200,
+    "firstHashIdx": 0
+  },
+  "deployedAt": "2026-05-24T06:50:07.460Z"
+}
