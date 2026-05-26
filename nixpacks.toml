@@ -8,7 +8,11 @@
 nixPkgs = ["nodejs_20", "git"]
 
 [phases.install]
-cmds = ["npm ci --no-audit --no-fund"]
+# --legacy-peer-deps because package.json carries react^19 alongside
+# @privy-io/react-auth@^3 whose peerDep is react@^18 - npm 10+ refuses
+# the install otherwise. The Privy bundle is built locally with the same
+# flag, so this matches the dev environment.
+cmds = ["npm install --no-audit --no-fund --legacy-peer-deps"]
 
 [phases.build]
 cmds = ["npx hardhat compile --quiet"]
