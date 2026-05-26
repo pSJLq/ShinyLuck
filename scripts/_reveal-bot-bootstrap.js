@@ -52,23 +52,37 @@ try {
 }
 
 // Validate the JSON shape so we fail loud at boot, not deep inside the bot.
+// reveal-bot.js accepts two shapes:
+//   shape-1 (deployment file): { seeds: [string, ...], hashes: [string, ...] }
+//   shape-2 (pool file, post-topup): { "<absoluteIdx>": "<seed>", ... }
+// Detect which one we got so we can log a sensible count.
 let parsed;
 try {
   parsed = JSON.parse(seedsJson);
 } catch (e) {
-  die(`SEEDS_JSON_B64 is not valid JSON: ${e.message}`);
+  die(`seeds payload is not valid JSON: ${e.message}`);
 }
-if (!parsed || !Array.isArray(parsed.seeds) || !Array.isArray(parsed.hashes)) {
-  die("SEEDS_JSON_B64 must contain a {seeds:[],hashes:[]} payload");
-}
-if (parsed.seeds.length === 0 || parsed.seeds.length !== parsed.hashes.length) {
-  die(`bad seeds payload: seeds=${parsed.seeds.length} hashes=${parsed.hashes.length}`);
+let seedCount = 0;
+if (parsed && Array.isArray(parsed.seeds) && Array.isArray(parsed.hashes)) {
+  if (parsed.seeds.length === 0 || parsed.seeds.length !== parsed.hashes.length) {
+    die(`bad shape-1 payload: seeds=${parsed.seeds.length} hashes=${parsed.hashes.length}`);
+  }
+  seedCount = parsed.seeds.length;
+} else if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+  // Sparse map (shape-2): every value must be a 0x-prefixed 32-byte hex.
+  const keys = Object.keys(parsed);
+  if (keys.length === 0) die("shape-2 sparse map is empty");
+  const bad = keys.find((k) => typeof parsed[k] !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(parsed[k]));
+  if (bad) die(`shape-2 entry "${bad}" is not a 32-byte 0x hex string`);
+  seedCount = keys.length;
+} else {
+  die("seeds payload must be {seeds:[],hashes:[]} (deployment file) or {idx:seed,...} (pool file)");
 }
 
 const seedsPath = path.join(os.tmpdir(), `shinyluck-seeds-${Date.now()}.json`);
 fs.writeFileSync(seedsPath, seedsJson, { mode: 0o600 });
 console.log(
-  `[reveal-bot-bootstrap] materialised ${parsed.seeds.length} seeds at ${seedsPath} (${seedsJson.length} bytes)`,
+  `[reveal-bot-bootstrap] materialised ${seedCount} seeds at ${seedsPath} (${seedsJson.length} bytes)`,
 );
 
 // Light sanity check on the chain wiring before we spawn hardhat - faster

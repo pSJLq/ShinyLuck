@@ -672,7 +672,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("[data-sl-acc-share]")?.addEventListener("click", async (e) => {
     if (!viewAddress) return;
     e.preventDefault();
-    const url = `${location.origin}${location.pathname.replace(/[^/]+$/, "account.html")}?address=${viewAddress}`;
+    const url = `${location.origin}/u/${viewAddress}`;
     if (navigator.share) {
       try { await navigator.share({ title: "ShinyLuck profile", url }); return; } catch (_) {}
     }

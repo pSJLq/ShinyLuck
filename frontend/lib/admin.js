@@ -249,7 +249,7 @@ async function refreshAgents() {
       const tr = document.createElement("tr");
       const pnlColor = r.pnl >= 0n ? "var(--green)" : "var(--red)";
       tr.innerHTML =
-        `<td><a href="account.html?address=${r.player.toLowerCase()}">${shortAddr(r.player)}</a></td>` +
+        `<td><a href="/u/${r.player.toLowerCase()}">${shortAddr(r.player)}</a></td>` +
         `<td>${shortAddr(r.vault)}</td>` +
         `<td style="color:${r.active ? 'var(--green)' : 'var(--amber)'};">${r.active ? "ACTIVE" : "PAUSED"}</td>` +
         `<td>${fmtSTT(r.spentTotal)} STT</td>` +

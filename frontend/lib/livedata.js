@@ -326,9 +326,9 @@ function appendFeedRow(body, ev, animate) {
 }
 
 function accountUrlFor(addr) {
-  const inGames = location.pathname.includes("/games/");
-  const prefix = inGames ? "../" : "";
-  return `${prefix}account.html?address=${addr.toLowerCase()}`;
+  // Root-relative pretty URL - Vercel rewrites /u/:addr → /account.html and
+  // readViewAddress() in account.js parses the path. Works from any nesting.
+  return `/u/${addr.toLowerCase()}`;
 }
 
 /// Convert raw BetSettled events into renderable feed rows. `stakeMap` is

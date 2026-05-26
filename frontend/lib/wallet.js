@@ -408,22 +408,16 @@ document.addEventListener("click", async (e) => {
   }
 });
 
-/// "Account" nav link → own profile when connected (canonical query form).
-/// Path prefix depends on nesting depth (root vs /games/X vs /games/X/Y).
+/// "Account" nav link → own profile when connected. Uses the canonical
+/// /u/<addr> pretty URL (handled by Vercel rewrite + the readViewAddress
+/// parser in account.js). Root-relative so it works from any nesting depth.
 document.addEventListener("click", (e) => {
   const a = e.target.closest('a[data-page="account"]');
   if (!a) return;
   if (!connected || !SL.address) return;
   e.preventDefault();
   e.stopPropagation();
-  // depth = number of dirs above the root frontend dir we are sitting in
-  const segs = location.pathname.split("/").filter(Boolean);
-  // /SomniaLuck.html         → segs=['SomniaLuck.html']      → depth=0
-  // /games/dice.html         → segs=['games','dice.html']    → depth=1
-  // /games/sugar/index.html  → segs=['games','sugar','index.html'] → depth=2
-  const depth = Math.max(0, segs.length - 1);
-  const prefix = "../".repeat(depth);
-  window.location.href = `${prefix}account.html?address=${SL.address.toLowerCase()}`;
+  window.location.href = `/u/${SL.address.toLowerCase()}`;
 }, true);
 
 document.addEventListener("DOMContentLoaded", () => {

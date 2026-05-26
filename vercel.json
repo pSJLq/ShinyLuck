@@ -8,15 +8,12 @@
   "trailingSlash": false,
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/", "destination": "/SomniaLuck.html" },
-    { "source": "/u/:addr", "destination": "/account.html" },
+    { "source": "/u/:addr",  "destination": "/account.html" },
     { "source": "/u/:addr/", "destination": "/account.html" }
   ],
   "redirects": [
     { "source": "/SomniaLuck.html", "destination": "/", "permanent": true },
-    { "source": "/SomniaLuck",      "destination": "/", "permanent": true },
-    { "source": "/index.html",      "destination": "/", "permanent": true },
-    { "source": "/index",           "destination": "/", "permanent": true }
+    { "source": "/SomniaLuck",      "destination": "/", "permanent": true }
   ],
   "headers": [
     {
