@@ -169,22 +169,22 @@
   const navHTML = `
     <header class="nav">
       <div class="nav-inner">
-        <a class="logo" href="../SomniaLuck.html" data-link data-hover>
+        <a class="logo" href="/" data-link data-hover>
           <span class="brackets">{</span><span class="name"><b>l</b></span><span class="brackets">}</span>
           <span class="name">ShinyLuck</span>
           <span class="badge-mainnet" data-sl-network-badge>-</span>
         </a>
         <nav class="nav-links">
-          <a href="../SomniaLuck.html#games" data-link data-page="games">Games</a>
-          <a href="../leaderboard.html" data-link data-page="leaderboard">Leaderboard</a>
-          <a href="../fair.html" data-link data-page="fair">Provably Fair</a>
-          <a href="../docs.html" data-link data-page="docs">Docs</a>
-          <a href="../account.html" data-link data-page="account">Account</a>
-          <a href="../agent.html" data-link data-page="agent">My Agent</a>
+          <a href="/#games" data-link data-page="games">Games</a>
+          <a href="/leaderboard" data-link data-page="leaderboard">Leaderboard</a>
+          <a href="/fair" data-link data-page="fair">Provably Fair</a>
+          <a href="/docs" data-link data-page="docs">Docs</a>
+          <a href="/account" data-link data-page="account">Account</a>
+          <a href="/agent" data-link data-page="agent">My Agent</a>
         </nav>
         <div class="nav-spacer"></div>
         <button class="btn btn-ghost" data-hover data-wallet-btn>Connect Wallet</button>
-        <a class="btn btn-primary" data-hover href="../SomniaLuck.html#games" data-link>Play Now →</a>
+        <a class="btn btn-primary" data-hover href="/#games" data-link>Play Now →</a>
       </div>
     </header>
   `;
