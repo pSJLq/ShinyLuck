@@ -24,12 +24,44 @@ import { provider, wsProvider, fetchDeploymentBlock } from "./rpc.js";
 // vercel.app domains - the browser fetch returns 0 results silently.
 // Instead, we hit the Somnia JSON-RPC eth_getLogs directly in chunks. This
 // is slightly slower (8-12 chunks per 220k window) but works from any origin.
+// Direct fetch to the Somnia JSON-RPC endpoint. We deliberately bypass
+// `ethers.JsonRpcProvider.send` because v6's auto-batching joins our many
+// per-chunk eth_getLogs into a single batched RPC payload that the public
+// node rejects with "block range exceeds 1000" (the chunked semantics get
+// lost in the batch). Raw fetch keeps each chunk as its own POST.
+const RPC_URL = "https://api.infra.testnet.somnia.network";
+async function rawGetLogsHttp(addr, topic0, from, to) {
+  try {
+    const resp = await fetch(RPC_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: Math.floor(Math.random() * 1e9), method: "eth_getLogs",
+        params: [{
+          address: addr, topics: [topic0],
+          fromBlock: "0x" + from.toString(16),
+          toBlock: "0x" + to.toString(16),
+        }],
+      }),
+    });
+    if (!resp.ok) return [];
+    const j = await resp.json();
+    if (j.error) {
+      console.warn(`[cost-ledger] eth_getLogs ${from}..${to}: ${j.error.message}`);
+      return [];
+    }
+    return j.result || [];
+  } catch (e) {
+    console.warn(`[cost-ledger] eth_getLogs ${from}..${to}: ${e.message}`);
+    return [];
+  }
+}
 async function rawLogsRange(addr, topic0, from, to) {
-  const p = provider();
-  // Somnia testnet caps eth_getLogs at 1000 blocks per call, but we use 900
-  // with 100-block headroom for safety.
+  // Somnia testnet caps eth_getLogs at 1000 blocks per call - we use 900
+  // with 100-block headroom for safety. Parallel batch size kept modest to
+  // avoid the public node rate-limiting our flood.
   const CHUNK = 900;
-  const PARALLEL = 16;
+  const PARALLEL = 8;
   const ranges = [];
   for (let s = from; s <= to; s += CHUNK) {
     ranges.push([s, Math.min(s + CHUNK - 1, to)]);
@@ -37,14 +69,7 @@ async function rawLogsRange(addr, topic0, from, to) {
   const out = [];
   for (let i = 0; i < ranges.length; i += PARALLEL) {
     const batch = ranges.slice(i, i + PARALLEL);
-    const results = await Promise.all(batch.map(async ([s, e]) => {
-      try {
-        return await p.send("eth_getLogs", [{
-          address: addr, topics: [topic0],
-          fromBlock: "0x" + s.toString(16), toBlock: "0x" + e.toString(16),
-        }]);
-      } catch (_) { return []; }
-    }));
+    const results = await Promise.all(batch.map(([s, e]) => rawGetLogsHttp(addr, topic0, s, e)));
     for (const r of results) out.push(...r);
   }
   return out;
