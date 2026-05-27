@@ -10,6 +10,7 @@ import {
     IAgentRequesterHandler,
     ILLMAgent,
     IJsonApiAgent,
+    IParseWebsiteAgent,
     Response,
     Request,
     ResponseStatus,
@@ -69,11 +70,42 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
     IAgentRequester public agentPlatform;
     uint256 public llmAgentId   = 12847293847561029384;
     uint256 public jsonAgentId  = 13174292974160097713;
-    uint256 public llmPricePerWorker  = 0.07 ether;
-    uint256 public jsonPricePerWorker = 0.03 ether;
+    uint256 public parseAgentId = 12875401142070969085;
+    uint256 public llmPricePerWorker   = 0.07 ether;
+    uint256 public jsonPricePerWorker  = 0.03 ether;
+    uint256 public parsePricePerWorker = 0.05 ether;
     uint8   public agentSubcommitteeSize = 3;
     uint16  public minRtpBps = 8500;   // 85.00% floor
     uint16  public maxRtpBps = 9700;   // 97.00% ceiling
+
+    // News-driven Bonus Mode trigger via Parse Website Agent. Every hourly
+    // tick we ask the agent to extract the latest crypto headline from a
+    // configured URL (e.g. cryptopanic.com / coindesk). The headline goes
+    // straight into an LLM Inference call with allowedValues = [BIG_BONUS,
+    // HOLD]: bullish news → activate Bonus Mode 60 min, neutral → skip.
+    // Cheap (~0.15 + 0.24 STT per tick) AND uses the 3rd agent type so the
+    // economics widget on the lobby shows all four platform tracks active.
+    string public newsFeedUrl = "https://jsonblob.com/api/jsonBlob/019e555c-25db-7e74-a62d-31c135e87539";
+    string public newsCssSelector = "$.headline_top";
+    mapping(uint256 => bool)   public pendingNewsParse;
+    mapping(uint256 => string) public pendingNewsHeadline; // requestId → headline awaiting LLM verdict
+    string  public lastNewsHeadline;
+    uint256 public lastNewsHeadlineTs;
+    event NewsHeadlineRequested(uint256 indexed requestId, string url);
+    event NewsHeadlineResolved(uint256 indexed requestId, string headline);
+    event NewsBonusDecisionRequested(uint256 indexed requestId, string headline);
+    event NewsBonusDecisionResolved(uint256 indexed requestId, string decision);
+
+    // Tick cadence. Lower = more events visible on the lobby but more STT
+    // burnt per day. 1800 = 30 min. Owner-settable so we can dial up
+    // (`setHourlyTickIntervalSeconds(900)` = every 15 min) for showcases or
+    // dial down for quiet periods. Hardcoded floor of 300s prevents runaway.
+    uint256 public hourlyTickIntervalSeconds = 1800;
+
+    // Smart-skip threshold for RTP analysis. If |bankroll Δ% in last hour|
+    // is below this, don't fire the LLM call - nothing meaningful to decide.
+    // bps = basis points (100 = 1%). Default 100 = "skip if change < 1%".
+    uint16 public rtpAnalysisSkipBps = 100;
 
     // ShinyLuck Competitor RTP Research feed - public JSON endpoint.
     // Owner-updatable. Keys this contract reads:
@@ -288,6 +320,10 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         // ("unknown - research feed not yet fetched") in the prompt.
         try this.requestCompetitorRtp(uint8(Casino.GameType.SLOTS))   {} catch {}
         try this.requestCompetitorRtp(uint8(Casino.GameType.CLUSTER)) {} catch {}
+        // Stage 3: ask the Parse Website Agent for the latest crypto news
+        // headline. The callback fires an LLM Inference to decide BIG_BONUS
+        // vs HOLD - bullish headlines auto-activate Bonus Mode 60 min.
+        try this.requestNewsHeadline() {} catch {}
         try this.requestRtpAnalysis(uint8(Casino.GameType.SLOTS))     {} catch {}
         try this.requestRtpAnalysis(uint8(Casino.GameType.CLUSTER))   {} catch {}
 
@@ -321,16 +357,16 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
     }
 
     function _rescheduleHourlyTick() internal {
-        // One-shot schedule for ~1 hour from now. The next handler invocation
-        // will call us back, and we re-schedule again. Net effect: a
-        // self-perpetuating hourly cron without any off-chain keeper.
-        // SubscriptionOwner balance check is on address(this).balance ≥ 32 ETH,
-        // so we silently skip if the balance ever drops below that.
+        // One-shot schedule for the configured interval (default 30 min).
+        // The next handler invocation calls us back to re-schedule, giving
+        // a self-perpetuating cron without any off-chain keeper.
+        // SubscriptionOwner balance check requires ≥ 32 STT, so we silently
+        // skip if the balance ever drops below that.
         if (address(this).balance < SomniaExtensions.SUBSCRIPTION_OWNER_MINIMUM_BALANCE) {
             return;
         }
         SomniaExtensions.SubscriptionOptions memory opts = _opts();
-        uint256 nextMs = (block.timestamp + 3600) * 1000 + 1;
+        uint256 nextMs = (block.timestamp + hourlyTickIntervalSeconds) * 1000 + 1;
         try this.scheduleHourly(nextMs, opts) returns (uint256 subId) {
             hourlyCronSubId = subId;
             emit SubscriptionCreated(subId, "hourly-cron-renew");
@@ -359,7 +395,9 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         require(address(this).balance >= SomniaExtensions.SUBSCRIPTION_OWNER_MINIMUM_BALANCE, "fund first (>=32 STT)");
         if (hourlyCronSubId != 0) revert("already bootstrapped");
         SomniaExtensions.SubscriptionOptions memory opts = _opts();
-        uint256 nextMs = (block.timestamp + 3600) * 1000 + 1;
+        // First tick fires 60s from now so we don't have to wait the full
+        // interval to see the agent chain start producing events.
+        uint256 nextMs = (block.timestamp + 60) * 1000 + 1;
         hourlyCronSubId = SomniaExtensions.scheduleSubscriptionAtTimestamp(address(this), nextMs, opts);
         emit SubscriptionCreated(hourlyCronSubId, "hourly-cron-initial");
     }
@@ -391,7 +429,9 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
 
     function rebootHourlyTick() external onlyOwner {
         SomniaExtensions.SubscriptionOptions memory opts = _opts();
-        uint256 nextMs = (block.timestamp + 3600) * 1000 + 1;
+        // Reboot fires in 60s so the operator sees activity immediately
+        // after calling this instead of waiting up to a full interval.
+        uint256 nextMs = (block.timestamp + 60) * 1000 + 1;
         hourlyCronSubId = SomniaExtensions.scheduleSubscriptionAtTimestamp(address(this), nextMs, opts);
         emit SubscriptionCreated(hourlyCronSubId, "hourly-cron-reboot");
     }
@@ -531,6 +571,26 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         return agentPlatform.getRequestDeposit() + jsonPricePerWorker * agentSubcommitteeSize;
     }
 
+    function quoteParseCost() public view returns (uint256) {
+        if (address(agentPlatform) == address(0)) return 0;
+        return agentPlatform.getRequestDeposit() + parsePricePerWorker * agentSubcommitteeSize;
+    }
+
+    function setNewsFeed(string calldata url, string calldata selector) external onlyOwner {
+        newsFeedUrl = url;
+        newsCssSelector = selector;
+    }
+
+    function setHourlyTickIntervalSeconds(uint256 s) external onlyOwner {
+        require(s >= 300 && s <= 86400, "300s..1day");
+        hourlyTickIntervalSeconds = s;
+    }
+
+    function setRtpAnalysisSkipBps(uint16 bps) external onlyOwner {
+        require(bps <= 5000, "max 50%");
+        rtpAnalysisSkipBps = bps;
+    }
+
     function setCompetitorFeedUrl(string calldata url) external onlyOwner {
         competitorFeedUrl = url;
         emit CompetitorFeedUrlSet(url);
@@ -576,6 +636,70 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         emit CompetitorRtpRequested(requestId, game, competitorFeedUrl);
     }
 
+    // -------------------------------------------------------------------
+    // STAGE 3 - Parse Website Agent: extract latest crypto headline,
+    // then feed to LLM Inference to decide BIG_BONUS vs HOLD.
+    // -------------------------------------------------------------------
+
+    function requestNewsHeadline() public {
+        require(msg.sender == address(this) || msg.sender == owner() || msg.sender == hmAgent, "auth");
+        if (address(agentPlatform) == address(0)) {
+            emit AgentRequestSkipped("news-parse", "platform-not-wired");
+            return;
+        }
+        if (bytes(newsFeedUrl).length == 0) {
+            emit AgentRequestSkipped("news-parse", "url-not-set");
+            return;
+        }
+        uint256 cost = quoteParseCost();
+        if (address(this).balance < cost + SomniaExtensions.SUBSCRIPTION_OWNER_MINIMUM_BALANCE) {
+            emit AgentRequestSkipped("news-parse", "insufficient-balance");
+            return;
+        }
+        bytes memory payload = abi.encodeWithSelector(
+            IParseWebsiteAgent.parseText.selector,
+            newsFeedUrl,
+            newsCssSelector,
+            uint8(0)
+        );
+        uint256 requestId = agentPlatform.createRequest{value: cost}(
+            parseAgentId,
+            address(this),
+            this.handleResponse.selector,
+            payload
+        );
+        pendingNewsParse[requestId] = true;
+        emit NewsHeadlineRequested(requestId, newsFeedUrl);
+    }
+
+    function _requestNewsBonusDecision(string memory headline) internal {
+        if (address(agentPlatform) == address(0)) return;
+        uint256 cost = quoteLlmCost();
+        if (address(this).balance < cost + SomniaExtensions.SUBSCRIPTION_OWNER_MINIMUM_BALANCE) {
+            emit AgentRequestSkipped("news-bonus", "insufficient-balance");
+            return;
+        }
+        string memory prompt = string(abi.encodePacked(
+            "Crypto news headline: \"", headline, "\". ",
+            "If the market sentiment is strongly bullish (e.g. ATH, halving, ETF approval, ",
+            "major rally, regulatory clarity), reply BIG_BONUS to activate a 60-minute ",
+            "generous payout window for casino users. Otherwise reply HOLD."
+        ));
+        string memory system = "You are a casino marketing trigger. Reply EXACTLY one word from the allowed values. Be conservative: BIG_BONUS only for clearly euphoric headlines.";
+        string[] memory allowed = new string[](2);
+        allowed[0] = "BIG_BONUS";
+        allowed[1] = "HOLD";
+        bytes memory payload = abi.encodeWithSelector(
+            ILLMAgent.inferString.selector,
+            prompt, system, false, allowed
+        );
+        uint256 requestId = agentPlatform.createRequest{value: cost}(
+            llmAgentId, address(this), this.handleResponse.selector, payload
+        );
+        pendingNewsHeadline[requestId] = headline;
+        emit NewsBonusDecisionRequested(requestId, headline);
+    }
+
     // ---------------------------------------------------------------------
     // STAGE 2 - LLM Inference Agent picks a decision for the given game
     // ---------------------------------------------------------------------
@@ -612,7 +736,19 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             }
         }
 
+        // Smart-skip: if bankroll barely moved AND competitor RTP is close
+        // to ours, there's nothing meaningful to ask the LLM about. Saves
+        // 0.24 STT per skipped tick. Configurable via rtpAnalysisSkipBps.
+        uint256 absChange = changeBps < 0 ? uint256(-changeBps) : uint256(changeBps);
         uint256 competitorRtp = lastCompetitorRtpBps[game];
+        uint256 rtpGap = competitorRtp > 0
+            ? (competitorRtp > currentRtp ? competitorRtp - currentRtp : currentRtp - competitorRtp)
+            : uint256(rtpAnalysisSkipBps) + 1; // unknown competitor → always run
+        if (absChange < uint256(rtpAnalysisSkipBps) && rtpGap < uint256(rtpAnalysisSkipBps)) {
+            emit AgentRequestSkipped("rtp-analysis", "no-meaningful-change");
+            return;
+        }
+
         string memory prompt = _buildDecisionPrompt(game, currentRtp, free, changeBps, competitorRtp);
         string memory system = "You are the autonomous RTP regulator for ShinyLuck on Somnia. Reply with EXACTLY one word from the allowed values. Your goal is to be competitive: if our RTP is materially below competitor average, RAISE. If significantly above, LOWER. HOLD if within 0.5%. BIG_BONUS only when bankroll grew strongly AND competitors are loosening too. Protect bankroll first.";
 
@@ -650,6 +786,48 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         Request memory /* details */
     ) external override {
         require(msg.sender == address(agentPlatform), "wrong caller");
+
+        // News-parse callback? (Parse Website Agent returned the headline)
+        if (pendingNewsParse[requestId]) {
+            delete pendingNewsParse[requestId];
+            if (status != ResponseStatus.Success || responses.length == 0) {
+                emit AgentRequestSkipped("news-parse", "no-consensus");
+                return;
+            }
+            string memory headline;
+            try this.tryDecodeString(responses[0].result) returns (string memory s) { headline = s; }
+            catch { emit AgentRequestSkipped("news-parse", "decode-failed"); return; }
+            if (bytes(headline).length == 0) {
+                emit AgentRequestSkipped("news-parse", "empty-headline");
+                return;
+            }
+            lastNewsHeadline = headline;
+            lastNewsHeadlineTs = block.timestamp;
+            emit NewsHeadlineResolved(requestId, headline);
+            // Fire stage 2: LLM decides BIG_BONUS vs HOLD on this headline.
+            _requestNewsBonusDecision(headline);
+            return;
+        }
+
+        // News-bonus callback? (LLM verdict on the headline)
+        if (bytes(pendingNewsHeadline[requestId]).length != 0) {
+            string memory headline = pendingNewsHeadline[requestId];
+            delete pendingNewsHeadline[requestId];
+            if (status != ResponseStatus.Success || responses.length == 0) {
+                emit AgentRequestSkipped("news-bonus", "no-consensus");
+                return;
+            }
+            string memory decision;
+            try this.tryDecodeString(responses[0].result) returns (string memory s) { decision = s; }
+            catch { emit AgentRequestSkipped("news-bonus", "decode-failed"); return; }
+            emit NewsBonusDecisionResolved(requestId, decision);
+            if (keccak256(bytes(decision)) == keccak256(bytes("BIG_BONUS"))) {
+                try casino.activateBonusMode(60, string(abi.encodePacked(
+                    "LLM: news-driven Bonus Mode -- ", headline
+                ))) {} catch { emit AgentRequestSkipped("news-bonus", "casino-rejected"); }
+            }
+            return;
+        }
 
         // Player-decision callback? (LLM picked SKIP / GAME_STAKE)
         address pending = pendingPlayerDecision[requestId];
