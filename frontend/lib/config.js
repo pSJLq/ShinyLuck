@@ -2,10 +2,10 @@
 // `npm run deploy:testnet` to overwrite (don't edit by hand).
 export const CONFIG = {
   network: "somniaTestnet",
-  casino: "0xb17CE5D7bf4eCa28580368FaD1548C99D5a2545C",
-  registry: "0x3e1dA686c239B95b3d5CbfAE88AD2443c3752D75",
-  houseManager: "0xd59C635698c7b368f4b6922c78f589869C8032b7",
-  agentVerifier: "0xfAe5Fe90252b3b43eE967EaCD9985789fA5BDE77",
+  casino: "0x7983E6D858cd683C243ABe71b8729861E8020F6f",
+  registry: "0x8D220A04231b7E473032eD0D00B3fc7061512d59",
+  houseManager: "0x6fa6fb34C3864072fd27d63Cc1D136cD9833D402",
+  agentVerifier: "0x7AFEbafc0727fe654285eCA0656E83c56028bAF5",
   agentPlatform: "0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776",
   agentServiceUrl: "http://localhost:3001",
   // Privy app ID - published, not a secret. Lives in .env as Privy_App_Id.
@@ -36,6 +36,7 @@ export const CONFIG = {
     { address: "0x6771De2cB1f1356a41Fb424F235C0d5896B35B9a", deploymentBlock: 390136107 },
     { address: "0x9a5D25cBc00178D3051a897568F62F1EA4540C24", deploymentBlock: 390672006 },
     { address: "0xb17CE5D7bf4eCa28580368FaD1548C99D5a2545C", deploymentBlock: 390697989 },
+    { address: "0x7983E6D858cd683C243ABe71b8729861E8020F6f", deploymentBlock: 393518558 },
   ],
 };
 

@@ -115,3 +115,7 @@ subgraph/generated/
 # Test coverage
 coverage/
 coverage.json
+
+# Temp seeds-b64 dump for Railway env-var pasting
+seeds_b64_gen10.txt
+seeds_b64_*.txt

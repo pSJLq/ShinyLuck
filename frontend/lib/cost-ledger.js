@@ -102,20 +102,25 @@ const ONE_DAY_BLOCKS = 220_000n;
 // We read the active config from HouseManager via quoteLlmCost / quoteJsonCost
 // in fetchPricing() so this stays accurate even if the operator tunes pricing.
 const PRICING_DEFAULTS = {
-  llm:  ethers.parseEther("0.24"), // 0.07 × 3 workers + 0.03 reserve
-  json: ethers.parseEther("0.12"), // 0.03 × 3 workers + 0.03 reserve
+  llm:   ethers.parseEther("0.24"), // 0.07 × 3 workers + 0.03 reserve
+  json:  ethers.parseEther("0.12"), // 0.03 × 3 workers + 0.03 reserve
+  parse: ethers.parseEther("0.18"), // 0.05 × 3 workers + 0.03 reserve
 };
 
-// Event → category. Matches the four ways our contracts spend on agent calls:
-//   - HM RtpAnalysisRequested        → LLM Inference Agent (the showpiece)
-//   - HM CompetitorRtpRequested      → JSON API Agent
-//   - HM PlayerDecisionRequested     → LLM Inference Agent (per-user dispatch)
-//   - AgentQuorumVerifier quorum req → LLM Inference Agent (3-of-4 redundancy)
+// Event → category. Matches the six ways our contracts spend on agent calls:
+//   - HM RtpAnalysisRequested            → LLM Inference Agent (the showpiece)
+//   - HM CompetitorRtpRequested          → JSON API Agent
+//   - HM PlayerDecisionRequested         → LLM Inference Agent (per-user dispatch)
+//   - HM NewsHeadlineRequested           → Parse Website Agent (crypto news → Bonus Mode)
+//   - HM NewsBonusDecisionRequested      → LLM Inference Agent (verdict on the headline)
+//   - AgentQuorumVerifier quorum req     → LLM Inference Agent (3-of-4 redundancy)
 const CATEGORIES = {
-  rtp:      { label: "RTP analysis · LLM",      cls: "r-llm",    agent: "llm" },
-  comp:     { label: "Competitor RTP · JSON",   cls: "r-json",   agent: "json" },
-  player:   { label: "Player Agents · LLM",     cls: "r-player", agent: "llm" },
-  quorum:   { label: "Quorum verify · LLM",     cls: "r-quorum", agent: "llm" },
+  rtp:      { label: "RTP analysis · LLM",          cls: "r-llm",    agent: "llm" },
+  comp:     { label: "Competitor RTP · JSON",       cls: "r-json",   agent: "json" },
+  player:   { label: "Player Agents · LLM",         cls: "r-player", agent: "llm" },
+  news:     { label: "News headline · Parse",       cls: "r-parse",  agent: "parse" },
+  newsLlm:  { label: "News bonus verdict · LLM",    cls: "r-llm",    agent: "llm" },
+  quorum:   { label: "Quorum verify · LLM",         cls: "r-quorum", agent: "llm" },
 };
 
 // Event signatures must match HouseManager.sol byte-for-byte - the keccak256
@@ -126,8 +131,11 @@ const HM_ABI = [
   "event RtpAnalysisRequested(uint256 indexed requestId, uint8 indexed game, uint16 ourRtpBps, int256 bankrollChangeBps, uint256 competitorRtpBps)",
   "event CompetitorRtpRequested(uint256 indexed requestId, uint8 indexed game, string url)",
   "event PlayerDecisionRequested(uint256 indexed requestId, address indexed player, uint256 vaultBalance, uint256 spentTodayWei, uint256 dailyLimitWei)",
+  "event NewsHeadlineRequested(uint256 indexed requestId, string url)",
+  "event NewsBonusDecisionRequested(uint256 indexed requestId, string headline)",
   "function quoteLlmCost() view returns (uint256)",
   "function quoteJsonCost() view returns (uint256)",
+  "function quoteParseCost() view returns (uint256)",
 ];
 const VERIFIER_ABI = [
   "event QuorumRequested(uint256 indexed betId, uint256 indexed requestId, address indexed requester)",
@@ -156,10 +164,12 @@ function receiptHref(requestId) {
 }
 
 function categoryFor(eventName) {
-  if (eventName === "RtpAnalysisRequested")      return "rtp";
-  if (eventName === "CompetitorRtpRequested")    return "comp";
-  if (eventName === "PlayerDecisionRequested")   return "player";
-  if (eventName === "QuorumRequested")           return "quorum";
+  if (eventName === "RtpAnalysisRequested")          return "rtp";
+  if (eventName === "CompetitorRtpRequested")        return "comp";
+  if (eventName === "PlayerDecisionRequested")       return "player";
+  if (eventName === "NewsHeadlineRequested")         return "news";
+  if (eventName === "NewsBonusDecisionRequested")    return "newsLlm";
+  if (eventName === "QuorumRequested")               return "quorum";
   return null;
 }
 
@@ -173,12 +183,14 @@ async function fetchPricing() {
   if (!CONFIG.houseManager || CONFIG.houseManager === ZERO) return;
   try {
     const hm = new ethers.Contract(CONFIG.houseManager, HM_ABI, provider());
-    const [llm, json] = await Promise.all([
+    const [llm, json, parse] = await Promise.all([
       hm.quoteLlmCost().catch(() => 0n),
       hm.quoteJsonCost().catch(() => 0n),
+      hm.quoteParseCost().catch(() => 0n),
     ]);
-    if (llm > 0n)  state.pricing.llm  = llm;
-    if (json > 0n) state.pricing.json = json;
+    if (llm > 0n)   state.pricing.llm   = llm;
+    if (json > 0n)  state.pricing.json  = json;
+    if (parse > 0n) state.pricing.parse = parse;
   } catch (e) { /* fall back to defaults */ }
 }
 
@@ -208,9 +220,11 @@ async function backfill24h() {
 
   const hm = new ethers.Contract(CONFIG.houseManager, HM_ABI, p);
   const tasks = [
-    fetchHmLogs(hm, "RtpAnalysisRequested",    floor, head).catch(() => []),
-    fetchHmLogs(hm, "CompetitorRtpRequested",  floor, head).catch(() => []),
-    fetchHmLogs(hm, "PlayerDecisionRequested", floor, head).catch(() => []),
+    fetchHmLogs(hm, "RtpAnalysisRequested",         floor, head).catch(() => []),
+    fetchHmLogs(hm, "CompetitorRtpRequested",       floor, head).catch(() => []),
+    fetchHmLogs(hm, "PlayerDecisionRequested",      floor, head).catch(() => []),
+    fetchHmLogs(hm, "NewsHeadlineRequested",        floor, head).catch(() => []),
+    fetchHmLogs(hm, "NewsBonusDecisionRequested",   floor, head).catch(() => []),
   ];
   if (CONFIG.agentVerifier && CONFIG.agentVerifier !== ZERO) {
     const ver = new ethers.Contract(CONFIG.agentVerifier, VERIFIER_ABI, p);
@@ -364,7 +378,8 @@ function subscribeLive() {
         });
       } catch (_) {}
     };
-    ["RtpAnalysisRequested", "CompetitorRtpRequested", "PlayerDecisionRequested"].forEach(wire);
+    ["RtpAnalysisRequested", "CompetitorRtpRequested", "PlayerDecisionRequested",
+     "NewsHeadlineRequested", "NewsBonusDecisionRequested"].forEach(wire);
   }
   if (CONFIG.agentVerifier && CONFIG.agentVerifier !== ZERO) {
     try {
