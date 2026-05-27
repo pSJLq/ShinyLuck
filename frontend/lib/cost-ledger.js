@@ -155,7 +155,9 @@ async function backfill24h() {
   for (const log of allLogs) {
     const tsMs = blockTs.get(log.blockNumber);
     if (!tsMs || tsMs < cutoff) continue;
-    const cat = categoryFor(log.fragment ? log.fragment.name : log.eventName || "");
+    // fetchLogs returns shape { name, args, blockNumber, transactionHash, logIndex }
+    // - the event name is at `log.name`, not log.fragment.name.
+    const cat = categoryFor(log.name);
     if (!cat) continue;
     const rid = (log.args && log.args.requestId) ? log.args.requestId.toString() : `${log.transactionHash}-${log.logIndex}`;
     state.events.set(rid, { kind: cat, tsMs, requestId: rid });
