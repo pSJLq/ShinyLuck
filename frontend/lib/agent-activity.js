@@ -446,7 +446,7 @@ async function coldStart() {
   if (CONFIG.agentVerifier && CONFIG.agentVerifier !== ZERO) {
     const ver = new ethers.Contract(CONFIG.agentVerifier, VERIFIER_ABI, provider());
     try {
-      const qr = await fetchLogs(ver, "QuorumResult", from, head).catch(() => []);
+      const qr = await rawFetchLogs(ver, "QuorumResult", from, head).catch(() => []);
       const qrBlocks = [...new Set(qr.map((e) => e.blockNumber).filter((b) => !tsByBlock.has(b)))];
       await Promise.all(qrBlocks.map(async (b) => {
         try { const blk = await provider().getBlock(b); if (blk) tsByBlock.set(b, blk.timestamp * 1000); }
@@ -456,7 +456,7 @@ async function coldStart() {
         const tsMs = tsByBlock.get(ev.blockNumber) || Date.now();
         pushEvent("llm", tsMs, llmLabelFor(ev));
       }
-      const qr24 = await fetchLogs(ver, "QuorumResult", dayBack, head).catch(() => []);
+      const qr24 = await rawFetchLogs(ver, "QuorumResult", dayBack, head).catch(() => []);
       state.llm.totalQuorum = qr24.length;
       state.llm.okQuorum = qr24.filter((e) => Number(e.args.level) === 2).length;
     } catch (e) { console.warn("[agent-activity] verifier cold-start:", e.message); }
