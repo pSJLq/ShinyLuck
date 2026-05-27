@@ -46,8 +46,12 @@ const CATEGORIES = {
   quorum:   { label: "Quorum verify · LLM",     cls: "r-quorum", agent: "llm" },
 };
 
+// Event signatures must match HouseManager.sol byte-for-byte - the keccak256
+// topic0 hash depends on the full signature including non-indexed params,
+// so a wrong tail (e.g. missing `competitorRtpBps`) → wrong topic0 →
+// eth_getLogs returns zero matches.
 const HM_ABI = [
-  "event RtpAnalysisRequested(uint256 indexed requestId, uint8 indexed game, uint16 currentRtpBps, int256 bankrollChangeBps)",
+  "event RtpAnalysisRequested(uint256 indexed requestId, uint8 indexed game, uint16 ourRtpBps, int256 bankrollChangeBps, uint256 competitorRtpBps)",
   "event CompetitorRtpRequested(uint256 indexed requestId, uint8 indexed game, string url)",
   "event PlayerDecisionRequested(uint256 indexed requestId, address indexed player, uint256 vaultBalance, uint256 spentTodayWei, uint256 dailyLimitWei)",
   "function quoteLlmCost() view returns (uint256)",

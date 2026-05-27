@@ -32,13 +32,18 @@ const ZERO = "0x0000000000000000000000000000000000000000";
 const ACTIVITY_BUCKETS = 28;
 const BUCKET_MS = 60_000; // 1-minute buckets → 28-min activity window
 
+// Event signatures must match HouseManager.sol byte-for-byte - the keccak256
+// topic0 hash includes the full signature (indexed + non-indexed). An
+// outdated tail (e.g. missing `competitorRtpBps`, swapping signers/workers
+// for decision/sample) → wrong topic0 → eth_getLogs and provider.on filter
+// silently return nothing.
 const HM_ABI = [
   "event ReactiveBetSettledHandled(uint256 newMaxBet, uint256 freeBankroll)",
   "event ReactiveHourlyTick(uint256 freeBankrollNow, int256 changeBps)",
   "event ReasoningRequested(string action, int256 changeBps, uint256 freeBankroll, uint256 timestamp)",
-  "event RtpAnalysisRequested(uint256 indexed requestId, uint8 indexed game, uint16 currentRtpBps, int256 bankrollChangeBps)",
-  "event RtpAnalysisResolved(uint256 indexed requestId, uint8 indexed game, uint16 oldRtpBps, uint16 newRtpBps, uint8 signers, uint8 workers, string sample)",
-  "event RtpAnalysisSkipped(uint8 indexed game, string reason)",
+  "event RtpAnalysisRequested(uint256 indexed requestId, uint8 indexed game, uint16 ourRtpBps, int256 bankrollChangeBps, uint256 competitorRtpBps)",
+  "event RtpAnalysisResolved(uint256 indexed requestId, uint8 indexed game, uint16 oldRtpBps, uint16 newRtpBps, string decision, string sample)",
+  "event AgentRequestSkipped(string indexed kind, string reason)",
 ];
 const VERIFIER_ABI = [
   "event QuorumRequested(uint256 indexed betId, uint256 indexed requestId, address indexed requester)",
@@ -332,7 +337,7 @@ async function coldStart() {
       fetchLogs(hm, "ReasoningRequested",        from, head).catch(() => []),
       fetchLogs(hm, "RtpAnalysisRequested",      from, head).catch(() => []),
       fetchLogs(hm, "RtpAnalysisResolved",       from, head).catch(() => []),
-      fetchLogs(hm, "RtpAnalysisSkipped",        from, head).catch(() => []),
+      fetchLogs(hm, "AgentRequestSkipped",        from, head).catch(() => []),
     ]);
     events = [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip].flat();
   } catch (e) { console.warn("[agent-activity] HM cold-start:", e.message); }
@@ -417,11 +422,13 @@ function hmLabelFor(ev) {
     case "ReasoningRequested":
       return `${ev.args.action} · Δ${fmtBps(ev.args.changeBps)}% · bankroll ${fmtSttFromWei(ev.args.freeBankroll)} STT`;
     case "RtpAnalysisRequested":
-      return `→ asking LLM for ${gameName(ev.args.game)} RTP (current ${fmtBpsPct(ev.args.currentRtpBps)}%, Δ${fmtBps(ev.args.bankrollChangeBps)}%)${receiptLink(ev.args.requestId)}`;
+      return `→ asking LLM for ${gameName(ev.args.game)} RTP (our ${fmtBpsPct(ev.args.ourRtpBps)}%, Δ${fmtBps(ev.args.bankrollChangeBps)}%, competitor ${ev.args.competitorRtpBps > 0n ? fmtBpsPct(ev.args.competitorRtpBps) + "%" : "unknown"})${receiptLink(ev.args.requestId)}`;
     case "RtpAnalysisResolved":
-      return `← LLM consensus ${ev.args.signers}/${ev.args.workers}: ${gameName(ev.args.game)} ${fmtBpsPct(ev.args.oldRtpBps)}% → ${fmtBpsPct(ev.args.newRtpBps)}%${receiptLink(ev.args.requestId)}`;
-    case "RtpAnalysisSkipped":
-      return `RTP analysis skipped (${ev.args.game}): ${ev.args.reason}`;
+      return `← LLM decision "${ev.args.decision}": ${gameName(ev.args.game)} ${fmtBpsPct(ev.args.oldRtpBps)}% → ${fmtBpsPct(ev.args.newRtpBps)}%${receiptLink(ev.args.requestId)}`;
+    case "AgentRequestSkipped":
+      // `kind` is indexed bytes32 (string-hashed by event semantics) - ethers
+      // surfaces it as a Result. `reason` is the plain string we emitted.
+      return `agent request skipped: ${ev.args.reason}`;
     default:
       return ev.name;
   }
@@ -511,7 +518,7 @@ function subscribeRealtime() {
     } catch (e) { /* event missing on older HM - skip */ }
   };
   ["ReactiveBetSettledHandled", "ReactiveHourlyTick", "ReasoningRequested",
-   "RtpAnalysisRequested", "RtpAnalysisResolved", "RtpAnalysisSkipped"]
+   "RtpAnalysisRequested", "RtpAnalysisResolved", "AgentRequestSkipped"]
     .forEach(subscribeHm);
 
   if (ver) {
