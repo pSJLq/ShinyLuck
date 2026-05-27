@@ -2804,3 +2804,24 @@ pre.code-block .cmd { color: #fff; }
   color: var(--cyan);
   border-color: var(--cyan);
 }
+
+/* Deep-link to the public Somnia agent platform receipt for any displayed
+   agent request. Used by lib/agent-activity.js (lobby ticker), lib/fair.js
+   (Provably Fair quorum banner), and anywhere else we render a requestId. */
+.sl-receipt-link {
+  color: var(--cyan);
+  text-decoration: none;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  padding: 1px 4px;
+  border: 1px solid var(--line, rgba(255, 255, 255, .12));
+  border-radius: 3px;
+  margin-left: 4px;
+  white-space: nowrap;
+  vertical-align: middle;
+  transition: background 120ms, border-color 120ms;
+}
+.sl-receipt-link:hover {
+  background: rgba(34, 211, 238, .14);
+  border-color: var(--cyan);
+}

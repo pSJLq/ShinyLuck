@@ -198,7 +198,16 @@ async function refresh() {
         banner.style.color = lvl.color;
       }
       const status = $("[data-sl-quorum-status]");
-      if (status) status.textContent = `Agent quorum: ${q.args.signers}/${q.args.totalWorkers} signed · ${lvl.label}`;
+      if (status) {
+        // Link to the public Somnia receipt for the underlying agent request -
+        // judges + skeptical users can click through to verify the 3-of-4 LLM
+        // committee responses byte-for-byte on the official platform.
+        const rid = q.args.requestId !== undefined ? q.args.requestId.toString() : null;
+        const receiptHtml = rid
+          ? ` <a href="https://agents.testnet.somnia.network/receipts/${rid}" target="_blank" rel="noopener" class="sl-receipt-link" title="View Somnia agent platform receipt for request ${rid}">[receipt ↗]</a>`
+          : "";
+        status.innerHTML = `Agent quorum: ${q.args.signers}/${q.args.totalWorkers} signed · ${lvl.label}${receiptHtml}`;
+      }
       const latest = $("[data-sl-quorum-latest]");
       if (latest) {
         latest.textContent = `${q.args.signers}/${q.args.totalWorkers} ✓`;
