@@ -193,6 +193,7 @@
      livedata.js (used on the lobby/account pages for the news ticker and
      stats grid) has zero data-sl-* hooks on this page - removed to drop a
      29 KB module load + its RPC chatter from the cold-start path. -->
+<script src="/lib/console-filter.js"></script>
 <script src="/vendor/privy.bundle.js" defer></script>
 <script src="/partials.js" defer></script>
 
