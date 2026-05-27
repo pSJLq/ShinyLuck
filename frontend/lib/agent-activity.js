@@ -411,6 +411,12 @@ async function coldStart() {
     const tsMs = tsByBlock.get(ev.blockNumber) || (Date.now() - 1000);
     pushEvent("hm", tsMs, hmLabelFor(ev));
   }
+  // Paint immediately so the HM card flips from "awaiting first event…" to
+  // the latest decision the moment HM data is in - don't wait for the slow
+  // casino + verifier chains that follow (those add up to ~10s of fetches
+  // on a cold cache).
+  renderAll();
+  updateHmStats();
 
   // 24-hour reasoning count - pulled separately because the bucket window
   // is only 28 minutes. Sum BOTH the on-chain HM ReasoningRequested events
