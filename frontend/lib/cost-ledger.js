@@ -17,7 +17,54 @@
 
 import { ethers } from "/vendor/ethers.bundle.js";
 import { CONFIG } from "./config.js";
-import { provider, wsProvider, fetchLogs, fetchDeploymentBlock } from "./rpc.js";
+import { provider, wsProvider, fetchDeploymentBlock } from "./rpc.js";
+
+// We deliberately do NOT use the rpc.js `fetchLogs` here because its primary
+// path goes through Shannon Explorer's REST endpoint which blocks CORS from
+// vercel.app domains - the browser fetch returns 0 results silently.
+// Instead, we hit the Somnia JSON-RPC eth_getLogs directly in chunks. This
+// is slightly slower (8-12 chunks per 220k window) but works from any origin.
+async function rawLogsRange(addr, topic0, from, to) {
+  const p = provider();
+  // Somnia testnet caps eth_getLogs at 1000 blocks per call, but we use 900
+  // with 100-block headroom for safety.
+  const CHUNK = 900;
+  const PARALLEL = 16;
+  const ranges = [];
+  for (let s = from; s <= to; s += CHUNK) {
+    ranges.push([s, Math.min(s + CHUNK - 1, to)]);
+  }
+  const out = [];
+  for (let i = 0; i < ranges.length; i += PARALLEL) {
+    const batch = ranges.slice(i, i + PARALLEL);
+    const results = await Promise.all(batch.map(async ([s, e]) => {
+      try {
+        return await p.send("eth_getLogs", [{
+          address: addr, topics: [topic0],
+          fromBlock: "0x" + s.toString(16), toBlock: "0x" + e.toString(16),
+        }]);
+      } catch (_) { return []; }
+    }));
+    for (const r of results) out.push(...r);
+  }
+  return out;
+}
+async function fetchHmLogs(hm, eventName, from, to) {
+  const topic0 = hm.interface.getEvent(eventName).topicHash;
+  const raws = await rawLogsRange(hm.target, topic0, from, to);
+  return raws.map((r) => {
+    try {
+      const parsed = hm.interface.parseLog({ topics: r.topics, data: r.data });
+      return {
+        name: parsed.name,
+        args: parsed.args,
+        blockNumber: parseInt(r.blockNumber, 16),
+        transactionHash: r.transactionHash,
+        logIndex: parseInt(r.logIndex, 16),
+      };
+    } catch (_) { return null; }
+  }).filter(Boolean);
+}
 
 const ZERO = "0x0000000000000000000000000000000000000000";
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -137,13 +184,13 @@ async function backfill24h() {
 
   const hm = new ethers.Contract(CONFIG.houseManager, HM_ABI, p);
   const tasks = [
-    fetchLogs(hm, "RtpAnalysisRequested",    floor, head).catch((e) => { console.warn("[cost-ledger] fetch RTP:", e.message); return []; }),
-    fetchLogs(hm, "CompetitorRtpRequested",  floor, head).catch((e) => { console.warn("[cost-ledger] fetch COMP:", e.message); return []; }),
-    fetchLogs(hm, "PlayerDecisionRequested", floor, head).catch((e) => { console.warn("[cost-ledger] fetch PLAYER:", e.message); return []; }),
+    fetchHmLogs(hm, "RtpAnalysisRequested",    floor, head).catch((e) => { console.warn("[cost-ledger] fetch RTP:", e.message); return []; }),
+    fetchHmLogs(hm, "CompetitorRtpRequested",  floor, head).catch((e) => { console.warn("[cost-ledger] fetch COMP:", e.message); return []; }),
+    fetchHmLogs(hm, "PlayerDecisionRequested", floor, head).catch((e) => { console.warn("[cost-ledger] fetch PLAYER:", e.message); return []; }),
   ];
   if (CONFIG.agentVerifier && CONFIG.agentVerifier !== ZERO) {
     const ver = new ethers.Contract(CONFIG.agentVerifier, VERIFIER_ABI, p);
-    tasks.push(fetchLogs(ver, "QuorumRequested", floor, head).catch((e) => { console.warn("[cost-ledger] fetch QUORUM:", e.message); return []; }));
+    tasks.push(fetchHmLogs(ver, "QuorumRequested", floor, head).catch((e) => { console.warn("[cost-ledger] fetch QUORUM:", e.message); return []; }));
   }
   const results = await Promise.all(tasks);
   const allLogs = results.flat();
