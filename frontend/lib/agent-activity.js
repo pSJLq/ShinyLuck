@@ -26,9 +26,63 @@
 
 import { ethers } from "/vendor/ethers.bundle.js";
 import { CONFIG } from "./config.js";
-import { provider, wsProvider, fetchLogs, fetchDeploymentBlock } from "./rpc.js";
+import { provider, wsProvider, fetchDeploymentBlock } from "./rpc.js";
 
 const ZERO = "0x0000000000000000000000000000000000000000";
+
+// We deliberately do NOT use the rpc.js `fetchLogs` here - its Shannon
+// Explorer primary path is CORS-blocked from vercel.app, and the RPC
+// fallback through ethers JsonRpcProvider gets killed by v6's auto-batch
+// (chunked queries get joined into one batch that exceeds the 1000-block
+// per-call limit). Same workaround as in cost-ledger.js: raw fetch direct
+// to the Somnia public RPC, manual chunking.
+const RPC_URL = "https://api.infra.testnet.somnia.network";
+async function rawGetLogsHttp(addr, topic0, from, to) {
+  try {
+    const resp = await fetch(RPC_URL, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: Math.floor(Math.random() * 1e9), method: "eth_getLogs",
+        params: [{
+          address: addr, topics: [topic0],
+          fromBlock: "0x" + from.toString(16), toBlock: "0x" + to.toString(16),
+        }],
+      }),
+    });
+    if (!resp.ok) return [];
+    const j = await resp.json();
+    if (j.error) return [];
+    return j.result || [];
+  } catch (_) { return []; }
+}
+async function rawLogsRange(addr, topic0, from, to) {
+  const CHUNK = 900;
+  const PARALLEL = 8;
+  const ranges = [];
+  for (let s = from; s <= to; s += CHUNK) ranges.push([s, Math.min(s + CHUNK - 1, to)]);
+  const out = [];
+  for (let i = 0; i < ranges.length; i += PARALLEL) {
+    const batch = ranges.slice(i, i + PARALLEL);
+    const results = await Promise.all(batch.map(([s, e]) => rawGetLogsHttp(addr, topic0, s, e)));
+    for (const r of results) out.push(...r);
+  }
+  return out;
+}
+async function rawFetchLogs(contract, eventName, from, to) {
+  const topic0 = contract.interface.getEvent(eventName).topicHash;
+  const raws = await rawLogsRange(contract.target, topic0, from, to);
+  return raws.map((r) => {
+    try {
+      const parsed = contract.interface.parseLog({ topics: r.topics, data: r.data });
+      return {
+        name: parsed.name, args: parsed.args,
+        blockNumber: parseInt(r.blockNumber, 16),
+        transactionHash: r.transactionHash,
+        logIndex: parseInt(r.logIndex, 16),
+      };
+    } catch (_) { return null; }
+  }).filter(Boolean);
+}
 const ACTIVITY_BUCKETS = 28;
 const BUCKET_MS = 60_000; // 1-minute buckets → 28-min activity window
 
@@ -332,12 +386,12 @@ async function coldStart() {
   let events = [];
   try {
     const [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip] = await Promise.all([
-      fetchLogs(hm, "ReactiveBetSettledHandled", from, head).catch(() => []),
-      fetchLogs(hm, "ReactiveHourlyTick",        from, head).catch(() => []),
-      fetchLogs(hm, "ReasoningRequested",        from, head).catch(() => []),
-      fetchLogs(hm, "RtpAnalysisRequested",      from, head).catch(() => []),
-      fetchLogs(hm, "RtpAnalysisResolved",       from, head).catch(() => []),
-      fetchLogs(hm, "AgentRequestSkipped",        from, head).catch(() => []),
+      rawFetchLogs(hm, "ReactiveBetSettledHandled", from, head).catch(() => []),
+      rawFetchLogs(hm, "ReactiveHourlyTick",        from, head).catch(() => []),
+      rawFetchLogs(hm, "ReasoningRequested",        from, head).catch(() => []),
+      rawFetchLogs(hm, "RtpAnalysisRequested",      from, head).catch(() => []),
+      rawFetchLogs(hm, "RtpAnalysisResolved",       from, head).catch(() => []),
+      rawFetchLogs(hm, "AgentRequestSkipped",        from, head).catch(() => []),
     ]);
     events = [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip].flat();
   } catch (e) { console.warn("[agent-activity] HM cold-start:", e.message); }
@@ -360,7 +414,7 @@ async function coldStart() {
   // is only 28 minutes. Sum BOTH the on-chain HM ReasoningRequested events
   // AND the off-chain hm-cron's ReasoningLog events emitted on the Casino.
   try {
-    const r24 = await fetchLogs(hm, "ReasoningRequested", dayBack, head).catch(() => []);
+    const r24 = await rawFetchLogs(hm, "ReasoningRequested", dayBack, head).catch(() => []);
     state.hm.reasoningCount24h = r24.length;
   } catch (_) {}
   // Casino-side ReasoningLog (from off-chain hm-cron narration).
@@ -368,9 +422,9 @@ async function coldStart() {
     const casino = new ethers.Contract(CONFIG.casino, CASINO_REASONING_ABI, provider());
     try {
       const [logs, bonus, rtp] = await Promise.all([
-        fetchLogs(casino, "ReasoningLog", from, head).catch(() => []),
-        fetchLogs(casino, "BonusModeActivated", from, head).catch(() => []),
-        fetchLogs(casino, "RtpAdjusted", from, head).catch(() => []),
+        rawFetchLogs(casino, "ReasoningLog", from, head).catch(() => []),
+        rawFetchLogs(casino, "BonusModeActivated", from, head).catch(() => []),
+        rawFetchLogs(casino, "RtpAdjusted", from, head).catch(() => []),
       ]);
       const allEv = [...logs, ...bonus, ...rtp];
       const newBlocks = [...new Set(allEv.map((e) => e.blockNumber).filter((b) => !tsByBlock.has(b)))];
@@ -383,7 +437,7 @@ async function coldStart() {
         pushEvent("hm", tsMs, casinoLabelFor(ev));
       }
       // Bump 24h counter with the off-chain narration too.
-      const logs24 = await fetchLogs(casino, "ReasoningLog", dayBack, head).catch(() => []);
+      const logs24 = await rawFetchLogs(casino, "ReasoningLog", dayBack, head).catch(() => []);
       state.hm.reasoningCount24h += logs24.length;
     } catch (e) { console.warn("[agent-activity] casino cold-start:", e.message); }
   }
