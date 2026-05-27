@@ -144,11 +144,28 @@ async function main() {
     console.log(`[deploy] funded bankroll: ${INITIAL_BANKROLL_ETH} STT`);
   }
 
-  // 7. Provision initial seed batch. Save unrevealed seeds for the house service.
+  // 7. Provision initial seed batch.
+  //
+  // If `SEED_MASTER_KEY` is set in the environment, derive the initial seeds
+  // deterministically from it (same `keccak256(master ‖ uint256(idx))`
+  // construction the reveal-bot uses for auto-topup). Result: the reveal-bot
+  // can reveal indices 0..N for any N using ONLY the master key, no seeds
+  // file ever needs to ship to Railway/Render. If the env var is missing
+  // we fall back to random seeds (legacy behaviour) and still write the
+  // preimages file the operator must hand-deploy.
+  const masterKey = process.env.SEED_MASTER_KEY || null;
+  if (masterKey && !/^0x[0-9a-fA-F]{64}$/.test(masterKey)) {
+    throw new Error(`SEED_MASTER_KEY must be a 32-byte 0x-prefixed hex string`);
+  }
+  function deriveSeed(idx) {
+    return ethers.keccak256(
+      ethers.solidityPacked(["bytes32", "uint256"], [masterKey, BigInt(idx)]),
+    );
+  }
   const seeds = [];
   const hashes = [];
   for (let i = 0; i < SEED_BATCH_SIZE; i++) {
-    const s = genServerSeed();
+    const s = masterKey ? deriveSeed(i) : genServerSeed();
     seeds.push(s);
     hashes.push(hashServerSeed(s));
   }
@@ -156,7 +173,11 @@ async function main() {
   // provisionSeedHashes via the owner fallback path.
   tx = await casino.provisionSeedHashes(hashes);
   await tx.wait();
-  console.log(`[deploy] provisioned ${SEED_BATCH_SIZE} seed hashes`);
+  if (masterKey) {
+    console.log(`[deploy] provisioned ${SEED_BATCH_SIZE} seed hashes (deterministic from SEED_MASTER_KEY - reveal-bot can settle without a seeds file)`);
+  } else {
+    console.log(`[deploy] provisioned ${SEED_BATCH_SIZE} seed hashes (random - reveal-bot needs the seeds file at deployments/seeds/)`);
+  }
 
   // 8. Write deployment manifest.
   const out = {
