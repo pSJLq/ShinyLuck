@@ -371,13 +371,14 @@ function updateLlmStats() {
 async function coldStart() {
   if (!CONFIG.houseManager || CONFIG.houseManager === ZERO) return;
   const head = await provider().getBlockNumber();
-  // ~30 minutes of blocks at ~400 ms each = 4500 blocks. Stay generous
-  // (5000) so cron events from the previous hour also land in the
-  // 24-hour reasoning counter.
-  const minutesBack = 30;
-  const blocksBack = Math.ceil((minutesBack * 60 * 1000) / 400) + 200;
-  const from = Math.max(0, head - blocksBack);
+  // 24 hours of blocks at ~400 ms each = 216k blocks. The hourly cron can
+  // stall for hours at a time (subscription edge cases), so a 30-min window
+  // misses everything when activity is sparse. The chart's 28-min bucket
+  // window still shows only recent buckets, but the "current thought"
+  // ticker needs a fresh-enough event to feel alive on cold load.
   const dayBack = Math.max(0, head - Math.ceil((24 * 60 * 60 * 1000) / 400));
+  const from = dayBack;
+  console.log(`[agent-activity] coldStart from block ${from} to ${head}`);
 
   // HouseManager contract handle (read-only).
   const hm = new ethers.Contract(CONFIG.houseManager, HM_ABI, provider());
@@ -394,6 +395,7 @@ async function coldStart() {
       rawFetchLogs(hm, "AgentRequestSkipped",        from, head).catch(() => []),
     ]);
     events = [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip].flat();
+    console.log(`[agent-activity] HM events loaded: reflex=${reflex.length} tick=${tick.length} reasoning=${reasoning.length} rtpReq=${rtpReq.length} rtpRes=${rtpRes.length} rtpSkip=${rtpSkip.length}`);
   } catch (e) { console.warn("[agent-activity] HM cold-start:", e.message); }
 
   // Need timestamps. Use block.timestamp via a small batch read; cap at the
