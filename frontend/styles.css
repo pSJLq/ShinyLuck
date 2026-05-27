@@ -2805,6 +2805,164 @@ pre.code-block .cmd { color: #fff; }
   border-color: var(--cyan);
 }
 
+/* Agent economics / cost ledger widget. Rendered on the lobby [03] section
+   below the four agent cards. Driven by lib/cost-ledger.js which aggregates
+   the last 24h of on-chain *Requested events and prices each one using the
+   live quoteLlmCost / quoteJsonCost from HouseManager. */
+.cost-ledger {
+  margin-top: 40px;
+  padding: 28px 32px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  background: linear-gradient(180deg, rgba(34, 211, 238, 0.04) 0%, rgba(139, 92, 246, 0.02) 100%);
+  border-radius: 0;
+}
+.cost-ledger-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.cost-ledger-head h3 {
+  font-size: 16px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin: 0 0 6px 0;
+  color: var(--fg);
+}
+.cost-ledger-sub {
+  font-size: 11px;
+  color: var(--fg-mute);
+  letter-spacing: 0.5px;
+}
+.cost-ledger-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--green, #22c55e);
+  padding: 4px 10px;
+  border: 1px solid var(--green, #22c55e);
+  border-radius: 2px;
+  font-family: var(--mono);
+}
+.cost-ledger-pill::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--green, #22c55e);
+  border-radius: 50%;
+  animation: cost-ledger-pulse 1.6s ease-in-out infinite;
+}
+@keyframes cost-ledger-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.3; }
+}
+.cost-ledger-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 24px;
+  margin-bottom: 28px;
+}
+.cost-stat {
+  border-left: 2px solid var(--cyan);
+  padding-left: 14px;
+}
+.cost-stat .cost-l {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: var(--fg-mute);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.cost-stat .cost-v {
+  font-size: 28px;
+  font-family: var(--mono);
+  color: var(--fg);
+  font-weight: 500;
+  line-height: 1.1;
+}
+.cost-stat .cost-sub {
+  font-size: 10px;
+  color: var(--fg-mute);
+  margin-top: 4px;
+  font-family: var(--mono);
+  letter-spacing: 0.5px;
+}
+.cost-breakdown {
+  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+  padding-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cost-row {
+  display: grid;
+  grid-template-columns: 200px 1fr 80px 100px;
+  align-items: center;
+  gap: 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.cost-row-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+}
+.cost-row-label::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.cost-row-bar {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+.cost-row-bar-fill {
+  height: 100%;
+  background: currentColor;
+  transition: width 240ms ease-out;
+  opacity: 0.7;
+}
+.cost-row-count {
+  color: var(--fg-mute);
+  text-align: right;
+  font-size: 11px;
+}
+.cost-row-amount {
+  text-align: right;
+  color: var(--fg);
+  font-weight: 500;
+}
+.cost-row.r-llm    { color: var(--purple-2, #a78bfa); }
+.cost-row.r-json   { color: var(--cyan, #22D3EE); }
+.cost-row.r-parse  { color: var(--amber, #fbbf24); }
+.cost-row.r-quorum { color: var(--green, #22c55e); }
+.cost-row.r-player { color: var(--red, #ef4444); }
+.cost-empty {
+  color: var(--fg-mute);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: center;
+  padding: 16px;
+  opacity: 0.6;
+}
+@media (max-width: 720px) {
+  .cost-row { grid-template-columns: 140px 1fr 60px 80px; gap: 10px; font-size: 11px; }
+  .cost-ledger { padding: 20px 18px; }
+}
+
 /* Deep-link to the public Somnia agent platform receipt for any displayed
    agent request. Used by lib/agent-activity.js (lobby ticker), lib/fair.js
    (Provably Fair quorum banner), and anywhere else we render a requestId. */

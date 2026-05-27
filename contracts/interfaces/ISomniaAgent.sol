@@ -156,6 +156,19 @@ interface IJsonApiAgent {
         external returns (int256 result);
 }
 
+/// @notice Parse Website Agent (agentId = 12875401142070969085). Fetches
+///         a URL and extracts content by CSS selector. Used here to scrape
+///         a public crypto-news / sentiment page once per cron tick and
+///         feed the headline into the LLM decision for Bonus Mode triggers.
+///         Per-worker cost: ~0.05 STT (slightly higher than JSON due to
+///         headless-browser overhead). Consensus = Majority.
+interface IParseWebsiteAgent {
+    /// @notice Fetch the inner text of the `index`-th element matching
+    ///         `cssSelector` on `url`. Returns "" if no match.
+    function parseText(string memory url, string memory cssSelector, uint8 index)
+        external returns (string memory result);
+}
+
 /// @dev Back-compat aliases - older files in this repo reference these names.
 ///      New code should use IAgentRequester / IAgentRequesterHandler.
 interface ISomniaAgentPlatform is IAgentRequester {}

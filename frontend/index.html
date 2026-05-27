@@ -13,6 +13,7 @@
 <script type="module" src="lib/wallet.js"></script>
 <script type="module" src="lib/livedata.js"></script>
 <script type="module" src="lib/agent-activity.js"></script>
+<script type="module" src="lib/cost-ledger.js"></script>
 </head>
 <body data-active-page="games">
 <div data-page-shell>
@@ -574,6 +575,43 @@
           <div class="agent-stat"><div class="l">Bankroll</div><div class="v" data-sl="bankroll">-</div></div>
         </div>
         <div class="agent-bar" style="color: var(--red)"></div>
+      </div>
+    </div>
+
+    <!-- Cost ledger: real economics of the agent stack, derived from on-chain
+         events in the last 24h. Click any row to see receipts. -->
+    <div class="cost-ledger" data-hover>
+      <div class="cost-ledger-head">
+        <div>
+          <h3>Agent economics</h3>
+          <span class="cost-ledger-sub">last 24 hours · on-chain events · every call is a Somnia Agent Platform receipt</span>
+        </div>
+        <span class="cost-ledger-pill" data-sl-cost-live>LIVE</span>
+      </div>
+      <div class="cost-ledger-grid">
+        <div class="cost-stat">
+          <div class="cost-l">Total spent</div>
+          <div class="cost-v" data-sl-cost-total>-</div>
+          <div class="cost-sub" data-sl-cost-total-usd></div>
+        </div>
+        <div class="cost-stat">
+          <div class="cost-l">Agent calls</div>
+          <div class="cost-v" data-sl-cost-count>-</div>
+          <div class="cost-sub">across all 4 agents</div>
+        </div>
+        <div class="cost-stat">
+          <div class="cost-l">Avg / call</div>
+          <div class="cost-v" data-sl-cost-avg>-</div>
+          <div class="cost-sub">platform-billed</div>
+        </div>
+        <div class="cost-stat">
+          <div class="cost-l">HM runway</div>
+          <div class="cost-v" data-sl-cost-runway>-</div>
+          <div class="cost-sub" data-sl-cost-runway-detail></div>
+        </div>
+      </div>
+      <div class="cost-breakdown" data-sl-cost-breakdown>
+        <div class="cost-empty">awaiting first 24h of events…</div>
       </div>
     </div>
   </div>
