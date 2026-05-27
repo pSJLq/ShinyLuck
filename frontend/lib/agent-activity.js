@@ -378,7 +378,6 @@ async function coldStart() {
   // ticker needs a fresh-enough event to feel alive on cold load.
   const dayBack = Math.max(0, head - Math.ceil((24 * 60 * 60 * 1000) / 400));
   const from = dayBack;
-  console.log(`[agent-activity] coldStart from block ${from} to ${head}`);
 
   // HouseManager contract handle (read-only).
   const hm = new ethers.Contract(CONFIG.houseManager, HM_ABI, provider());
@@ -395,7 +394,6 @@ async function coldStart() {
       rawFetchLogs(hm, "AgentRequestSkipped",        from, head).catch(() => []),
     ]);
     events = [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip].flat();
-    console.log(`[agent-activity] HM events loaded: reflex=${reflex.length} tick=${tick.length} reasoning=${reasoning.length} rtpReq=${rtpReq.length} rtpRes=${rtpRes.length} rtpSkip=${rtpSkip.length}`);
   } catch (e) { console.warn("[agent-activity] HM cold-start:", e.message); }
 
   // Need timestamps. Use block.timestamp via a small batch read; cap at the

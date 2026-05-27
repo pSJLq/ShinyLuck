@@ -205,21 +205,19 @@ async function backfill24h() {
     if (dep && dep > floor) floor = dep;
   } catch (_) {}
   if (floor < 0) floor = 0;
-  console.log(`[cost-ledger] backfill from block ${floor} to ${head} (${head - floor} blocks)`);
 
   const hm = new ethers.Contract(CONFIG.houseManager, HM_ABI, p);
   const tasks = [
-    fetchHmLogs(hm, "RtpAnalysisRequested",    floor, head).catch((e) => { console.warn("[cost-ledger] fetch RTP:", e.message); return []; }),
-    fetchHmLogs(hm, "CompetitorRtpRequested",  floor, head).catch((e) => { console.warn("[cost-ledger] fetch COMP:", e.message); return []; }),
-    fetchHmLogs(hm, "PlayerDecisionRequested", floor, head).catch((e) => { console.warn("[cost-ledger] fetch PLAYER:", e.message); return []; }),
+    fetchHmLogs(hm, "RtpAnalysisRequested",    floor, head).catch(() => []),
+    fetchHmLogs(hm, "CompetitorRtpRequested",  floor, head).catch(() => []),
+    fetchHmLogs(hm, "PlayerDecisionRequested", floor, head).catch(() => []),
   ];
   if (CONFIG.agentVerifier && CONFIG.agentVerifier !== ZERO) {
     const ver = new ethers.Contract(CONFIG.agentVerifier, VERIFIER_ABI, p);
-    tasks.push(fetchHmLogs(ver, "QuorumRequested", floor, head).catch((e) => { console.warn("[cost-ledger] fetch QUORUM:", e.message); return []; }));
+    tasks.push(fetchHmLogs(ver, "QuorumRequested", floor, head).catch(() => []));
   }
   const results = await Promise.all(tasks);
   const allLogs = results.flat();
-  console.log(`[cost-ledger] backfill found ${allLogs.length} raw logs (rtp=${results[0].length}, comp=${results[1].length}, player=${results[2].length}, quorum=${results[3]?.length || 0})`);
 
   // Resolve block timestamps in batch so we can filter to the last 24h
   // precisely (vs the 220k-block approximation).
@@ -233,22 +231,14 @@ async function backfill24h() {
   }));
 
   const cutoff = Date.now() - ONE_DAY_MS;
-  let keptCount = 0;
   for (const log of allLogs) {
     const tsMs = blockTs.get(log.blockNumber);
     if (!tsMs || tsMs < cutoff) continue;
-    // fetchLogs returns shape { name, args, blockNumber, transactionHash, logIndex }
-    // - the event name is at `log.name`, not log.fragment.name.
     const cat = categoryFor(log.name);
-    if (!cat) {
-      console.warn(`[cost-ledger] unrecognised event name "${log.name}"`);
-      continue;
-    }
+    if (!cat) continue;
     const rid = (log.args && log.args.requestId) ? log.args.requestId.toString() : `${log.transactionHash}-${log.logIndex}`;
     state.events.set(rid, { kind: cat, tsMs, requestId: rid });
-    keptCount++;
   }
-  console.log(`[cost-ledger] kept ${keptCount} events within last 24h`);
 }
 
 function pushLive(eventName, args, tsMs) {
