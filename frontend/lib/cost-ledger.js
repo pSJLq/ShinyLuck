@@ -114,10 +114,13 @@ async function fetchHmBalance() {
 }
 
 async function backfill24h() {
-  if (!CONFIG.houseManager || CONFIG.houseManager === ZERO) return;
+  if (!CONFIG.houseManager || CONFIG.houseManager === ZERO) {
+    console.warn("[cost-ledger] no houseManager in CONFIG, skipping backfill");
+    return;
+  }
   const p = provider();
   let head;
-  try { head = await p.getBlockNumber(); } catch { return; }
+  try { head = await p.getBlockNumber(); } catch (e) { console.warn("[cost-ledger] getBlockNumber:", e.message); return; }
   // Anchor scan to deploymentBlock so a freshly-rotated casino doesn't try
   // to read pre-genesis history. Falls back to head - 220k if no manifest.
   let floor = head - Number(ONE_DAY_BLOCKS);
@@ -126,22 +129,24 @@ async function backfill24h() {
     if (dep && dep > floor) floor = dep;
   } catch (_) {}
   if (floor < 0) floor = 0;
+  console.log(`[cost-ledger] backfill from block ${floor} to ${head} (${head - floor} blocks)`);
 
   const hm = new ethers.Contract(CONFIG.houseManager, HM_ABI, p);
   const tasks = [
-    fetchLogs(hm, "RtpAnalysisRequested",    floor, head).catch(() => []),
-    fetchLogs(hm, "CompetitorRtpRequested",  floor, head).catch(() => []),
-    fetchLogs(hm, "PlayerDecisionRequested", floor, head).catch(() => []),
+    fetchLogs(hm, "RtpAnalysisRequested",    floor, head).catch((e) => { console.warn("[cost-ledger] fetch RTP:", e.message); return []; }),
+    fetchLogs(hm, "CompetitorRtpRequested",  floor, head).catch((e) => { console.warn("[cost-ledger] fetch COMP:", e.message); return []; }),
+    fetchLogs(hm, "PlayerDecisionRequested", floor, head).catch((e) => { console.warn("[cost-ledger] fetch PLAYER:", e.message); return []; }),
   ];
   if (CONFIG.agentVerifier && CONFIG.agentVerifier !== ZERO) {
     const ver = new ethers.Contract(CONFIG.agentVerifier, VERIFIER_ABI, p);
-    tasks.push(fetchLogs(ver, "QuorumRequested", floor, head).catch(() => []));
+    tasks.push(fetchLogs(ver, "QuorumRequested", floor, head).catch((e) => { console.warn("[cost-ledger] fetch QUORUM:", e.message); return []; }));
   }
   const results = await Promise.all(tasks);
+  const allLogs = results.flat();
+  console.log(`[cost-ledger] backfill found ${allLogs.length} raw logs (rtp=${results[0].length}, comp=${results[1].length}, player=${results[2].length}, quorum=${results[3]?.length || 0})`);
 
   // Resolve block timestamps in batch so we can filter to the last 24h
   // precisely (vs the 220k-block approximation).
-  const allLogs = results.flat();
   const blockNums = [...new Set(allLogs.map((l) => l.blockNumber))];
   const blockTs = new Map();
   await Promise.all(blockNums.map(async (bn) => {
@@ -152,16 +157,22 @@ async function backfill24h() {
   }));
 
   const cutoff = Date.now() - ONE_DAY_MS;
+  let keptCount = 0;
   for (const log of allLogs) {
     const tsMs = blockTs.get(log.blockNumber);
     if (!tsMs || tsMs < cutoff) continue;
     // fetchLogs returns shape { name, args, blockNumber, transactionHash, logIndex }
     // - the event name is at `log.name`, not log.fragment.name.
     const cat = categoryFor(log.name);
-    if (!cat) continue;
+    if (!cat) {
+      console.warn(`[cost-ledger] unrecognised event name "${log.name}"`);
+      continue;
+    }
     const rid = (log.args && log.args.requestId) ? log.args.requestId.toString() : `${log.transactionHash}-${log.logIndex}`;
     state.events.set(rid, { kind: cat, tsMs, requestId: rid });
+    keptCount++;
   }
+  console.log(`[cost-ledger] kept ${keptCount} events within last 24h`);
 }
 
 function pushLive(eventName, args, tsMs) {
