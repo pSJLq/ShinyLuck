@@ -171,30 +171,20 @@ body { font-family: var(--mono); color: var(--ink-0); background: var(--bg-0); m
      column has cells" bug. */
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap:6px; max-width:760px; margin:0 auto;
-  /* align-items:start is CRITICAL: the default `stretch` overrides each
-     reel's aspect-ratio / explicit height, stretching it to the grid-row
-     height. During a spin the 27-cell strip then balloons the row and the
-     reel grows with it - so overflow:hidden never clips and symbols spill
-     below the frame ("reels move chaotically"). `start` lets the reel keep
-     its own definite height (aspect-ratio 1/3 + the px height JS sets at
-     spin time) so overflow always clips to exactly 3 rows. */
+  /* align-items:start so the grid never stretches a reel past the explicit
+     3*cellW height that JS pins on it - keeps overflow:hidden clipping to
+     exactly 3 rows during a spin. */
   align-items: start;
+  min-height: 360px;
 }
 .reel {
   position:relative; overflow:hidden; border-radius:4px;
   background: linear-gradient(180deg, #0a0c12, #07090f);
   border:1px solid rgba(255,255,255,.04);
-  /* CRITICAL FIX: give the reel a DEFINITE height purely in CSS via
-     aspect-ratio (1 wide : 3 tall = exactly 3 square cells). Previously
-     the reel only had `min-height`, so during a spin the 27-cell strip
-     would STRETCH the reel instead of being clipped by `overflow:hidden`
-     - that's the "reels fly off the boundary" bug. With a locked 1:3 box
-     the overflow always clips to the 3 visible rows, and the resting
-     layout no longer depends on the JS `_sizeReels` measurement winning
-     a race against first paint. */
-  aspect-ratio: 1 / 3;
-  /* Belt-and-suspenders: prevent the cell content from forcing the
-     grid item to grow beyond its allotted 1fr. */
+  /* Height is set in JS (_sizeReels / _spinToGrid) to exactly 3*cellW.
+     A min-height floor avoids a 0-height flash in the brief window after
+     the async wallet-gated mount but before _sizeReels measures width. */
+  min-height: 110px;
   min-width: 0;
 }
 .reel.anticipating { filter: drop-shadow(0 0 14px rgba(255,210,85,.5)); }
@@ -204,11 +194,8 @@ body { font-family: var(--mono); color: var(--ink-0); background: var(--bg-0); m
 .reel-strip { display:flex; flex-direction:column; will-change: transform; }
 .cell {
   position:relative; flex:0 0 auto; width:100%;
-  /* Square by construction (height == column width). Resting cells need
-     no JS-set height anymore; spinning cells still get an explicit px
-     height from _spinToGrid for the transform math (that inline value
-     overrides this and equals the same square size). */
-  aspect-ratio: 1 / 1;
+  /* Square cells: height is set in JS to equal the column width
+     (_sizeReels for resting cells, _spinToGrid for the scrolling strip). */
   display:grid; place-items:center;
   font-size:clamp(36px, 4.2vw, 64px); font-weight:800; letter-spacing:-1px; line-height:1;
   border-radius:4px;

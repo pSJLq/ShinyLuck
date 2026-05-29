@@ -67,27 +67,39 @@ export class Vault7Animator {
       this.reelsEl.appendChild(reel);
     }
     this._sizeReels();
-    new ResizeObserver(() => this._sizeReels()).observe(this.reelsEl);
+    // Observe a REEL (a grid item), not the container. The container's width
+    // is stable (max-width:760px) so observing it never catches the moment a
+    // reel goes from 0 → real width after the async mount. The grid item's
+    // width DOES change then, so this fires _sizeReels at exactly the right
+    // time and the resting glyphs appear instead of staying collapsed.
+    const firstReel = this.reelsEl.querySelector('.reel');
+    if (firstReel) new ResizeObserver(() => this._sizeReels()).observe(firstReel);
   }
 
   _sizeReels() {
-    // Layout is now owned ENTIRELY by CSS (.reel { aspect-ratio: 1/3 } +
-    // .cell { aspect-ratio: 1 }). We no longer write inline pixel heights
-    // here - that JS-measurement path was the root of the "only one column
-    // / giant cells / reels fly off" bugs (a bad clientWidth reading during
-    // the async wallet-gated mount poisoned every reel's height and the
-    // ResizeObserver on the container never re-fired to correct it).
-    //
-    // All this does now is strip any stale inline heights a previously
-    // cached build may have left on the resting cells, so they fall back
-    // to the CSS aspect-ratio box. Skipped mid-spin so we never disturb the
-    // transform-driven strip that _spinToGrid manages.
+    // Pin every reel to a 3-cell box (height = 3*cellW) and make resting
+    // cells square. Identical to the proven reference design. The ONLY
+    // extra robustness vs the reference: a retry guard, because our reels
+    // mount asynchronously (behind the wallet-connect gate) so the very
+    // first call can land before the grid has a real width. We retry on the
+    // next animation frame until clientWidth is real; the ResizeObserver in
+    // _build (now watching a reel, not the container) catches the 0→real
+    // width transition too. Skipped mid-spin so we never fight _spinToGrid.
     if (this.frameEl && this.frameEl.classList.contains('spinning')) return;
     const reels = $$('.reel', this.reelsEl);
+    if (!reels.length) return;
+    const w = reels[0].clientWidth;
+    if (w < 10) {
+      if (this._pendingSize) return;
+      this._pendingSize = true;
+      requestAnimationFrame(() => { this._pendingSize = false; this._sizeReels(); });
+      return;
+    }
+    const cellH = Math.round(w);
     for (const r of reels) {
-      if (r.style.height) r.style.height = '';
+      r.style.height = (cellH * ROWS) + 'px';
       const strip = $('.reel-strip', r);
-      if (strip) $$('.cell', strip).forEach(c => { if (c.style.height) c.style.height = ''; });
+      if (strip) $$('.cell', strip).forEach(c => c.style.height = cellH + 'px');
     }
   }
 
