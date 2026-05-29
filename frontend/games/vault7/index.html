@@ -108,7 +108,10 @@
       const ZERO32 = '0x' + '0'.repeat(64);
       if (ss && typeof ss === 'string' && ss !== ZERO32) {
         const fsv = document.querySelector('[data-fair-server]');
-        if (fsv) fsv.textContent = ss.slice(0, 10) + '…' + ss.slice(-8);
+        // Show the FULL revealed server seed (matches the client-seed row,
+        // which is shown in full) so it's copy-pasteable for verification -
+        // not a truncated …with dots… version.
+        if (fsv) { fsv.textContent = ss; fsv.style.wordBreak = 'break-all'; }
       }
     } catch (_) {}
   }

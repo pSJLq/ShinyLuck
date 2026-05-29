@@ -14,7 +14,16 @@ let _provider = null;
 export function provider() {
   if (!_provider) {
     const net = CHAINS[CONFIG.network] || CHAINS.somniaTestnet;
-    _provider = new ethers.JsonRpcProvider(net.rpcUrls[0]);
+    // batchMaxCount:1 disables ethers v6 JSON-RPC request batching. Somnia's
+    // public RPC rejects batched eth_getLogs payloads, which silently broke
+    // the chunked historical fetch in account.js / livedata.js / fair.js on
+    // the deployed site (recent bets, incl. VAULT.7, never loaded). One HTTP
+    // request per call is a touch chattier but actually works. staticNetwork
+    // skips a redundant eth_chainId round-trip on every call.
+    _provider = new ethers.JsonRpcProvider(net.rpcUrls[0], undefined, {
+      batchMaxCount: 1,
+      staticNetwork: true,
+    });
     // Best-effort: try the WS endpoint for push subscriptions (block ticker,
     // live feed). Falls back silently to the JSON-RPC provider if the gateway
     // doesn't speak websockets.

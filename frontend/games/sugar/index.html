@@ -466,6 +466,11 @@
           const bal = await SL.getNativeBalance();
           if (currentSlot?.updateBalance) currentSlot.updateBalance(bal);
         } catch (_) {}
+        // Also re-pull RTP here: the one-shot mount fetch + RtpAdjusted WS sub
+        // can miss an agent adjustment that happened while this tab was
+        // backgrounded or before the WS connected, leaving the hero stuck at
+        // a stale 92%. This poll guarantees it converges to the on-chain value.
+        refreshRtp();
       }, 8000);
       addEventListener('beforeunload', () => clearInterval(balPoll));
 
