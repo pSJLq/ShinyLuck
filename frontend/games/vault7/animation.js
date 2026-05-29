@@ -226,6 +226,13 @@ export class Vault7Animator {
     const SCROLL = 24;
     for (let c = 0; c < COLS; c++) {
       const strip = strips[c];
+      // FORCE the reel to a definite 3-cell box at spin time. This is the
+      // single reliable moment (the user clicked SPIN, the frame is on
+      // screen, clientWidth is valid). Combined with `.reels{align-items:
+      // start}` so the grid can't stretch it back, this guarantees
+      // overflow:hidden clips the 27-cell strip to exactly the 3 visible
+      // rows - no more symbols spilling below the frame.
+      reels[c].style.height = (cellH * ROWS) + 'px';
       strip.style.transition = 'none';
       strip.innerHTML = '';
       for (let i = 0; i < SCROLL + ROWS; i++) {
