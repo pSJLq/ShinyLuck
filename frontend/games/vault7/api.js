@@ -112,7 +112,14 @@ export class Vault7Slot {
       return;
     }
 
-    this.freeSpinsRemaining = result.freeSpinsTriggered || 0;
+    // Production returns the authoritative on-chain remaining (set by
+    // onSpinRequest from Casino.freeSpinsAvailable). Demo has no such field,
+    // so fall back to the engine's freeSpinsTriggered. Using the chain value
+    // is what fixes "badge vanished + next spin charged" - the badge now
+    // tracks real credits and free spins stay free.
+    this.freeSpinsRemaining = (result.freeSpinsRemaining != null)
+      ? result.freeSpinsRemaining
+      : (result.freeSpinsTriggered || 0);
     this._updateUI();
 
     // Mark this play() as user-initiated. The animator's play() refuses
@@ -158,6 +165,14 @@ export class Vault7Slot {
         $('[data-auto]', this.container).classList.remove('active');
         this._updateAutoLbl();
       }
+    } else if (this.freeSpinsRemaining > 0 && this.mode === 'production' && !this.busy) {
+      // Auto-advance the free-spin chain: each remaining credit is a free
+      // on-chain bet, so play them out automatically (~1s apart) rather than
+      // making the player click SPIN for each. The busy guard + spin()'s own
+      // `if (this.busy) return` prevent any collision with a manual click.
+      setTimeout(() => {
+        if (!this.busy && this.freeSpinsRemaining > 0) this.spin(false);
+      }, this.turbo ? 600 : 1200);
     }
   }
 

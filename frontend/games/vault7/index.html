@@ -138,12 +138,21 @@
         onSpinRequest: async (stakeWei) => {
           // Per-step timing log so the wait breakdown is visible in DevTools.
           const tStart = performance.now();
+          // Free-spin credits live ON-CHAIN (Casino.freeSpinsAvailable). If the
+          // player has any, this spin consumes one for free (placeSlotsBet with
+          // useFreeSpin=true → no charge, ×2 multiplier); otherwise it's a
+          // normal paid spin. This is the real FREE SPINS path - previously the
+          // page always sent useFreeSpin=false, so the on-chain credits were
+          // never spent and every spin (incl. the bonus round) was charged.
+          let useFree = false;
+          try { useFree = (await SL.casino.freeSpinsAvailable(SL.address)) > 0n; } catch (_) {}
+
           const t1 = performance.now();
-          const stake = await clampOrToast(stakeWei, 'slots');
+          const stake = useFree ? stakeWei : await clampOrToast(stakeWei, 'slots');
           const clampMs = performance.now() - t1;
 
           const t2 = performance.now();
-          const placeRes = await SL.placeSlots(Number(stake) / 1e18, false);
+          const placeRes = await SL.placeSlots(Number(stake) / 1e18, useFree);
           const placeMs = performance.now() - t2;
 
           const t3 = performance.now();
@@ -151,10 +160,14 @@
           const waitMs = performance.now() - t3;
 
           const totalMs = performance.now() - tStart;
-          console.log(`[vault7] spin total ${totalMs.toFixed(0)}ms  (clamp ${clampMs.toFixed(0)}ms · place ${placeMs.toFixed(0)}ms · wait ${waitMs.toFixed(0)}ms)`);
+          console.log(`[vault7] spin total ${totalMs.toFixed(0)}ms  (clamp ${clampMs.toFixed(0)}ms · place ${placeMs.toFixed(0)}ms · wait ${waitMs.toFixed(0)}ms)${useFree ? ' [FREE SPIN]' : ''}`);
 
           updateFairPanel(settled, placeRes.betId);
-          return decodeVault7Result({ settled, stakeWei: stake, isBuyBonus: false });
+          const result = decodeVault7Result({ settled, stakeWei: stake, isBuyBonus: false });
+          // Authoritative remaining free-spin balance straight from the
+          // contract (post-settle) so the badge + paid/free gating are exact.
+          try { result.freeSpinsRemaining = Number(await SL.casino.freeSpinsAvailable(SL.address)); } catch (_) {}
+          return result;
         },
         onBuyBonusRequest: async (stakeWei) => {
           const free = await SL.casino.freeBankroll();
@@ -169,7 +182,11 @@
           const placeRes = await SL.buyBonusVault7(Number(stake) / 1e18);
           const settled = await SL.waitForSettle(placeRes.betId);
           updateFairPanel(settled, placeRes.betId);
-          return decodeVault7Result({ settled, stakeWei: stake, isBuyBonus: true });
+          const result = decodeVault7Result({ settled, stakeWei: stake, isBuyBonus: true });
+          // Buy-bonus awards the free-spin credits on-chain - read the real
+          // count so the badge shows + the subsequent spins run for free.
+          try { result.freeSpinsRemaining = Number(await SL.casino.freeSpinsAvailable(SL.address)); } catch (_) {}
+          return result;
         },
         onSpinCompleted: async () => {
           try {
