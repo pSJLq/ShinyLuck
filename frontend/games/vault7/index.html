@@ -88,6 +88,31 @@
   let currentSlot = null;
   let mounting = false;
 
+  // Replace the session placeholder in the Provably Fair side-panel with the
+  // REAL on-chain values from a settled bet: the actual betId (nonce), the
+  // client seed the contract recorded, and the revealed server seed. This is
+  // what makes the panel verifiable rather than a baked-in display.
+  function updateFairPanel(settled, betId) {
+    try {
+      if (betId != null) {
+        const fn = document.querySelector('[data-fair-nonce]');
+        if (fn) fn.textContent = String(betId).padStart(6, '0');
+      }
+      const a = (settled && settled.args) ? settled.args : (settled || {});
+      const cs = settled?.clientSeed || a.clientSeed;
+      if (cs && typeof cs === 'string') {
+        const fc = document.querySelector('[data-fair-client]');
+        if (fc) fc.textContent = cs;
+      }
+      const ss = settled?.serverSeed || a.serverSeed;
+      const ZERO32 = '0x' + '0'.repeat(64);
+      if (ss && typeof ss === 'string' && ss !== ZERO32) {
+        const fsv = document.querySelector('[data-fair-server]');
+        if (fsv) fsv.textContent = ss.slice(0, 10) + '…' + ss.slice(-8);
+      }
+    } catch (_) {}
+  }
+
   async function mountProduction() {
     if (mounting || currentSlot) return;
     if (!SL.address || !SL.signer) {
@@ -128,6 +153,7 @@
           const totalMs = performance.now() - tStart;
           console.log(`[vault7] spin total ${totalMs.toFixed(0)}ms  (clamp ${clampMs.toFixed(0)}ms · place ${placeMs.toFixed(0)}ms · wait ${waitMs.toFixed(0)}ms)`);
 
+          updateFairPanel(settled, placeRes.betId);
           return decodeVault7Result({ settled, stakeWei: stake, isBuyBonus: false });
         },
         onBuyBonusRequest: async (stakeWei) => {
@@ -142,6 +168,7 @@
           const stake = await clampOrToast(stakeWei, 'slots');
           const placeRes = await SL.buyBonusVault7(Number(stake) / 1e18);
           const settled = await SL.waitForSettle(placeRes.betId);
+          updateFairPanel(settled, placeRes.betId);
           return decodeVault7Result({ settled, stakeWei: stake, isBuyBonus: true });
         },
         onSpinCompleted: async () => {
@@ -154,6 +181,28 @@
       if (currentSlot.animator) currentSlot.animator.setTurbo(true);
       currentSlot.turbo = true;
       window.slot = currentSlot;
+
+      // Live RTP from the contract (slots = game id 2). The LLM RTP agent
+      // flexes it via casino.adjustSlotRTP; pull once now + on every
+      // RtpAdjusted so the hero figure is the real on-chain value, not a
+      // baked-in 92%. Mirrors the Sugar page.
+      async function refreshRtp() {
+        try {
+          const rtp = await SL.casino.getReportedRTP(2);
+          if (!rtp) return;
+          const pct = (Number(rtp) / 100).toFixed(2) + '%';
+          document.querySelectorAll('[data-sl="rtp"][data-game="slots"]').forEach((el) => { el.textContent = pct; });
+        } catch (_) {}
+      }
+      refreshRtp();
+      try {
+        const { wsProvider } = await import('/lib/rpc.js');
+        const ws2 = wsProvider && wsProvider();
+        if (ws2) {
+          const topicRtp = SL.casino.interface.getEvent('RtpAdjusted').topicHash;
+          ws2.on({ address: SL.casino.target, topics: [topicRtp] }, refreshRtp);
+        }
+      } catch (_) {}
     } catch (e) {
       console.error('[vault7] mount failed:', e);
       prompt.style.display = '';

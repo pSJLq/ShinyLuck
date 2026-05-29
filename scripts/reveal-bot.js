@@ -209,6 +209,54 @@ async function main() {
   maybeAutoTopupSeeds().catch(() => {});
   setInterval(() => { maybeAutoTopupSeeds().catch(() => {}); }, SEED_TOPUP_CHECK_MS);
 
+  // ─────────────────────── AGENT WATCHDOG (keeper) ──────────────────────────
+  // The HouseManager runs a self-rescheduling Reactivity cron (precompile
+  // 0x0100) - that's the autonomous mechanism. But on Somnia testnet the
+  // scheduled-subscription delivery is flaky: validators occasionally drop
+  // the re-schedule, so the cron silently stops firing after a tick or two.
+  // Since this reveal-bot already runs 24/7 (and its signer is the casino
+  // owner), it doubles as a watchdog: if the last hourly tick is stale, it
+  // (a) reboots the cron and (b) directly fires the agent chain so the
+  // lobby's agent cards + cost ledger keep showing fresh on-chain activity
+  // through the demo window. Disable with AGENT_WATCHDOG=0.
+  const AGENT_WATCHDOG       = process.env.AGENT_WATCHDOG !== "0";
+  const WATCHDOG_CHECK_MS    = parseInt(process.env.AGENT_WATCHDOG_CHECK_MS || "600000", 10); // 10 min
+  const WATCHDOG_STALE_S     = parseInt(process.env.AGENT_WATCHDOG_STALE_S  || "1800", 10);   // 30 min
+  const MIN_HM_BAL           = ethers.parseEther("33"); // 32 floor + headroom for one chain
+  let watchdogBusy = false;
+  async function agentWatchdog() {
+    if (!AGENT_WATCHDOG || watchdogBusy) return;
+    watchdogBusy = true;
+    try {
+      const hm = await ethers.getContractAt("HouseManager", manifest.addresses.houseManager, signer);
+      const bal = await provider.getBalance(manifest.addresses.houseManager);
+      if (bal < MIN_HM_BAL) return; // can't afford an agent call; leave it
+      const lastTick = await hm.lastHourlyTickTs();
+      const ageS = Math.floor(Date.now() / 1000) - Number(lastTick);
+      if (Number(lastTick) > 0 && ageS < WATCHDOG_STALE_S) return; // cron is healthy
+      console.log(`[reveal-bot] agent-watchdog: cron stale (${ageS}s) - rebooting + firing agent chain`);
+      // Reboot the self-cron so the on-chain mechanism resumes too.
+      try { const tx = await hm.rebootHourlyTick(); await tx.wait(); } catch (e) { console.warn(`[reveal-bot] watchdog reboot: ${e.shortMessage || e.message}`); }
+      // Directly fire one full chain so activity shows immediately - each is
+      // try/catch'd so a single failure (e.g. smart-skip) doesn't abort.
+      const fire = async (label, fn) => {
+        try { const tx = await fn(); await tx.wait(); console.log(`[reveal-bot] watchdog fired ${label} (${tx.hash.slice(0,12)}…)`); }
+        catch (e) { /* smart-skip / insufficient-balance are normal */ }
+      };
+      await fire("rtp-slots",   () => hm.requestRtpAnalysis(2));
+      await fire("rtp-cluster", () => hm.requestRtpAnalysis(6));
+      await fire("comp-slots",  () => hm.requestCompetitorRtp(2));
+      await fire("news",        () => hm.requestNewsHeadline());
+    } catch (e) {
+      console.warn(`[reveal-bot] agent-watchdog: ${e.shortMessage || e.message}`);
+    } finally {
+      watchdogBusy = false;
+    }
+  }
+  // First check 90s after boot (let the chain settle), then every 10 min.
+  setTimeout(() => { agentWatchdog().catch(() => {}); }, 90_000);
+  setInterval(() => { agentWatchdog().catch(() => {}); }, WATCHDOG_CHECK_MS);
+
   const currentBlock0 = await provider.getBlockNumber();
 
   // ───────────────────────── PUSH PATH (WebSocket) ──────────────────────────

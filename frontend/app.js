@@ -15,7 +15,9 @@ document.addEventListener('click', (e) => {
 // are polished (sugar, dice) and which are still rough. pointer-events:none
 // keeps the card clickable through the sticker.
 document.addEventListener('DOMContentLoaded', () => {
-  const BETA_GAMES = ['crash', 'vault7', 'mines', 'plinko', 'roulette'];
+  // vault7 graduated out of beta (reels + spin fully working), so it no
+  // longer gets a BETA card sticker - same tier as sugar/dice now.
+  const BETA_GAMES = ['crash', 'mines', 'plinko', 'roulette'];
   document.querySelectorAll('a.game[href*="games/"]').forEach((card) => {
     const href = (card.getAttribute('href') || '').toLowerCase();
     if (!BETA_GAMES.some((g) => href.includes('/' + g))) return;

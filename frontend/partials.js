@@ -300,7 +300,9 @@
     // excluded so the lobby's most-promoted titles look polished.
     const path = (location.pathname || "").toLowerCase();
     const isGamePage = /\/games\//.test(path);
-    const isStableGame = /\/games\/(sugar|dice)/.test(path);
+    // sugar, dice AND vault7 are the polished, fully-working titles - no
+    // TESTING ribbon on them.
+    const isStableGame = /\/games\/(sugar|dice|vault7)/.test(path);
     if (isGamePage && !isStableGame && !document.querySelector('.sl-testing-ribbon')) {
       const ribbon = document.createElement('div');
       ribbon.className = 'sl-testing-ribbon';
