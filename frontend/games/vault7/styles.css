@@ -191,7 +191,18 @@ body { font-family: var(--mono); color: var(--ink-0); background: var(--bg-0); m
 .reel.anticipating::after { content:""; position:absolute; inset:0; background: radial-gradient(circle at 50% 50%, rgba(255,210,85,.18), transparent 70%); pointer-events:none; animation: anticipate-pulse .5s ease-in-out infinite; }
 @keyframes anticipate-pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
 
-.reel-strip { display:flex; flex-direction:column; will-change: transform; }
+.reel-strip {
+  display:flex; flex-direction:column; will-change: transform;
+  /* CRITICAL: the global frontend/styles.css (loaded before this file)
+     defines `.reel-strip { animation: spin 2.4s infinite }` for the lobby's
+     decorative background slot. That class name collides with ours, and
+     since our rule never reset `animation`, the infinite scroll leaked into
+     VAULT.7 - the reels spun forever on load with no spin button pressed
+     ("slots move on their own / chaotic / only one symbol visible mid-
+     scroll"). Reset it so our reels are dead-still until _spinToGrid drives
+     them via an explicit transform. */
+  animation: none !important;
+}
 .cell {
   position:relative; flex:0 0 auto; width:100%;
   /* Square cells: height is set in JS to equal the column width
