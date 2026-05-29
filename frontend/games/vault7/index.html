@@ -11,9 +11,9 @@
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/games/vault7/styles.css">
 <style>
-  /* Native cursor on slot pages - same rationale as sugar/index.html. */
-  html, body { cursor: auto !important; }
-  .cursor-dot, .cursor-ring { display: none !important; }
+  /* Custom RAF cursor (from partials.js) stays ON for vault7 - the page
+     is light enough. Only the heavy ambient orb background is disabled
+     to keep the reel animation at 60fps. */
   .vault-shell .ambient,
   .vault-shell .ambient-orb { display: none !important; }
 

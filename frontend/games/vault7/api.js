@@ -190,7 +190,7 @@ export class Vault7Slot {
       <p class="lede">Five reels, twenty paylines, ×2 free-spin multiplier. Wilds substitute, scatters pay anywhere. Every reel position signed by the contract.</p>
     </div>
     <div class="hero-meta">
-      <div class="m">RTP<b class="cyan">92.00%</b></div>
+      <div class="m">RTP<b class="cyan" data-sl="rtp" data-game="slots">92.00%</b></div>
       <div class="m">Volatility<b class="purple">HIGH</b></div>
       <div class="m">Max Win<b class="gold">10,000×</b></div>
       <div class="m">Mechanic<b class="purple">20 LINES · CLASSIC</b></div>
@@ -257,7 +257,7 @@ export class Vault7Slot {
           <div class="lbl">BALANCE</div>
           <div class="balance"><span class="cur">STT</span><span data-balance>1,000.00</span></div>
           <div class="last-win zero" data-last-win>- no win yet</div>
-          <div class="ev-note">Honest 92% RTP - published from contract</div>
+          <div class="ev-note">Honest RTP - published live from the contract</div>
         </div>
       </div>
     </div>

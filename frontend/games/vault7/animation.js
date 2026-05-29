@@ -71,23 +71,23 @@ export class Vault7Animator {
   }
 
   _sizeReels() {
+    // Layout is now owned ENTIRELY by CSS (.reel { aspect-ratio: 1/3 } +
+    // .cell { aspect-ratio: 1 }). We no longer write inline pixel heights
+    // here - that JS-measurement path was the root of the "only one column
+    // / giant cells / reels fly off" bugs (a bad clientWidth reading during
+    // the async wallet-gated mount poisoned every reel's height and the
+    // ResizeObserver on the container never re-fired to correct it).
+    //
+    // All this does now is strip any stale inline heights a previously
+    // cached build may have left on the resting cells, so they fall back
+    // to the CSS aspect-ratio box. Skipped mid-spin so we never disturb the
+    // transform-driven strip that _spinToGrid manages.
+    if (this.frameEl && this.frameEl.classList.contains('spinning')) return;
     const reels = $$('.reel', this.reelsEl);
-    if (!reels.length) return;
-    const w = reels[0].clientWidth;
-    // GUARD (per design diagnosis): if the container hasn't been
-    // laid out yet, w is 0, cells get height: 0, and the entire grid
-    // collapses. We retry on the next rAF tick until the container has
-    // a real size. ResizeObserver picks up any subsequent change.
-    if (w < 10) {
-      if (this._pendingSize) return;
-      this._pendingSize = true;
-      requestAnimationFrame(() => { this._pendingSize = false; this._sizeReels(); });
-      return;
-    }
-    const cellH = Math.round(w);
     for (const r of reels) {
-      r.style.height = (cellH * 3) + 'px';
-      $$('.cell', r).forEach(c => c.style.height = cellH + 'px');
+      if (r.style.height) r.style.height = '';
+      const strip = $('.reel-strip', r);
+      if (strip) $$('.cell', strip).forEach(c => { if (c.style.height) c.style.height = ''; });
     }
   }
 
