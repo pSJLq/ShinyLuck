@@ -17,7 +17,17 @@ import { ethers } from "/vendor/ethers.bundle.js";
 import { RouletteGame } from "./roulette-ui.js";
 import { SL, connect } from "../wallet.js";
 import { CONFIG } from "../config.js";
+import { CHAINS } from "../shinyluck-sdk.js";
 import { provider, fetchRecentLogs } from "../rpc.js";
+
+// Shannon Explorer base for verify-links (same source the per-bet games use).
+function explorerTxUrl(hash) {
+  try {
+    const net = CHAINS[CONFIG.network] || CHAINS.somniaTestnet;
+    const base = (net.blockExplorerUrls[0] || "").replace(/\/$/, "");
+    return hash ? `${base}/tx/${hash}` : base;
+  } catch (_) { return "#"; }
+}
 
 // Casino.RouletteBetKind enum - MUST match the contract.
 const KIND = {
@@ -121,14 +131,41 @@ async function claimAndRefresh() {
   refreshBalance();
 }
 
-async function onSettled(id, resultNumber) {
+async function onSettled(id, resultNumber, fair) {
   if (!game || resolvedRounds.has(id)) return;
   resolvedRounds.add(id);
   resolving = true;
   try { await game.resolveRound(displayResult(resultNumber)); } catch (_) {}
   resolving = false;
+  // Provably-fair: show the REAL revealed server seed + randomness from the
+  // RouletteRoundSettled event, with a Shannon Explorer link to verify.
+  try {
+    game.setFair({
+      roundId: id,
+      result: displayResult(resultNumber),
+      serverSeed: fair && fair.serverSeed,
+      randomness: fair && fair.randomness,
+      explorerUrl: fair && fair.txHash ? explorerTxUrl(fair.txHash) : explorerTxUrl(),
+    });
+  } catch (_) {}
   if (placedRounds.has(id)) { placedRounds.delete(id); claimAndRefresh(); }
   tick();
+}
+
+// Pull serverSeed + randomness for a settled round from its event log so the
+// fair panel can be populated even when settle was detected via the poll path
+// (which only reads the round struct, not the event's randomness field).
+async function fetchFair(roundId) {
+  try {
+    const evs = await fetchRecentLogs(casino(), "RouletteRoundSettled", {
+      minCount: 1, maxLookback: 50_000,
+      filter: (e) => Number(e.args.roundId) === Number(roundId),
+    });
+    if (evs.length) {
+      return { serverSeed: evs[0].args.serverSeed, randomness: evs[0].args.randomness, txHash: evs[0].transactionHash };
+    }
+  } catch (_) {}
+  return null;
 }
 
 // One reconcile pass: (1) if the round we're showing has settled, spin it;
@@ -140,7 +177,8 @@ async function tick() {
     if (uiRoundId >= 0 && !resolvedRounds.has(uiRoundId)) {
       const r = await casino().getRouletteRound(uiRoundId);
       if (Boolean(r.settled ?? r[4])) {
-        await onSettled(uiRoundId, Number(r.resultNumber ?? r[5]));
+        const fair = await fetchFair(uiRoundId);
+        await onSettled(uiRoundId, Number(r.resultNumber ?? r[5]), fair || { serverSeed: r.serverSeed ?? r[6] });
         return;
       }
     }
@@ -203,7 +241,10 @@ function mount() {
   // live chain subscriptions (read-only provider). tick() reconciles state.
   try {
     const c = casino();
-    c.on("RouletteRoundSettled", (roundId, resultNumber) => { onSettled(Number(roundId), Number(resultNumber)); });
+    c.on("RouletteRoundSettled", (roundId, resultNumber, serverSeed, randomness, ev) => {
+      const txHash = ev && (ev.log ? ev.log.transactionHash : ev.transactionHash);
+      onSettled(Number(roundId), Number(resultNumber), { serverSeed, randomness, txHash });
+    });
     c.on("RouletteRoundStarted", () => { tick(); });
     c.on("RouletteBetPlaced", (roundId, player, kind, number, amount) => {
       // Surface OTHER players' bets in the live feed (our own already show).

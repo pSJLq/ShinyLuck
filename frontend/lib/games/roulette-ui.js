@@ -700,8 +700,17 @@ export class RouletteGame {
             </div>
           </div>
           <div class="rl-card rl-feed-card" style="flex:1">
-            <div class="rl-card-head"><span class="rl-k">live table</span><span class="rl-more" data-feedcount>0 online</span></div>
+            <div class="rl-card-head"><span class="rl-k">live table</span><span class="rl-more" data-feedcount>live</span></div>
             <div class="rl-feed" data-feed></div>
+          </div>
+          <div class="rl-card rl-fair-card">
+            <div class="rl-card-head"><span class="rl-k">provably fair</span><a class="rl-more rl-fair-link" data-fairlink href="#" target="_blank" rel="noopener" style="display:none">verify ↗</a></div>
+            <div class="rl-fair-grid">
+              <span class="rl-fair-k">round</span><span class="rl-fair-v" data-fairround>-</span>
+              <span class="rl-fair-k">result</span><span class="rl-fair-v" data-fairresult>-</span>
+              <span class="rl-fair-k">server seed</span><span class="rl-fair-v rl-fair-seed" data-fairserver>awaiting settle</span>
+              <span class="rl-fair-k">randomness</span><span class="rl-fair-v rl-fair-seed" data-fairrand>-</span>
+            </div>
           </div>
         </div>
       </div>
@@ -724,6 +733,8 @@ export class RouletteGame {
       rbbar: q("[data-rbbar]"), oebar: q("[data-oebar]"), rbval: q("[data-rbval]"), oeval: q("[data-oeval]"),
       hot: q("[data-hot]"), cold: q("[data-cold]"),
       feed: q("[data-feed]"), feedcount: q("[data-feedcount]"),
+      fairRound: q("[data-fairround]"), fairResult: q("[data-fairresult]"),
+      fairServer: q("[data-fairserver]"), fairRand: q("[data-fairrand]"), fairLink: q("[data-fairlink]"),
       toasts: q("[data-toasts]"), fx: q("[data-fx]"),
     };
     this.$wheelCanvas = this.$.wheelCanvas;
@@ -1121,8 +1132,11 @@ export class RouletteGame {
   _beginOpenRound(roundId, windowMs, bettors) {
     this.roundId = roundId;
     this.$.round.textContent = "#" + roundId;
-    this.bettorCount = bettors || this.bettorCount;
+    // Respect an explicit count from the host (incl. 0 for a fresh on-chain
+    // round) - `bettors || prev` would have kept a stale number on 0.
+    if (bettors != null) this.bettorCount = bettors;
     this.$.players.textContent = this.bettorCount;
+    if (this.o.mode !== "demo") this.$.feedcount.textContent = this.bettorCount > 0 ? this.bettorCount + " betting" : "live";
     this.lockedBets = null;
     this._clearWinStates();
     this._setPhase("open");
@@ -1147,13 +1161,20 @@ export class RouletteGame {
   }
 
   _engineOpenFromHost() {
-    // production: wait for host setRound; show idle open state meanwhile
+    // production: wait for host setRound; show idle open state meanwhile.
+    // NO demo feed/sim here - players, the live-table feed and table stats
+    // are driven ONLY by real on-chain events the host pushes in
+    // (pushCommunityBet on RouletteBetPlaced, setRound bettorCount from the
+    // chain, recent from RouletteRoundSettled). Starting at 0 players is the
+    // honest number for a fresh testnet round; it ticks up as real bets land.
     this._setPhase("open");
     this.$.countcap.textContent = "waiting for round";
+    this.bettorCount = 0;
+    this.$.players.textContent = "0";
+    this.$.feedcount.textContent = "live";
     if (typeof this.o.getRound === "function") {
       this.o.getRound().then(r => r && this.setRound(r)).catch(() => {});
     }
-    this._startFeed();
   }
 
   /* ====================== PUBLIC HOST API ====================== */
@@ -1233,6 +1254,23 @@ export class RouletteGame {
     this.root.classList.toggle("rl-bonus", this.bonus);
     this._wheel.setBonus(this.bonus);
     if (on) this._toast("⚡ BONUS MODE ACTIVATED", "win");
+  }
+
+  /** Populate the provably-fair card from a real settled round. The host
+   *  passes the on-chain serverSeed + randomness from RouletteRoundSettled
+   *  plus an explorer link, so the panel proves the result was not invented
+   *  client-side. Mirrors the per-bet games' fair panel. */
+  setFair({ roundId, result, serverSeed, randomness, explorerUrl } = {}) {
+    if (!this.$.fairServer) return;
+    const ZERO32 = "0x" + "0".repeat(64);
+    if (roundId != null) this.$.fairRound.textContent = "#" + roundId;
+    if (result != null) this.$.fairResult.textContent = String(result);
+    if (serverSeed && serverSeed !== ZERO32) this.$.fairServer.textContent = serverSeed;
+    if (randomness && randomness !== ZERO32) this.$.fairRand.textContent = randomness;
+    if (explorerUrl && this.$.fairLink) {
+      this.$.fairLink.href = explorerUrl;
+      this.$.fairLink.style.display = "";
+    }
   }
 
   pushCommunityBet({ addr, type, amount, you = false } = {}) {
