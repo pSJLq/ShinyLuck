@@ -49,6 +49,14 @@ data/
 .claude/
 slots-from-design/
 
+# Design scratch (integrated copy lives in frontend/ after wiring)
+Roulettedesign/
+
+# Local diagnostic / scratch scripts (underscore-prefixed, not shipped)
+scripts/_diag-*.js
+scripts/_q.js
+scripts/_rtp.js
+
 # Personal working files (hackathon submission drafts, notes, etc.)
 SUBMISSION.md
 NOTES.md
