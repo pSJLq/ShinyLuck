@@ -171,9 +171,15 @@ async function main() {
   // The reveal-bot signer here is the deployer (Casino owner), so
   // provisionSeedHashes is allowed by the `msg.sender == houseManager ||
   // msg.sender == owner()` gate.
-  const SEED_TOPUP_THRESHOLD = parseInt(process.env.SEED_TOPUP_THRESHOLD || "100", 10);
-  const SEED_TOPUP_BATCH     = parseInt(process.env.SEED_TOPUP_BATCH     || "500", 10);
-  const SEED_TOPUP_CHECK_MS  = parseInt(process.env.SEED_TOPUP_CHECK_MS  || "60000", 10);
+  // Threshold raised 100 -> 400 and batch 500 -> 1000. Round-based games burn
+  // a seed every 30s (2/min), so a 100-seed floor left only ~50 min of runway
+  // and, worse, after a container restart the topup loop could lose the race
+  // to consumption and the pool hit zero (startRound reverts NoSeedAvailable,
+  // wheel freezes). A 400 floor = ~13 min of slack before refill even at the
+  // fastest cadence, and 1000/batch means topups are rare.
+  const SEED_TOPUP_THRESHOLD = parseInt(process.env.SEED_TOPUP_THRESHOLD || "400", 10);
+  const SEED_TOPUP_BATCH     = parseInt(process.env.SEED_TOPUP_BATCH     || "1000", 10);
+  const SEED_TOPUP_CHECK_MS  = parseInt(process.env.SEED_TOPUP_CHECK_MS  || "30000", 10);
   // Chunk on-chain provision so a single tx doesn't blow the block gas limit.
   const SEED_TOPUP_CHUNK     = 200;
   let seedTopupBusy = false;

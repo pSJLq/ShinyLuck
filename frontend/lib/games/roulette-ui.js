@@ -626,13 +626,6 @@ export class RouletteGame {
       <div class="rl-grain"></div>
       <div class="rl-app">
         <div class="rl-topbar">
-          <div class="rl-brand">
-            <div class="rl-logomark">{<b>s</b>}</div>
-            <div>
-              <div class="rl-brand-name">ShinyLuck</div>
-              <div class="rl-brand-sub">provably-fair roulette</div>
-            </div>
-          </div>
           <div class="rl-chain-pill"><span class="rl-dot"></span> Somnia L1 · on-chain</div>
           <div class="rl-spacer"></div>
           <div class="rl-stat"><span class="rl-k">Round</span><span class="rl-v" data-round>#${this.roundId}</span></div>
@@ -640,14 +633,13 @@ export class RouletteGame {
           <div class="rl-stat"><span class="rl-k">Players</span><span class="rl-v" data-players>0</span></div>
           <div class="rl-vsep"></div>
           <div class="rl-stat rl-accent-stat"><span class="rl-k">Balance</span><span class="rl-v" data-balance>0.00 <small>${C}</small></span></div>
-          <button class="rl-iconbtn" data-sound title="Sound">${ICONS.sound}</button>
-          <button class="rl-iconbtn" data-turbo title="Turbo spin">${ICONS.turbo}</button>
         </div>
 
         <div class="rl-main">
           <div class="rl-stage">
             <div class="rl-wheel-wrap">
               <div class="rl-phase"><span class="rl-phase-led"></span><span class="rl-phase-label" data-phaselabel>OPEN</span></div>
+              <button class="rl-iconbtn rl-sound-float" data-sound title="Sound">${ICONS.sound}</button>
               <canvas class="rl-wheel-canvas" data-wheel></canvas>
               <div class="rl-result-badge" data-result></div>
               <div class="rl-nobets" data-nobets><span>No More Bets</span></div>
@@ -720,7 +712,7 @@ export class RouletteGame {
     const q = (s) => this.root.querySelector(s);
     this.$ = {
       round: q("[data-round]"), players: q("[data-players]"), balance: q("[data-balance]"),
-      sound: q("[data-sound]"), turbo: q("[data-turbo]"),
+      sound: q("[data-sound]"),
       wheelCanvas: q("[data-wheel]"), phaseLabel: q("[data-phaselabel]"),
       result: q("[data-result]"), nobets: q("[data-nobets]"),
       countdown: q("[data-countdown]"), countcap: q("[data-countcap]"), ringProg: q(".rl-ring-prog"),
@@ -865,14 +857,7 @@ export class RouletteGame {
     this.$.rebet.onclick = () => this._rebet();
     this.$.double.onclick = () => this._double();
     this.$.place.onclick = () => this._placeBets();
-    this.$.sound.onclick = () => this._toggleSound();
-    this.$.turbo.onclick = () => {
-      this.turbo = !this.turbo;
-      this.$.turbo.classList.toggle("active", this.turbo);
-      this.$.turbo.style.color = this.turbo ? "var(--rl-accent)" : "";
-      this.$.turbo.style.borderColor = this.turbo ? "var(--rl-accent)" : "";
-      this._toast(this.turbo ? "Turbo spin ON" : "Turbo spin OFF");
-    };
+    if (this.$.sound) this.$.sound.onclick = () => this._toggleSound();
   }
 
   _toggleSound() {
@@ -1180,9 +1165,30 @@ export class RouletteGame {
       this.recent = recentResults.slice(-15);
       this._renderHistory(); this._renderStats();
     }
+    // No open round to show yet (between settle and the next open) - sit in a
+    // calm "waiting" state instead of faking a locked round, which used to
+    // freeze the countdown on its template value and show "no more bets".
+    if (roundId == null && betWindowEndMs == null) {
+      clearTimeout(this._lockTimer);
+      this._setPhase("open");
+      this.$.countcap.textContent = "waiting for round";
+      this.$.countdown.textContent = "--";
+      this.$.felt.classList.remove("locked");
+      this.$.result.classList.remove("show");
+      return;
+    }
     const dur = betWindowEndMs ? Math.max(0, betWindowEndMs - Date.now()) : this.o.betWindowMs;
     this._beginOpenRound(roundId ?? this.roundId + 1, dur, bettorCount);
-    if (!isOpen) this._enterLock();
+    if (!isOpen) {
+      this._enterLock();
+    } else if (betWindowEndMs) {
+      // Lock the board exactly when the on-chain bet window closes so the
+      // player can't place a bet the contract would reject (RoundClosed).
+      clearTimeout(this._lockTimer);
+      this._lockTimer = this._after(Math.max(0, betWindowEndMs - Date.now()), () => {
+        if (this.phase === "open") this._enterLock();
+      });
+    }
   }
 
   /** THE authoritative outcome. Drives spin → lands ball EXACTLY on resultNumber. */
