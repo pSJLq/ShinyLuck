@@ -173,9 +173,11 @@ function mount() {
         uiRoundId = cur.id;
         return { roundId: cur.id, betWindowEndMs: cur.betWindowEnd * 1000, isOpen: true, bettorCount: cur.bettorCount, recentResults };
       }
-      // No open round yet (between settle + next open) - seed history only;
-      // RouletteRoundStarted will open the next one.
-      return { recentResults, isOpen: false };
+      // No open round yet (between settle + next open) - seed history only and
+      // sit in the idle "waiting for round" state. RouletteRoundStarted (or the
+      // poll in tick()) opens the next one. Returning WITHOUT roundId/
+      // betWindowEndMs makes setRound show "waiting" instead of a fake lock.
+      return { recentResults };
     },
 
     // One tx for the whole basket. Contract enforces <= 5 bets/player/round.

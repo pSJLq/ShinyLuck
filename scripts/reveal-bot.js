@@ -541,14 +541,34 @@ async function main() {
     // 4. Round keepalive - make sure there's always an open Crash + Roulette
     //    round so players can hop in.
     if (ROUND_KEEPALIVE) {
-      const startIfNoOpen = async (gameLabel, currentFn, hasFn) => {
+      const startIfNoOpen = async (gameLabel, currentFn, hasFn, refundFn) => {
+        let round = null, id = null;
         try {
-          const id = await casino[currentFn]();
-          const round = await casino[hasFn](id);
+          id = await casino[currentFn]();
+          round = await casino[hasFn](id);
           // round is open if betWindowEnd > now AND not settled
           if (!round.settled && Number(round.betWindowEnd) > nowSec) return; // open, no-op
           if (Number(round.betWindowEnd) === 0) return; // race - wait
         } catch (_) { /* never started - proceed */ }
+        // SELF-HEAL: an unsettled round whose window closed long ago (past the
+        // round timeout) blocks startRound forever with RoundClosed. This
+        // happens after a bot restart: the round is older than the cold-start
+        // lookback, so it never re-enters pendingRounds to be settled/refunded.
+        // Without this, the wheel sits in LOCK for days (exactly what we hit).
+        // Refund it here so a fresh round can open immediately.
+        try {
+          if (round && !round.settled && Number(round.betWindowEnd) > 0 &&
+              nowSec - Number(round.betWindowEnd) > ROUND_TIMEOUT_S) {
+            const tx = await casino[refundFn](id);
+            await tx.wait();
+            console.log(`[reveal-bot] self-heal: refunded stuck ${gameLabel} round ${id} tx=${tx.hash}`);
+          }
+        } catch (e) {
+          const msg = e.shortMessage || e.message;
+          if (!/RoundAlreadySettled|RoundNotSettleable/.test(msg)) {
+            console.warn(`[reveal-bot] self-heal refund ${gameLabel}: ${msg}`);
+          }
+        }
         try {
           const startFn = gameLabel === "crash" ? "startCrashRound" : "startRouletteRound";
           const tx = await casino[startFn]();
@@ -568,7 +588,7 @@ async function main() {
           await tx.wait();
           console.log(`[reveal-bot] bootstrapped first crash round tx=${tx.hash}`);
         } else {
-          await startIfNoOpen("crash", "currentCrashRoundId", "getCrashRound");
+          await startIfNoOpen("crash", "currentCrashRoundId", "getCrashRound", "refundCrashRound");
         }
       } catch (e) { console.warn(`[reveal-bot] crash keepalive: ${e.shortMessage || e.message}`); }
       try {
@@ -578,7 +598,7 @@ async function main() {
           await tx.wait();
           console.log(`[reveal-bot] bootstrapped first roulette round tx=${tx.hash}`);
         } else {
-          await startIfNoOpen("roulette", "currentRouletteRoundId", "getRouletteRound");
+          await startIfNoOpen("roulette", "currentRouletteRoundId", "getRouletteRound", "refundRouletteRound");
         }
       } catch (e) { console.warn(`[reveal-bot] roulette keepalive: ${e.shortMessage || e.message}`); }
     }

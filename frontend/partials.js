@@ -302,7 +302,7 @@
     const isGamePage = /\/games\//.test(path);
     // sugar, dice AND vault7 are the polished, fully-working titles - no
     // TESTING ribbon on them.
-    const isStableGame = /\/games\/(sugar|dice|vault7)/.test(path);
+    const isStableGame = /\/games\/(sugar|dice|vault7|roulette)/.test(path);
     if (isGamePage && !isStableGame && !document.querySelector('.sl-testing-ribbon')) {
       const ribbon = document.createElement('div');
       ribbon.className = 'sl-testing-ribbon';
