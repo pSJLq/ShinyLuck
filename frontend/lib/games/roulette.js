@@ -107,9 +107,16 @@ async function fetchRecent(limit = 15) {
 // ---------------------------------------------------------------------------
 let game = null;
 let uiRoundId = -1;            // round currently shown OPEN in the UI
+let uiRoundEndMs = 0;          // betWindowEnd (ms) of the round shown OPEN
 let resolving = false;         // true while a settle spin animation is playing
 const resolvedRounds = new Set();
 const placedRounds = new Set();// rounds where the local player placed a bet
+
+// A bet tx needs a moment to sign + mine; if the on-chain window closes
+// before it lands the contract reverts RoundClosed (the CALL_EXCEPTION users
+// hit). Refuse to submit when under this many ms remain, and tell the user to
+// catch the next round instead of firing a doomed tx.
+const PLACE_CUTOFF_MS = 3500;
 
 function setGate(connected) {
   const g = document.getElementById("roulette-gate");
@@ -186,6 +193,7 @@ async function tick() {
     if (!cur) return;
     const now = Math.floor(Date.now() / 1000);
     if (!cur.settled && cur.id !== uiRoundId && now < cur.betWindowEnd) {
+      uiRoundEndMs = cur.betWindowEnd * 1000;
       uiRoundId = cur.id;
       game.setRound({ roundId: cur.id, betWindowEndMs: cur.betWindowEnd * 1000, isOpen: true, bettorCount: cur.bettorCount });
     }
@@ -222,6 +230,16 @@ function mount() {
     onPlaceBets: async (norm) => {
       if (!norm || norm.length === 0) throw new Error("no bets");
       if (norm.length > 5) { toast("Max 5 bets per round", { kind: "warn" }); throw new Error("max 5 bets per round"); }
+      // Window guard: if the round is about to close, the tx can't land in
+      // time and the contract reverts RoundClosed. Bounce it with a friendly
+      // message instead of the raw CALL_EXCEPTION and let the player catch the
+      // next round (a fresh one opens within a few seconds).
+      const msLeft = uiRoundEndMs - Date.now();
+      if (uiRoundEndMs && msLeft < PLACE_CUTOFF_MS) {
+        // Thrown message surfaces via the component's onError toast (single
+        // toast, no duplicate). Bets stay in the basket for the next round.
+        throw new Error("Bets just closed - catch the next round (opens in a few seconds)");
+      }
       await connect();
       const bets = norm.map(mapBet);
       const res = await SL.placeRoulette(bets);   // { roundId, txHash, blockNumber }
