@@ -4,7 +4,7 @@ export const CONFIG = {
   network: "somniaTestnet",
   casino: "0x2367ffbb1f6d90e3Ee116287d4533063ceBf8AB4",
   registry: "0x6fd2790Cf16D26C95d077a8093F06dF1e25E3E10",
-  houseManager: "0xB1719cE6589B14E82dAc78C1C8A82dc51Db9A553",
+  houseManager: "0x57871fA7c1e54c2F56B708d320bCB4427BEb3eCb",
   agentVerifier: "0x7b8543D1AaFCe05EC597555ba9bF5110584156E7",
   agentPlatform: "0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776",
   agentServiceUrl: "http://localhost:3001",

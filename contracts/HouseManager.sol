@@ -1043,8 +1043,17 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
     }
 
     function _wei2eth(uint256 wei_) internal pure returns (string memory) {
-        // Truncate to whole STT for prompt brevity (1e18 → "1").
-        return _u2s(wei_ / 1e18);
+        // 3-decimal (milli-STT) formatting. Whole-STT truncation was a real
+        // bug: a 0.8 STT vault rendered as "0", so the betting agent always
+        // saw "Vault balance 0 STT" and correctly refused to bet. Players bet
+        // sub-STT amounts (0.1 STT), so the prompt MUST show decimals.
+        // 0.8e18 → "0.800", 1e18 → "1.000", 0.1e18 → "0.100".
+        uint256 whole = wei_ / 1e18;
+        uint256 frac  = (wei_ % 1e18) / 1e15; // milli-STT
+        bytes memory fracStr = bytes(_u2s(frac));
+        if (fracStr.length == 1) fracStr = abi.encodePacked("00", fracStr);
+        else if (fracStr.length == 2) fracStr = abi.encodePacked("0", fracStr);
+        return string(abi.encodePacked(_u2s(whole), ".", fracStr));
     }
 
     // =====================================================================
@@ -1121,11 +1130,15 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         string[] memory roles = new string[](2);
         string[] memory messages = new string[](2);
         roles[0] = "system";
+        // Action-first framing: the model must CALL placeBet (verified live -
+        // a permissive "you may skip" prompt makes the Somnia LLM finish "stop"
+        // every time). The on-chain executeBet still enforces mask + daily/
+        // total limits + vault funding, so this guidance can't overspend.
         messages[0] = string(abi.encodePacked(
-            "You are an autonomous betting strategist for ONE casino user. You may call the placeBet tool AT MOST once, or not at all (just reply DONE) if the budget is too tight or the user's strategy says to wait. Be conservative: never stake more than 30% of vault balance or remaining daily budget. ",
+            "You are an autonomous betting agent acting for ONE casino user. Place a bet that follows the user's strategy by calling the placeBet tool exactly once. Pick a game the user allows and a stake at most 30% of the smaller of the vault balance and the remaining daily budget. Only reply DONE (no bet) if even a 0.01 STT bet would exceed the budget. ",
             bytes(strategy).length > 0
                 ? string(abi.encodePacked("User's strategy (honour it within the limits): \"", strategy, "\"."))
-                : "User gave no specific strategy; play sensibly."
+                : "User gave no specific strategy; bet a small amount on an allowed game."
         ));
         roles[1] = "user";
         messages[1] = _buildPlayerPrompt(mask, remainingDaily, dailyLimit, spentTotal, totalLimit, vaultBal);
@@ -1143,7 +1156,12 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             new string[](0),  // no MCP servers
             tools,
             uint256(2),       // maxIterations: one tool round + finish
-            false
+            true              // chainOfThought: REQUIRED for the model to emit
+                              // on-chain tool calls. With it false the platform
+                              // always finishes "stop" (no placeBet) - verified
+                              // live against the Somnia LLM agent. Only the
+                              // hourly agent uses this path, so the extra
+                              // reasoning latency never touches human spins.
         );
 
         // Collect the user's share from their vault BEFORE firing the
@@ -1192,7 +1210,7 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             " Spent total ", _wei2eth(spentTotalWei),
             "/", _wei2eth(totalLimitWei), " STT.",
             " Vault balance ", _wei2eth(vaultBalWei), " STT.",
-            " Pick SKIP if budget too tight or vault too low; otherwise pick a game+stake from the allowed list."
+            " Call placeBet now with an allowed game and a stake that fits the limits (only reply DONE if the budget is too low for any bet)."
         ));
     }
 
