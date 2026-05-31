@@ -285,7 +285,22 @@ function mount() {
       const txHash = ev && (ev.log ? ev.log.transactionHash : ev.transactionHash);
       onSettled(Number(roundId), Number(resultNumber), { serverSeed, randomness, txHash });
     });
-    c.on("RouletteRoundStarted", () => { tick(); });
+    // Open the round the INSTANT it starts, straight from the event payload -
+    // no RPC round-trip. This is what gives players the full ~10s window
+    // instead of however many seconds were left by the time a poll noticed.
+    c.on("RouletteRoundStarted", (roundId, betWindowEnd, commitBlock, seedIdx, ev) => {
+      try {
+        const id = Number(roundId);
+        if (resolvedRounds.has(id) || id === uiRoundId) return;
+        const endMs = endMsFromChain(Number(betWindowEnd));
+        if (Date.now() < endMs) {
+          uiRoundEndMs = endMs;
+          uiRoundId = id;
+          game.setRound({ roundId: id, betWindowEndMs: endMs, isOpen: true, bettorCount: 0 });
+        }
+      } catch (_) {}
+      tick();
+    });
     c.on("RouletteBetPlaced", (roundId, player, kind, number, amount) => {
       // Surface OTHER players' bets in the live feed (our own already show).
       try {

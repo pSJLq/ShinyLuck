@@ -652,12 +652,6 @@ export class RouletteGame {
                   <div class="rl-ring-cap" data-countcap>betting open</div>
                 </div>
               </div>
-              <div class="rl-mini-stats">
-                <div class="rl-mini"><div class="rl-k">Last result</div><div class="rl-v" data-last>-</div></div>
-                <div class="rl-mini"><div class="rl-k">Since last 0</div><div class="rl-v" data-sincezero>0</div></div>
-                <div class="rl-mini"><div class="rl-k">Red / Black</div><div class="rl-v"><span class="red" data-redc>0</span> / <span data-blackc>0</span></div></div>
-                <div class="rl-mini"><div class="rl-k">Odd / Even</div><div class="rl-v" data-oddeven>0 / 0</div></div>
-              </div>
             </div>
           </div>
 
@@ -1377,8 +1371,10 @@ export class RouletteGame {
     badge.style.color = col === "red" ? "#ff5a2a" : col === "green" ? "#00a866" : "#6e6eed";
     badge.textContent = num;
     badge.classList.remove("show"); void badge.offsetWidth; badge.classList.add("show");
-    this.$.last.textContent = num;
-    this.$.last.style.color = col === "red" ? "var(--rl-red-2)" : col === "green" ? "var(--rl-green-2)" : "var(--rl-ink)";
+    if (this.$.last) {
+      this.$.last.textContent = num;
+      this.$.last.style.color = col === "red" ? "var(--rl-red-2)" : col === "green" ? "var(--rl-green-2)" : "var(--rl-ink)";
+    }
   }
 
   _countUp(target) {
@@ -1421,9 +1417,6 @@ export class RouletteGame {
     this.$.oebar.innerHTML = `<i class="odd" style="width:${odd/oeTot*100}%"></i><i class="even" style="width:${even/oeTot*100}%"></i>`;
     this.$.rbval.innerHTML = `<span style="color:var(--rl-red-2)">${red} red</span><span>${black} black</span>`;
     this.$.oeval.innerHTML = `<span style="color:var(--rl-blue)">${odd} odd</span><span style="color:var(--rl-cyan)">${even} even</span>`;
-    this.$.redc.textContent = red; this.$.blackc.textContent = black;
-    this.$.oddeven.textContent = `${odd} / ${even}`;
-    this.$.sinceZero.textContent = sinceZero;
 
     // hot / cold over recent
     const freq = new Map();
