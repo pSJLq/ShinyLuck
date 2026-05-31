@@ -77,6 +77,26 @@ function mapBet(b) {
   }
 }
 
+// Chain clock vs browser clock skew. The contract closes the bet window when
+// block.timestamp >= betWindowEnd, but the UI counts down against Date.now().
+// On Somnia the browser wall-clock can run several seconds AHEAD of chain
+// time, so a bet placed at "UI 3s left" hits a window the chain already
+// closed -> RoundClosed revert. We measure the skew from the latest block and
+// translate every on-chain deadline into the equivalent wall-clock instant, so
+// the countdown and the place-guard both track REAL chain time.
+let chainSkewMs = 0; // wallNow_ms - chainNow_ms  (positive => browser ahead)
+async function refreshChainSkew() {
+  try {
+    const blk = await provider().getBlock("latest");
+    if (blk && blk.timestamp) chainSkewMs = Date.now() - blk.timestamp * 1000;
+  } catch (_) {}
+}
+// Convert an on-chain betWindowEnd (seconds) to the wall-clock ms instant the
+// window actually closes on-chain.
+function endMsFromChain(betWindowEndSec) {
+  return betWindowEndSec * 1000 + chainSkewMs;
+}
+
 async function readCurrentRound() {
   const c = casino();
   const total = Number(await c.totalRouletteRounds());
@@ -191,11 +211,11 @@ async function tick() {
     }
     const cur = await readCurrentRound();
     if (!cur) return;
-    const now = Math.floor(Date.now() / 1000);
-    if (!cur.settled && cur.id !== uiRoundId && now < cur.betWindowEnd) {
-      uiRoundEndMs = cur.betWindowEnd * 1000;
+    const endMs = endMsFromChain(cur.betWindowEnd);
+    if (!cur.settled && cur.id !== uiRoundId && Date.now() < endMs) {
+      uiRoundEndMs = endMs;
       uiRoundId = cur.id;
-      game.setRound({ roundId: cur.id, betWindowEndMs: cur.betWindowEnd * 1000, isOpen: true, bettorCount: cur.bettorCount });
+      game.setRound({ roundId: cur.id, betWindowEndMs: endMs, isOpen: true, bettorCount: cur.bettorCount });
     }
   } catch (_) {}
 }
@@ -213,11 +233,13 @@ function mount() {
 
     // Called once on construction; subsequent rounds arrive via events/tick.
     getRound: async () => {
+      await refreshChainSkew();
       const [cur, recentResults] = await Promise.all([readCurrentRound(), fetchRecent(15)]);
-      const now = Math.floor(Date.now() / 1000);
-      if (cur && !cur.settled && now < cur.betWindowEnd) {
+      const endMs = cur ? endMsFromChain(cur.betWindowEnd) : 0;
+      if (cur && !cur.settled && Date.now() < endMs) {
+        uiRoundEndMs = endMs;
         uiRoundId = cur.id;
-        return { roundId: cur.id, betWindowEndMs: cur.betWindowEnd * 1000, isOpen: true, bettorCount: cur.bettorCount, recentResults };
+        return { roundId: cur.id, betWindowEndMs: endMs, isOpen: true, bettorCount: cur.bettorCount, recentResults };
       }
       // No open round yet (between settle + next open) - seed history only and
       // sit in the idle "waiting for round" state. RouletteRoundStarted (or the
@@ -275,6 +297,9 @@ function mount() {
 
   // Poll fallback - keeps the wheel honest if a push is dropped.
   setInterval(tick, 3000);
+  // Keep the chain-clock skew fresh (clocks drift); cheap one-block read.
+  refreshChainSkew();
+  setInterval(refreshChainSkew, 15000);
   tick();
 }
 
