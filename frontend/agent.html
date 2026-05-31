@@ -57,7 +57,8 @@
         <h3>Register Agent</h3>
         <div class="bet-row">
           <label>Strategy (plain English)</label>
-          <textarea data-sl-strategy rows="4" style="width:100%; background:transparent; color:var(--fg); border:1px solid rgba(255,255,255,0.15); padding: 10px; font-family: var(--mono); font-size: 12px;">Play Dice with 0.1 STT bets, roll over 60, stop after 10 wins or 5 STT loss per day</textarea>
+          <textarea data-sl-strategy maxlength="200" rows="4" style="width:100%; background:transparent; color:var(--fg); border:1px solid rgba(255,255,255,0.15); padding: 10px; font-family: var(--mono); font-size: 12px;">Play Dice with 0.1 STT bets, roll over 60, stop after 10 wins or 5 STT loss per day</textarea>
+          <div style="font-size:11px; color:var(--fg-mute); margin-top:6px; line-height:1.5;">Stored on-chain (max 200 chars). The House Manager injects it verbatim into your agent's LLM prompt - the model honours it within your limits below.</div>
         </div>
         <div class="bet-row">
           <label>Daily limit (STT)</label>

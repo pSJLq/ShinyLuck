@@ -39,6 +39,13 @@ contract MockAgentPlatform is IAgentRequester {
     function setNextStatus(ResponseStatus s) external { nextStatus = s; }
     function setDeposit(uint256 v) external { deposit = v; }
 
+    // Raw-result override: when set, triggerCallback delivers this exact bytes
+    // blob as each worker's `result` (instead of abi.encode(string)). Lets
+    // tests feed a canned inferToolsChat 6-tuple. Cleared after each delivery.
+    bytes public nextRawResult;
+    bool public useRaw;
+    function setNextRawResult(bytes calldata raw) external { nextRawResult = raw; useRaw = true; }
+
     function getRequestDeposit() external view returns (uint256) { return deposit; }
     function getAdvancedRequestDeposit(uint256 /*subSize*/) external view returns (uint256) { return deposit; }
 
@@ -93,7 +100,8 @@ contract MockAgentPlatform is IAgentRequester {
         s.delivered = true;
 
         Response[] memory responses = new Response[](s.workers);
-        bytes memory result = abi.encode(s.responseText);
+        bytes memory result = useRaw ? nextRawResult : abi.encode(s.responseText);
+        if (useRaw) useRaw = false; // one-shot
         for (uint256 i; i < s.workers; i++) {
             responses[i] = Response({
                 validator: address(uint160(i + 1)),

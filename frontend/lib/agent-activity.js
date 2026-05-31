@@ -98,6 +98,11 @@ const HM_ABI = [
   "event RtpAnalysisRequested(uint256 indexed requestId, uint8 indexed game, uint16 ourRtpBps, int256 bankrollChangeBps, uint256 competitorRtpBps)",
   "event RtpAnalysisResolved(uint256 indexed requestId, uint8 indexed game, uint16 oldRtpBps, uint16 newRtpBps, string decision, string sample)",
   "event AgentRequestSkipped(string indexed kind, string reason)",
+  // gen-14: per-player inferToolsChat Player Agent. PlayerDecisionResolved is
+  // the umbrella outcome (SKIP / TOOL_PLACEBET / DONE / DECODE_FAIL); the LLM
+  // itself decided the game+stake by yielding a placeBet on-chain tool call.
+  "event PlayerDecisionResolved(uint256 indexed requestId, address indexed player, string decision, uint8 game, uint256 stakeWei, uint256 betId, bool placed)",
+  "event PlayerAgentToolCall(uint256 indexed requestId, address indexed player, uint8 game, uint256 stakeWei, uint256 betId, bool placed)",
 ];
 const VERIFIER_ABI = [
   "event QuorumRequested(uint256 indexed betId, uint256 indexed requestId, address indexed requester)",
@@ -385,15 +390,16 @@ async function coldStart() {
   // Pull all HM events for the last 30 min in parallel.
   let events = [];
   try {
-    const [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip] = await Promise.all([
+    const [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip, playerDec] = await Promise.all([
       rawFetchLogs(hm, "ReactiveBetSettledHandled", from, head).catch(() => []),
       rawFetchLogs(hm, "ReactiveHourlyTick",        from, head).catch(() => []),
       rawFetchLogs(hm, "ReasoningRequested",        from, head).catch(() => []),
       rawFetchLogs(hm, "RtpAnalysisRequested",      from, head).catch(() => []),
       rawFetchLogs(hm, "RtpAnalysisResolved",       from, head).catch(() => []),
       rawFetchLogs(hm, "AgentRequestSkipped",        from, head).catch(() => []),
+      rawFetchLogs(hm, "PlayerDecisionResolved",     from, head).catch(() => []),
     ]);
-    events = [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip].flat();
+    events = [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip, playerDec].flat();
   } catch (e) { console.warn("[agent-activity] HM cold-start:", e.message); }
 
   // Need timestamps. Use block.timestamp via a small batch read; cap at the
@@ -489,6 +495,22 @@ function hmLabelFor(ev) {
       // `kind` is indexed bytes32 (string-hashed by event semantics) - ethers
       // surfaces it as a Result. `reason` is the plain string we emitted.
       return `agent request skipped: ${ev.args.reason}`;
+    case "PlayerDecisionResolved": {
+      // gen-14: the per-player LLM Player Agent (inferToolsChat). It either
+      // yielded a placeBet tool call (placed a real bet from the vault) or
+      // finished without betting.
+      const who = shortAddr(ev.args.player);
+      if (ev.args.placed) {
+        return `player ${who} agent bet ${fmtSttFromWei(ev.args.stakeWei)} STT on ${gameName(ev.args.game)} (LLM tool call #${ev.args.betId})`;
+      }
+      const d = String(ev.args.decision || "");
+      const why = d === "SKIP" ? "chose to skip this tick"
+        : d === "DONE" ? "finished its turn"
+        : d === "NO_CONSENSUS" ? "LLM consensus failed - skipped"
+        : d === "DECODE_FAIL" ? "tool-call decode failed - skipped"
+        : d.toLowerCase();
+      return `player ${who} agent ${why}`;
+    }
     default:
       return ev.name;
   }
@@ -538,6 +560,7 @@ function fmtBpsPct(bps) {
   return (Number(bps) / 100).toFixed(2);
 }
 function gameName(g) { return GAME_NAMES[Number(g)] || `game#${g}`; }
+function shortAddr(a) { const s = String(a || ""); return s.length >= 10 ? `${s.slice(0, 6)}…${s.slice(-4)}` : s; }
 
 // ---------------------------------------------------------------------------
 // Real-time subscription via WS (push-path). Falls back to a polling tick.
@@ -578,7 +601,8 @@ function subscribeRealtime() {
     } catch (e) { /* event missing on older HM - skip */ }
   };
   ["ReactiveBetSettledHandled", "ReactiveHourlyTick", "ReasoningRequested",
-   "RtpAnalysisRequested", "RtpAnalysisResolved", "AgentRequestSkipped"]
+   "RtpAnalysisRequested", "RtpAnalysisResolved", "AgentRequestSkipped",
+   "PlayerDecisionResolved"]
     .forEach(subscribeHm);
 
   if (ver) {

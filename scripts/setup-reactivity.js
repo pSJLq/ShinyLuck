@@ -27,7 +27,7 @@ const path = require("path");
 // ~0.60 STT/hour, ~14.4 STT/day) doesn't drain back below the floor for at
 // least a week unattended.
 const MIN_OWNER_BALANCE  = ethers.parseEther("32");
-const TOPUP_TARGET_TOTAL = ethers.parseEther("48"); // 32 floor + 16 agent buffer
+const TOPUP_TARGET_TOTAL = ethers.parseEther("33"); // 32 precompile floor + 1 buffer (Railway gas-autopilot refills HM from bet take)
 
 async function main() {
   const [deployer] = await ethers.getSigners();

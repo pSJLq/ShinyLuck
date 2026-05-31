@@ -34,6 +34,14 @@ contract PlayerAgentRegistry is Ownable, ReentrancyGuard {
 
     mapping(address => Permission) public permissions;
 
+    /// @notice The player's natural-language betting strategy, stored on-chain
+    ///         so HouseManager can inject it verbatim into the per-player LLM
+    ///         prompt (the agent honours "be aggressive, prefer roulette" etc.
+    ///         within the limits). `strategyHash` in Permission stays as the
+    ///         integrity commitment. Bounded length keeps gas + prompt size sane.
+    mapping(address => string) public strategyText;
+    uint256 public constant MAX_STRATEGY_LEN = 200;
+
     event RelayerUpdated(address indexed prev, address indexed next);
     event AgentRegistered(
         address indexed player,
@@ -169,7 +177,7 @@ contract PlayerAgentRegistry is Ownable, ReentrancyGuard {
     ///         casino bankroll as a deposit (no separate treasury contract in
     ///         v1; HM can later schedule a withdraw of profit via the timelock).
     function registerAgent(
-        bytes32 strategyHash,
+        string calldata strategy,
         uint256 dailyLimit,
         uint256 totalLimit,
         uint8 allowedGamesMask
@@ -177,6 +185,12 @@ contract PlayerAgentRegistry is Ownable, ReentrancyGuard {
         if (permissions[msg.sender].player != address(0)) revert AlreadyRegistered();
         if (dailyLimit == 0 || totalLimit == 0 || allowedGamesMask == 0) revert InvalidLimits();
         if (dailyLimit > totalLimit) revert InvalidLimits();
+        require(bytes(strategy).length <= MAX_STRATEGY_LEN, "strategy too long");
+
+        // Hash is computed on-chain from the stored text, so it's a trustworthy
+        // commitment to exactly what the agent will read - not a client value.
+        bytes32 strategyHash = keccak256(bytes(strategy));
+        strategyText[msg.sender] = strategy;
 
         AgentVault vault = new AgentVault(msg.sender, address(this), address(casino));
         permissions[msg.sender] = Permission({
@@ -215,17 +229,25 @@ contract PlayerAgentRegistry is Ownable, ReentrancyGuard {
         uint256 dailyLimit,
         uint256 totalLimit,
         uint8 allowedGamesMask,
-        bytes32 strategyHash
+        string calldata strategy
     ) external {
         Permission storage p = permissions[msg.sender];
         if (p.player == address(0)) revert NotRegistered();
         if (dailyLimit == 0 || totalLimit == 0 || allowedGamesMask == 0) revert InvalidLimits();
         if (dailyLimit > totalLimit) revert InvalidLimits();
+        require(bytes(strategy).length <= MAX_STRATEGY_LEN, "strategy too long");
+        bytes32 strategyHash = keccak256(bytes(strategy));
+        strategyText[msg.sender] = strategy;
         p.dailyLimit = dailyLimit;
         p.totalLimit = totalLimit;
         p.allowedGamesMask = allowedGamesMask;
         p.strategyHash = strategyHash;
         emit AgentParamsUpdated(msg.sender, dailyLimit, totalLimit, allowedGamesMask, strategyHash);
+    }
+
+    /// @notice The player's on-chain natural-language strategy (verbatim).
+    function getStrategy(address player) external view returns (string memory) {
+        return strategyText[player];
     }
 
     function pauseAgent() external {

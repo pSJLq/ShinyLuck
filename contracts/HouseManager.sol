@@ -158,13 +158,23 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
     ///         (promo periods). 10000 = casino pays 100% (legacy demo mode).
     ///         Anything above 10000 is rejected by the setter.
     uint16  public agentDecisionSubsidyBps = 0;
-    /// @notice requestId → packed (player address << 8) | gameOptionsCount.
-    ///         Stored so handleResponse routes correctly without scanning.
+    /// @notice requestId → player. The player-decision now runs through
+    ///         inferToolsChat (agent calls placeBet as an on-chain tool), so
+    ///         this just routes the callback back to the right player.
     mapping(uint256 => address) public pendingPlayerDecision;
+    /// @notice requestId → the player a RESUME request belongs to (after we
+    ///         executed a yielded tool call and re-asked the LLM). Separate
+    ///         from pendingPlayerDecision so the two callback shapes don't
+    ///         collide.
+    mapping(uint256 => address) public pendingPlayerResume;
 
     event PlayerRegistrySet(address indexed registry);
     event PlayerDecisionRequested(uint256 indexed requestId, address indexed player, uint256 vaultBalance, uint256 spentTodayWei, uint256 dailyLimitWei);
     event PlayerDecisionResolved(uint256 indexed requestId, address indexed player, string decision, uint8 game, uint256 stakeWei, uint256 betId, bool placed);
+    /// @notice Emitted when the LLM agent itself invokes the on-chain placeBet
+    ///         tool (the agent-native path). game/stake decoded from the
+    ///         agent-yielded calldata; betId/placed from registry.executeBet.
+    event PlayerAgentToolCall(uint256 indexed requestId, address indexed player, uint8 game, uint256 stakeWei, uint256 betId, bool placed);
 
     // BetSettled topic0: keccak256("BetSettled(uint256,address,uint8,bool,uint256,bytes32,bytes32,bytes32,bytes32,uint256,bytes)")
     // We don't hardcode the literal hash here - instead we compare emitter
@@ -572,6 +582,55 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         maxRtpBps = maxBps;
     }
 
+    // ---------------------------------------------------------------------
+    // PUBLIC AGENT-ENTRY - one call returns everything an EXTERNAL autonomous
+    // agent needs to discover the casino's live state and decide a bet. No
+    // backend required: read agentManifest(), then call the casino's public
+    // place*Bet entrypoints directly (documented in frontend/agent-manifest.json).
+    // ---------------------------------------------------------------------
+    struct GameInfo { uint8 game; uint16 reportedRtpBps; uint256 maxBetWei; bool paused; }
+    struct AgentManifest {
+        address casino;
+        uint256 freeBankrollWei;
+        bool bonusModeActive;
+        uint256 currentRouletteRoundId;
+        uint256 rouletteBetWindowEnd;   // unix secs; bet before this
+        bool rouletteOpen;              // not settled AND window not closed
+        GameInfo[] games;
+    }
+
+    /// @notice Live, machine-readable casino state for external agents.
+    function agentManifest() external view returns (AgentManifest memory m) {
+        m.casino = address(casino);
+        m.freeBankrollWei = casino.freeBankroll();
+        m.bonusModeActive = casino.bonusModeActive();
+        // Roulette open round (game id 5). NOTE: try/catch only guards the ONE
+        // external call in its head, so currentRouletteRoundId() and
+        // getRouletteRound() each need their own guard - on a fresh casino the
+        // latter reverts RoundNotFound(0) and would otherwise bubble up.
+        uint256 rid;
+        bool haveRound;
+        try casino.currentRouletteRoundId() returns (uint256 r) { rid = r; haveRound = true; } catch {}
+        if (haveRound) {
+            m.currentRouletteRoundId = rid;
+            try casino.getRouletteRound(rid) returns (
+                uint64, uint64 betWindowEnd, uint64, uint32, bool settled, uint8, bytes32, uint256
+            ) {
+                m.rouletteBetWindowEnd = betWindowEnd;
+                m.rouletteOpen = (!settled && block.timestamp < betWindowEnd);
+            } catch {}
+        }
+        // Per-game RTP + max bet + paused. ids: 0 DICE,1 CRASH,2 SLOTS,3 MINES,
+        // 4 PLINKO,5 ROULETTE,6 CLUSTER.
+        m.games = new GameInfo[](7);
+        for (uint8 g; g < 7; g++) {
+            uint16 rtp; try casino.getReportedRTP(g) returns (uint16 r) { rtp = r; } catch {}
+            uint256 mx; try casino.gameMaxBet(Casino.GameType(g)) returns (uint256 v) { mx = v; } catch {}
+            bool pz;  try casino.gamePaused(Casino.GameType(g)) returns (bool p) { pz = p; } catch {}
+            m.games[g] = GameInfo({ game: g, reportedRtpBps: rtp, maxBetWei: mx, paused: pz });
+        }
+    }
+
     /// @notice Quote the total deposit (reserve + reward pot) for one LLM call.
     ///         Formula per docs.somnia.network: reserve + pricePerWorker × subSize.
     ///         Sending only the reserve makes perAgentBudget=0 → runners skip
@@ -844,24 +903,19 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             return;
         }
 
-        // Player-decision callback? (LLM picked SKIP / GAME_STAKE)
-        address pending = pendingPlayerDecision[requestId];
+        // Player-decision callback? (inferToolsChat: the agent either replied
+        // "stop"/DONE, or yielded an on-chain placeBet tool call for us to run)
+        bool isResume = pendingPlayerResume[requestId] != address(0);
+        address pending = isResume ? pendingPlayerResume[requestId] : pendingPlayerDecision[requestId];
         if (pending != address(0)) {
-            delete pendingPlayerDecision[requestId];
+            if (isResume) delete pendingPlayerResume[requestId];
+            else delete pendingPlayerDecision[requestId];
             if (status != ResponseStatus.Success || responses.length == 0) {
                 emit AgentRequestSkipped("player-decision", "no-consensus");
                 emit PlayerDecisionResolved(requestId, pending, "NO_CONSENSUS", 0, 0, 0, false);
                 return;
             }
-            string memory decision;
-            try this.tryDecodeString(responses[0].result) returns (string memory s) { decision = s; }
-            catch {
-                emit AgentRequestSkipped("player-decision", "decode-failed");
-                emit PlayerDecisionResolved(requestId, pending, "DECODE_FAIL", 0, 0, 0, false);
-                return;
-            }
-            (uint8 g, uint256 stake, uint256 betId, bool placed) = _applyPlayerDecision(requestId, pending, decision);
-            emit PlayerDecisionResolved(requestId, pending, decision, g, stake, betId, placed);
+            _handlePlayerToolsResponse(requestId, pending, responses[0].result, isResume);
             return;
         }
 
@@ -1053,17 +1107,43 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         }
         uint256 remainingDaily = dailyLimit > spentToday ? dailyLimit - spentToday : 0;
 
-        string memory prompt = _buildPlayerPrompt(mask, remainingDaily, dailyLimit, spentTotal, totalLimit, vaultBal);
-        string memory system = "You are an autonomous betting strategist for a single user. Reply with EXACTLY one word from the allowed values. SKIP means do not play this tick. Otherwise pick a game and stake the user has permitted that fits the remaining daily budget and vault balance. Be conservative: do not pick a stake larger than 30% of vault balance or remaining daily budget.";
+        // AGENT-NATIVE PATH: instead of asking the LLM for a keyword and
+        // decoding it ourselves, we give the LLM an on-chain TOOL - placeBet -
+        // and let the agent itself decide to call it. The agent yields the
+        // calldata back to us (handleResponse, finishReason "tool_calls"); we
+        // execute it through registry.executeBet (same limits/vault guards) and
+        // resume. This is inferToolsChat - the model invokes our contract.
+        //
+        // The user's natural-language strategy is injected verbatim into the
+        // system prompt, so "be aggressive, prefer roulette" actually changes
+        // behaviour (previously the strategy text was stored but never read).
+        string memory strategy = IPlayerAgentRegistryMin(playerRegistry).getStrategy(player);
+        string[] memory roles = new string[](2);
+        string[] memory messages = new string[](2);
+        roles[0] = "system";
+        messages[0] = string(abi.encodePacked(
+            "You are an autonomous betting strategist for ONE casino user. You may call the placeBet tool AT MOST once, or not at all (just reply DONE) if the budget is too tight or the user's strategy says to wait. Be conservative: never stake more than 30% of vault balance or remaining daily budget. ",
+            bytes(strategy).length > 0
+                ? string(abi.encodePacked("User's strategy (honour it within the limits): \"", strategy, "\"."))
+                : "User gave no specific strategy; play sensibly."
+        ));
+        roles[1] = "user";
+        messages[1] = _buildPlayerPrompt(mask, remainingDaily, dailyLimit, spentTotal, totalLimit, vaultBal);
 
-        string[] memory allowed = _buildAllowedValues(mask);
+        ILLMAgent.OnchainTool[] memory tools = new ILLMAgent.OnchainTool[](1);
+        tools[0] = ILLMAgent.OnchainTool({
+            signature: "placeBet(uint8 game, uint96 stakeWei)",
+            description: "Place ONE casino bet for the user. game id: 0=DICE 2=SLOTS 4=PLINKO 5=ROULETTE 6=CLUSTER (only call for a game marked 1=allowed in the prompt). stakeWei is the wei stake (1 STT = 1e18). Must fit the remaining daily budget AND vault balance, and be <=30% of the smaller of the two."
+        });
 
         bytes memory payload = abi.encodeWithSelector(
-            ILLMAgent.inferString.selector,
-            prompt,
-            system,
-            false,
-            allowed
+            ILLMAgent.inferToolsChat.selector,
+            roles,
+            messages,
+            new string[](0),  // no MCP servers
+            tools,
+            uint256(2),       // maxIterations: one tool round + finish
+            false
         );
 
         // Collect the user's share from their vault BEFORE firing the
@@ -1120,75 +1200,139 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         return ((mask >> bit) & 1) == 1 ? "1" : "0";
     }
 
-    /// @dev Build the allowedValues list for the LLM. Always includes SKIP
-    ///      plus the permitted-game options at fixed stakes (small + medium).
-    function _buildAllowedValues(uint8 mask) internal pure returns (string[] memory) {
-        // Worst case: SKIP + 5 games * 2 stakes = 11. Cluster + Slots also.
-        string[] memory all = new string[](12);
-        uint256 n;
-        all[n++] = "SKIP";
-        if (((mask >> 0) & 1) == 1) { all[n++] = "DICE_0.1";    all[n++] = "DICE_0.5"; }
-        if (((mask >> 2) & 1) == 1) { all[n++] = "SLOTS_0.5";   }
-        if (((mask >> 4) & 1) == 1) { all[n++] = "PLINKO_0.5";  }
-        if (((mask >> 5) & 1) == 1) { all[n++] = "ROULETTE_0.5";}
-        if (((mask >> 6) & 1) == 1) { all[n++] = "CLUSTER_0.5"; }
-        // Trim to actual length.
-        string[] memory out = new string[](n);
-        for (uint256 i; i < n; i++) out[i] = all[i];
-        return out;
+
+    /// @dev THE agent-native callback. Decodes the inferToolsChat tuple. If the
+    ///      LLM yielded an on-chain tool call (finishReason "tool_calls"), the
+    ///      agent itself decided to bet: we decode placeBet(game,stake) from the
+    ///      yielded calldata, route it through registry.executeBet (mask/limit/
+    ///      vault guards), and resume the conversation once so the LLM can
+    ///      finish. "stop" → the agent chose not to bet (SKIP). We cap at one
+    ///      tool round to bound cost/latency on the hourly tick.
+    function _handlePlayerToolsResponse(uint256 requestId, address player, bytes memory result, bool isResume)
+        internal
+    {
+        // inferToolsChat returns: (finishReason, response, updatedRoles,
+        // updatedMessages, pendingToolCallIds, pendingToolCalls)
+        string memory finishReason;
+        string[] memory updatedRoles;
+        string[] memory updatedMessages;
+        bytes[] memory pendingToolCalls;
+        try this.decodeToolsChat(result) returns (
+            string memory fr, string[] memory ur, string[] memory um, bytes[] memory ptc
+        ) {
+            finishReason = fr; updatedRoles = ur; updatedMessages = um; pendingToolCalls = ptc;
+        } catch {
+            emit AgentRequestSkipped("player-decision", "decode-failed");
+            emit PlayerDecisionResolved(requestId, player, "DECODE_FAIL", 0, 0, 0, false);
+            return;
+        }
+
+        bytes32 frh = keccak256(bytes(finishReason));
+        // Agent finished without (or after) a tool call -> nothing more to do.
+        if (frh == keccak256(bytes("stop")) || pendingToolCalls.length == 0) {
+            emit PlayerDecisionResolved(requestId, player, isResume ? "DONE" : "SKIP", 0, 0, 0, false);
+            return;
+        }
+
+        // The agent wants to call placeBet. Execute the first yielded call
+        // (we declared exactly one tool and cap at one bet per tick).
+        (uint8 game, uint256 stakeWei, uint256 betId, bool placed) =
+            _executeYieldedPlaceBet(requestId, player, pendingToolCalls[0]);
+        emit PlayerAgentToolCall(requestId, player, game, stakeWei, betId, placed);
+        emit PlayerDecisionResolved(requestId, player, "TOOL_PLACEBET", game, stakeWei, betId, placed);
+
+        // Resume the conversation ONCE so the agent gets closure (and the
+        // PlayerDecisionResolved feed shows a clean end). Only if not already a
+        // resume, and only if the casino can still cover the LLM cost.
+        if (!isResume) {
+            uint256 cost = quoteLlmCost();
+            uint256 casinoShare = (cost * agentDecisionSubsidyBps) / 10000;
+            if (address(this).balance < casinoShare + SomniaExtensions.SUBSCRIPTION_OWNER_MINIMUM_BALANCE) return;
+            uint256 userShare = cost - casinoShare;
+            if (userShare > 0) {
+                try IPlayerAgentRegistryMin(playerRegistry).collectAgentFee(player, userShare) {}
+                catch { return; } // can't fund resume - leave it; the bet already landed
+            }
+            // Append the tool result to the conversation and re-ask.
+            uint256 n = updatedMessages.length;
+            string[] memory roles2 = new string[](n + 1);
+            string[] memory msgs2 = new string[](n + 1);
+            for (uint256 i; i < n; i++) { roles2[i] = updatedRoles[i]; msgs2[i] = updatedMessages[i]; }
+            roles2[n] = "tool";
+            msgs2[n] = string(abi.encodePacked(
+                "{\"content\":\"", placed ? "bet placed" : "bet rejected (limit/vault)", "\"}"
+            ));
+            bytes memory payload = abi.encodeWithSelector(
+                ILLMAgent.inferToolsChat.selector,
+                roles2, msgs2, new string[](0), new ILLMAgent.OnchainTool[](0), uint256(1), false
+            );
+            try agentPlatform.createRequest{value: cost}(
+                llmAgentId, address(this), this.handleResponse.selector, payload
+            ) returns (uint256 resumeId) {
+                pendingPlayerResume[resumeId] = player;
+            } catch {}
+        }
     }
 
-    /// @dev Apply an LLM decision. Decodes "GAME_STAKE" → game id + stake wei,
-    ///      builds calldata for the matching place*Bet entrypoint, and calls
-    ///      registry.executeBet on behalf of the player. Returns the betId
-    ///      (0 if SKIP or decoding failed) and a flag indicating whether a
-    ///      bet was actually placed.
-    function _applyPlayerDecision(uint256 requestId, address player, string memory decision)
+    /// @dev Decode the agent-yielded placeBet(uint8,uint96) calldata, map it to
+    ///      the matching casino place*Bet entrypoint, and execute via the
+    ///      registry (which enforces the player's mask + daily/total limits +
+    ///      vault funding). Returns game/stake/betId/placed.
+    function _executeYieldedPlaceBet(uint256 requestId, address player, bytes memory toolCalldata)
         internal returns (uint8 game, uint256 stakeWei, uint256 betId, bool placed)
     {
-        bytes32 h = keccak256(bytes(decision));
-        if (h == keccak256(bytes("SKIP"))) return (0, 0, 0, false);
+        // toolCalldata = selector(placeBet(uint8,uint96)) ++ abi(uint8,uint96).
+        // Strip the 4-byte selector, decode the two args.
+        if (toolCalldata.length < 4 + 64) return (0, 0, 0, false);
+        bytes memory args = new bytes(toolCalldata.length - 4);
+        for (uint256 i; i < args.length; i++) args[i] = toolCalldata[i + 4];
+        (uint8 g, uint96 s) = abi.decode(args, (uint8, uint96));
+        game = g; stakeWei = uint256(s);
+        if (stakeWei == 0) return (g, 0, 0, false);
 
-        bytes memory cs = abi.encodePacked(uint256(keccak256(abi.encodePacked(player, requestId, block.timestamp))));
+        bytes memory cd = _buildPlaceCalldata(game, stakeWei, player, requestId);
+        if (cd.length == 0) return (game, stakeWei, 0, false); // unsupported game id
 
-        if (h == keccak256(bytes("DICE_0.1"))) { game = 0; stakeWei = 0.1 ether; }
-        else if (h == keccak256(bytes("DICE_0.5"))) { game = 0; stakeWei = 0.5 ether; }
-        else if (h == keccak256(bytes("SLOTS_0.5"))) { game = 2; stakeWei = 0.5 ether; }
-        else if (h == keccak256(bytes("PLINKO_0.5"))) { game = 4; stakeWei = 0.5 ether; }
-        else if (h == keccak256(bytes("ROULETTE_0.5"))) { game = 5; stakeWei = 0.5 ether; }
-        else if (h == keccak256(bytes("CLUSTER_0.5"))) { game = 6; stakeWei = 0.5 ether; }
-        else return (0, 0, 0, false);
+        try IPlayerAgentRegistryMin(playerRegistry).executeBet(player, game, stakeWei, cd) returns (uint256 id) {
+            betId = id; placed = true;
+        } catch { placed = false; }
+    }
 
-        bytes memory cd;
+    /// @dev Build the casino place*Bet calldata for a (game, stake). Shared by
+    ///      the agent-native tool path. clientSeed derived per-request.
+    function _buildPlaceCalldata(uint8 game, uint256 stakeWei, address player, uint256 requestId)
+        internal view returns (bytes memory cd)
+    {
+        bytes32 cs = keccak256(abi.encodePacked(player, requestId, block.timestamp));
         if (game == 0) {
-            // placeDiceBet(uint8 target, bool over, bytes32 clientSeed)
-            cd = abi.encodeWithSignature("placeDiceBet(uint8,bool,bytes32)", uint8(60), true, bytes32(cs));
+            cd = abi.encodeWithSignature("placeDiceBet(uint8,bool,bytes32)", uint8(60), true, cs);
         } else if (game == 2) {
-            // placeSlotsBet(bytes32 clientSeed, bool useFreeSpin)
-            cd = abi.encodeWithSignature("placeSlotsBet(bytes32,bool)", bytes32(cs), false);
+            cd = abi.encodeWithSignature("placeSlotsBet(bytes32,bool)", cs, false);
         } else if (game == 4) {
-            // placeplinkoBet(uint8 risk, bytes32 clientSeed) - risk 1 = medium
-            cd = abi.encodeWithSignature("placeplinkoBet(uint8,bytes32)", uint8(1), bytes32(cs));
+            cd = abi.encodeWithSignature("placeplinkoBet(uint8,bytes32)", uint8(1), cs);
         } else if (game == 5) {
-            // placeRouletteBets((uint8 kind,uint8 number,uint96 amount)[])
-            // Single RED bet (kind=1) at the full stake.
             cd = abi.encodeWithSignature(
                 "placeRouletteBets((uint8,uint8,uint96)[])",
                 _singleRouletteBet(uint8(1), uint8(0), uint96(stakeWei))
             );
         } else if (game == 6) {
-            cd = abi.encodeWithSignature("placeClusterBet(bytes32,bool)", bytes32(cs), false);
+            cd = abi.encodeWithSignature("placeClusterBet(bytes32,bool)", cs, false);
         }
+        // else: cd stays empty -> unsupported
+    }
 
-        // Try executeBet. Wrap in try/catch so a per-player failure (e.g.
-        // empty vault, game paused, daily limit hit at race) doesn't kill
-        // the cron loop or the LLM-callback handler.
-        try IPlayerAgentRegistryMin(playerRegistry).executeBet(player, game, stakeWei, cd) returns (uint256 id) {
-            betId = id;
-            placed = true;
-        } catch {
-            placed = false;
-        }
+    /// @dev External wrapper so the tuple decode can be try/catch'd (Solidity
+    ///      can only try external calls). Returns the subset of the
+    ///      inferToolsChat tuple the handler needs.
+    function decodeToolsChat(bytes memory result) external pure returns (
+        string memory finishReason,
+        string[] memory updatedRoles,
+        string[] memory updatedMessages,
+        bytes[] memory pendingToolCalls
+    ) {
+        ( string memory fr, , string[] memory ur, string[] memory um, , bytes[] memory ptc )
+            = abi.decode(result, (string, string, string[], string[], string[], bytes[]));
+        return (fr, ur, um, ptc);
     }
 
     /// @dev Workaround: encode a typed [(uint8,uint8,uint96)] tuple array
@@ -1233,4 +1377,7 @@ interface IPlayerAgentRegistryMin {
     ///         caller's balance to cover the user's share of the LLM cost.
     ///         Caller must be in registry.executors.
     function collectAgentFee(address player, uint256 amount) external;
+    /// @notice The player's on-chain natural-language strategy, injected
+    ///         verbatim into the per-player LLM prompt.
+    function getStrategy(address player) external view returns (string memory);
 }

@@ -140,6 +140,37 @@ interface ILLMAgent {
         int256 maxValue,
         bool chainOfThought
     ) external returns (int256 response);
+
+    /// @notice An on-chain tool the LLM may call. The agent does NOT execute
+    ///         it - when the model wants to call it, the agent YIELDS the
+    ///         abi-encoded calldata back to the requester (finishReason
+    ///         "tool_calls"), the requester executes it against any contract
+    ///         and RESUMES the conversation by appending a (role:"tool")
+    ///         message. Signature uses Solidity-style human form, e.g.
+    ///         "placeBet(uint8 game, uint96 stakeWei)".
+    struct OnchainTool { string signature; string description; }
+
+    /// @notice Multi-turn chat where the LLM can call MCP tools (auto-executed
+    ///         by the agent) and/or on-chain tools (yielded back as calldata).
+    ///         This is the agent-native path: the model itself decides which
+    ///         contract call to make. Each round-trip is a fresh createRequest
+    ///         + consensus cycle. finishReason is "stop" | "tool_calls" |
+    ///         "max_iterations".
+    function inferToolsChat(
+        string[] memory roles,
+        string[] memory messages,
+        string[] memory mcpServerUrls,
+        OnchainTool[] memory onchainTools,
+        uint256 maxIterations,
+        bool chainOfThought
+    ) external returns (
+        string memory finishReason,
+        string memory response,
+        string[] memory updatedRoles,
+        string[] memory updatedMessages,
+        string[] memory pendingToolCallIds,
+        bytes[] memory pendingToolCalls
+    );
 }
 
 /// @notice JSON API Request Agent (agentId = 13174292974160097713). Fetches

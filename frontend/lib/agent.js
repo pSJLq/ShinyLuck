@@ -230,11 +230,15 @@ async function onRegister() {
     const total = ethers.parseEther(val("[data-sl-total]") || "0");
     const mask = gameMaskFromCheckboxes();
     if (mask === 0) throw new Error("pick at least one game");
-    btn.textContent = "Hashing strategy…";
-    const stratHash = ethers.keccak256(ethers.toUtf8Bytes(raw));
+    // gen-14: the strategy text itself goes on-chain (read by HouseManager and
+    // injected verbatim into the LLM betting prompt). Bound to MAX_STRATEGY_LEN
+    // (200 bytes on the contract) so the tx never reverts on length.
+    if (ethers.toUtf8Bytes(raw).length > 200) {
+      throw new Error("strategy too long (max 200 chars)");
+    }
     btn.textContent = "On-chain register…";
     const value = ethers.parseEther(String(pendingQuote.priceSTT || "0"));
-    const tx = await SL.registry.registerAgent(stratHash, daily, total, mask, { value });
+    const tx = await SL.registry.registerAgent(raw, daily, total, mask, { value });
     const rc = await tx.wait();
     const ev = rc.logs.map((l) => { try { return SL.registry.interface.parseLog(l); } catch { return null; } })
                      .find((p) => p && p.name === "AgentRegistered");

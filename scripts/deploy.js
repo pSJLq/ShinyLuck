@@ -307,6 +307,105 @@ if (typeof window !== "undefined") {
   fs.writeFileSync(cfgPath, cfgContent);
   console.log("[deploy] frontend config updated");
 
+  // Public agent-entry: a static, machine-readable manifest any third-party
+  // agent can fetch (same-origin GET /agent-manifest.json) to DISCOVER the
+  // casino's live state + INVOKE it autonomously - no backend, no API key.
+  // Auto-regenerated every deploy so the addresses never drift. This is the
+  // "Agent-First" front door: one document describes the discovery view, the
+  // direct bet entrypoints, and the managed Player-Agent (inferToolsChat) path.
+  try {
+    const isTestnet = networkLabel === "somniaTestnet";
+    const chain = isTestnet
+      ? { name: "Somnia Testnet (Shannon)", chainId: 50312,
+          rpc: "https://api.infra.testnet.somnia.network",
+          ws: "wss://api.infra.testnet.somnia.network/ws",
+          explorer: "https://shannon-explorer.somnia.network" }
+      : { name: "Somnia Mainnet", chainId: 5031,
+          rpc: "https://api.infra.mainnet.somnia.network/",
+          ws: "wss://api.infra.mainnet.somnia.network/ws",
+          explorer: "https://explorer.somnia.network" };
+
+    const agentManifest = {
+      name: "ShinyLuck",
+      version: "gen-14",
+      description:
+        "Agent-native on-chain casino on Somnia. External agents can discover live odds/limits/open rounds in one read (HouseManager.agentManifest()), place bets directly against the Casino, or register a managed Player Agent whose betting is driven hourly by the Somnia LLM Inference Agent via inferToolsChat (the model itself yields placeBet tool calls).",
+      updatedAt: new Date().toISOString(),
+      chain,
+      contracts: {
+        casino: casinoAddr,
+        houseManager: hmAddr,
+        playerAgentRegistry: regAddr,
+        agentQuorumVerifier: verifierAddr,
+        somniaAgentPlatform: AGENT_PLATFORM,
+      },
+      somniaAgentIds: {
+        llmInference: LLM_AGENT_ID.toString(),
+        jsonApi: process.env.AGENT_ID_JSON || "13174292974160097713",
+        parseWebsite: process.env.AGENT_ID_PARSE || "12875401142070969085",
+      },
+      games: [
+        { id: 0, name: "Dice" }, { id: 1, name: "Crash" }, { id: 2, name: "Slots (Vault.7)" },
+        { id: 3, name: "Mines" }, { id: 4, name: "Plinko" }, { id: 5, name: "Roulette" },
+        { id: 6, name: "Cluster (Sugar.Lab)" },
+      ],
+      // ONE read call returns everything an agent needs to decide + play.
+      discovery: {
+        contract: "houseManager",
+        method: "agentManifest()",
+        description:
+          "Returns live casino state: free bankroll, bonus-mode flag, current roulette round id + bet-window-end + open flag, and per-game (reported RTP bps, max bet wei, paused).",
+        returns:
+          "tuple(address casino, uint256 freeBankrollWei, bool bonusModeActive, uint256 currentRouletteRoundId, uint256 rouletteBetWindowEnd, bool rouletteOpen, tuple(uint8 game, uint16 reportedRtpBps, uint256 maxBetWei, bool paused)[] games)",
+      },
+      // Two ways to play.
+      play: {
+        direct: {
+          description:
+            "Sign + send these Casino transactions yourself. Each bet is provably fair (commit-reveal): you supply a clientSeed; the house reveals its serverSeed at settle. Results land in the BetSettled event.",
+          entrypoints: [
+            "function placeDiceBet(uint8 target, bool over, bytes32 clientSeed) payable returns (uint256 betId)",
+            "function placeSlotsBet(bytes32 clientSeed, bool useFreeSpin) payable returns (uint256 betId)",
+            "function placeClusterBet(bytes32 clientSeed, bool useFreeSpin) payable returns (uint256 betId)",
+            "function placeMinesBet(uint8 mineCount, bytes32 clientSeed) payable returns (uint256 betId)",
+            "function placeplinkoBet(uint8 risk, bytes32 clientSeed) payable returns (uint256 betId)",
+            "function placeCrashBet(uint256 autoCashoutX100) payable returns (uint256 betId)",
+            "function placeRouletteBets(tuple(uint8 kind, uint8 number, uint96 amount)[] bets) payable returns (uint256 firstBetId)",
+          ],
+        },
+        managed: {
+          description:
+            "Register a Player Agent once, fund its AgentVault, and the on-chain House Manager fires an hourly inferToolsChat tick: the Somnia LLM Inference Agent reads your natural-language strategy (stored verbatim on-chain) plus live state, and decides whether to bet by YIELDING a placeBet on-chain tool call, which the House Manager executes from your vault under your stake/game/daily/total limits. You pay only for your own LLM ticks from the vault.",
+          register:
+            "function registerAgent(string strategy, uint256 dailyLimit, uint256 totalLimit, uint8 allowedGamesMask) payable returns (address vault)",
+          update:
+            "function updateAgentParams(uint256 dailyLimit, uint256 totalLimit, uint8 allowedGamesMask, string strategy)",
+          pauseResume: ["function pauseAgent()", "function resumeAgent()"],
+          strategy: { maxChars: 200, storedOnChain: true, readBy: "houseManager (injected verbatim into the LLM prompt)" },
+          allowedGamesMask: "bit i set => GameType(i) allowed, e.g. Dice=bit0(1), Slots=bit2(4), Plinko=bit4(16), Roulette=bit5(32)",
+          onchainTool: {
+            signature: "placeBet(uint8 game, uint96 stakeWei)",
+            description: "The single tool the LLM may call; the House Manager turns it into the right Casino calldata and routes it through the registry/vault.",
+          },
+        },
+      },
+      events: {
+        BetPlaced: "event BetPlaced(uint256 indexed betId, address indexed player, uint8 indexed game, uint256 amount, bytes32 clientSeed, uint256 commitBlock, uint256 seedIdx, bytes params)",
+        BetSettled: "event BetSettled(uint256 indexed betId, address indexed player, uint8 indexed game, bool won, uint256 payout, bytes32 randomness, bytes32 serverSeed, bytes32 clientSeed, bytes32 blockHash, uint256 nonce, bytes resultData)",
+        PlayerDecisionResolved: "event PlayerDecisionResolved(uint256 indexed requestId, address indexed player, string decision, uint8 game, uint256 stakeWei, uint256 betId, bool placed)",
+        PlayerAgentToolCall: "event PlayerAgentToolCall(uint256 indexed requestId, address indexed player, uint8 game, uint256 stakeWei, uint256 betId, bool placed)",
+      },
+      provablyFair: {
+        scheme: "commit-reveal",
+        randomness: "keccak256(serverSeed || clientSeed || blockhash(commitBlock + REVEAL_DELAY) || nonce)",
+        verify: "On BetSettled, recompute the hash from the revealed serverSeed + your clientSeed + the committed blockhash + nonce, and confirm it matches `randomness`.",
+      },
+    };
+    const manifestJsonPath = path.join(__dirname, "..", "frontend", "agent-manifest.json");
+    fs.writeFileSync(manifestJsonPath, JSON.stringify(agentManifest, null, 2));
+    console.log("[deploy] public agent-manifest.json updated →", manifestJsonPath);
+  } catch (e) { console.warn("[deploy] agent-manifest.json write skipped:", e.message); }
+
   // Sync agent-service/.env so the relayer + HM cron pick up the new
   // Casino/Registry/HM addresses without manual editing.
   try {

@@ -268,10 +268,20 @@ sl.<span class="fn">presignClusterSpin</span>(<span class="str">"0.1"</span>);
       <li><code>HouseManager.ReactiveHourlyTick(freeBankrollNow, changeBps)</code> - cron pulse via precompile</li>
       <li><code>HouseManager.RtpAnalysisRequested / RtpAnalysisResolved</code> - LLM agent chain</li>
       <li><code>HouseManager.PlayerDecisionRequested(requestId, player, vaultBalance, spentTodayWei, dailyLimitWei)</code> - per-user LLM decision dispatched</li>
-      <li><code>HouseManager.PlayerDecisionResolved(requestId, player, decision, game, stakeWei, betId, placed)</code> - LLM picked SKIP or a game+stake, executed via vault</li>
+      <li><code>HouseManager.PlayerDecisionResolved(requestId, player, decision, game, stakeWei, betId, placed)</code> - the LLM Player Agent (inferToolsChat) finished a tick: it either yielded a placeBet tool call (executed via the vault) or chose to skip</li>
+      <li><code>HouseManager.PlayerAgentToolCall(requestId, player, game, stakeWei, betId, placed)</code> - the model itself decided the game + stake by calling the on-chain placeBet tool</li>
       <li><code>PlayerAgentRegistry.BetExecuted / AgentVault.AgentFeePaid</code> - executor placed a vault-funded bet / vault paid its share of the LLM call</li>
       <li><code>AgentQuorumVerifier.QuorumResult(betId, requestId, expected, signers, totalWorkers, level, status, sampleResponse)</code></li>
     </ul>
+
+    <h2 id="for-agents">For agents · discover &amp; play autonomously.</h2>
+    <p>ShinyLuck is agent-first: a third-party agent can discover the casino's live state and play it with no backend and no API key. Everything starts from one machine-readable manifest:</p>
+    <ul class="docs-list">
+      <li><a class="cyan" href="agent-manifest.json" target="_blank">/agent-manifest.json</a> - contract addresses, chain config, game ids, bet entrypoints, event schema, and the provably-fair formula. Auto-regenerated on every deploy so the addresses never drift.</li>
+    </ul>
+    <p><b>Discover (one read).</b> Call <code>HouseManager.agentManifest()</code> - it returns live state in a single view: free bankroll, bonus-mode flag, the open roulette round id + bet-window-end, and per-game reported RTP / max bet / paused. No event scraping needed to decide whether and what to bet.</p>
+    <p><b>Play directly.</b> Sign and send the Casino entrypoints yourself: <code>placeDiceBet</code>, <code>placeSlotsBet</code>, <code>placeClusterBet</code>, <code>placeMinesBet</code>, <code>placeplinkoBet</code>, <code>placeCrashBet</code>, <code>placeRouletteBets</code>. You pass a <code>clientSeed</code>; results land in <code>BetSettled</code> and are provably fair (verify the <code>randomness</code> against the revealed <code>serverSeed</code>).</p>
+    <p><b>Or run a managed Player Agent.</b> Call <code>PlayerAgentRegistry.registerAgent(string strategy, uint256 dailyLimit, uint256 totalLimit, uint8 allowedGamesMask)</code> with a plain-English strategy (stored verbatim on-chain, max 200 chars), fund the returned <code>AgentVault</code>, and the on-chain House Manager fires an hourly <code>inferToolsChat</code> tick: the Somnia LLM Inference Agent reads your strategy + live state and decides whether to bet by <em>yielding a <code>placeBet(uint8 game, uint96 stakeWei)</code> on-chain tool call</em>, which the House Manager executes from your vault under your limits. The model itself drives the bet - you only pay for your own LLM ticks from the vault.</p>
 
     <h2 id="fair-details">Provably fair · how the math works.</h2>
     <p>For every bet: <code>randomness = keccak256(serverSeed ‖ clientSeed ‖ blockhash(commitBlock + REVEAL_DELAY) ‖ nonce)</code>. <code>REVEAL_DELAY = 1</code> block. The server seed's hash is committed before any bet binds to its slot (see <code>provisionSeedHashes</code>); the blockhash is unknowable at commit time and only finalises 1 block later. The browser-side verifier on the <a class="cyan" href="fair.html" data-link>Provably Fair</a> page re-derives this exactly and compares against the on-chain value. The Agent Quorum Verifier asks 4 independent LLM workers to do the same - a 3-of-4 majority is the soft confirmation, but the money path doesn't wait on it.</p>
@@ -295,6 +305,7 @@ sl.<span class="fn">presignClusterSpin</span>(<span class="str">"0.1"</span>);
     <a href="#hm-llm">HM ↔ LLM loop</a>
     <a href="#sdk">JS SDK</a>
     <a href="#contracts">Contracts</a>
+    <a href="#for-agents">For agents</a>
     <a href="#fair-details">Provably fair</a>
     <div class="toc-foot">
       <div class="t">Was this helpful?</div>

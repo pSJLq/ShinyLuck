@@ -156,10 +156,14 @@ const CASINO_ABI = [
 ];
 
 const REGISTRY_ABI = [
-  "function registerAgent(bytes32 strategyHash,uint256 dailyLimit,uint256 totalLimit,uint8 allowedGamesMask) payable returns (address)",
+  // gen-14: the natural-language strategy is now stored on-chain (verbatim) so
+  // HouseManager injects it into the per-player LLM prompt. strategyHash is
+  // still derived on-chain (keccak256 of the string) as an integrity commitment.
+  "function registerAgent(string strategy,uint256 dailyLimit,uint256 totalLimit,uint8 allowedGamesMask) payable returns (address)",
   "function pauseAgent() external",
   "function resumeAgent() external",
-  "function updateAgentParams(uint256,uint256,uint8,bytes32) external",
+  "function updateAgentParams(uint256 dailyLimit,uint256 totalLimit,uint8 allowedGamesMask,string strategy) external",
+  "function getStrategy(address) view returns (string)",
   "function getPermission(address) view returns (tuple(address player,address vault,bytes32 strategyHash,uint256 dailyLimit,uint256 totalLimit,uint8 allowedGamesMask,bool active,uint256 spentToday,uint256 spentTotal,uint64 lastResetDay))",
   "event AgentRegistered(address indexed player,address indexed vault,bytes32 strategyHash,uint256 dailyLimit,uint256 totalLimit,uint8 allowedGamesMask)",
 ];
