@@ -958,9 +958,10 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     // 256-block EVM blockhash window, or the entropy block (commitBlock +
     // REVEAL_DELAY) expires before settle and every round refunds with result
     // 0. Somnia testnet runs ~0.1s/block, so 256 blocks is only ~26s; a 30s
-    // window made round games physically unsettleable. 10s = ~100 blocks
-    // leaves ~150 blocks of settle headroom and survives further speed-ups.
-    uint256 public constant CRASH_BET_WINDOW = 10 seconds;
+    // window made round games physically unsettleable. 15s = ~150 blocks
+    // leaves ~106 blocks (~10s) of settle headroom - comfortable for a human
+    // to place chips while still settling well inside the blockhash window.
+    uint256 public constant CRASH_BET_WINDOW = 15 seconds;
     uint256 public constant CRASH_ROUND_TIMEOUT = 5 minutes;
     uint256 public constant CRASH_MIN_AUTOCASHOUT = 101;
     uint256 public constant CRASH_MAX_AUTOCASHOUT = 10000;
@@ -1184,10 +1185,10 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     // ROULETTE  (round-based · up to 5 bets per player per round)
     // =====================================================================
 
-    // See CRASH_BET_WINDOW: 10s keeps the round inside the 256-block blockhash
-    // reveal window at Somnia's ~0.1s block time, so rounds actually settle
-    // with real randomness instead of always timing out to result 0.
-    uint256 public constant ROULETTE_BET_WINDOW = 10 seconds;
+    // See CRASH_BET_WINDOW: 15s keeps the round inside the 256-block blockhash
+    // reveal window at Somnia's ~0.1s block time (settle headroom ~10s), so
+    // rounds settle with real randomness AND humans get enough time to bet.
+    uint256 public constant ROULETTE_BET_WINDOW = 15 seconds;
     uint256 public constant ROULETTE_ROUND_TIMEOUT = 5 minutes;
     uint8   public constant ROULETTE_MAX_BETS_PER_PLAYER = 5;
 
