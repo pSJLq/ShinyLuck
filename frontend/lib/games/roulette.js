@@ -41,9 +41,11 @@ const ABI = [
   "function currentRouletteRoundId() view returns (uint256)",
   "function totalRouletteRounds() view returns (uint256)",
   "function getRouletteRound(uint256) view returns (uint64 id,uint64 betWindowEnd,uint64 commitBlock,uint32 seedIdx,bool settled,uint8 resultNumber,bytes32 serverSeed,uint256 bettorCount)",
+  "function bonusModeActive() view returns (bool)",
   "event RouletteRoundStarted(uint256 indexed roundId,uint256 betWindowEnd,uint256 commitBlock,uint256 seedIdx)",
   "event RouletteRoundSettled(uint256 indexed roundId,uint8 resultNumber,bytes32 serverSeed,bytes32 randomness)",
   "event RouletteBetPlaced(uint256 indexed roundId,address indexed player,uint8 kind,uint8 number,uint256 amount)",
+  "event BonusModeActivated(uint256 until,string reasoning)",
 ];
 
 let ro = null;
@@ -146,6 +148,18 @@ function setGate(connected) {
 async function refreshBalance() {
   try {
     if (game && SL.address && SL.provider) game.setBalance(await SL.provider.getBalance(SL.address));
+  } catch (_) {}
+}
+
+// Reflect the agent-triggered Bonus Mode on the wheel: when active, roulette
+// pays ROULETTE_BONUS_BOOST_X100 extra on wins (contract-side) and the
+// component shows its hotter bonus reskin. Driven by the same on-chain
+// bonusModeActive() the slots use, so the news/bankroll agents reach roulette.
+let bonusShown = false;
+async function refreshBonus() {
+  try {
+    const on = await casino().bonusModeActive();
+    if (on !== bonusShown) { bonusShown = on; if (game) game.setBonusMode(on); }
   } catch (_) {}
 }
 
@@ -322,6 +336,10 @@ function mount() {
   // Keep the chain-clock skew fresh (clocks drift); cheap one-block read.
   refreshChainSkew();
   setInterval(refreshChainSkew, 15000);
+  // Agent-driven Bonus Mode reskin + payout boost reflection.
+  refreshBonus();
+  setInterval(refreshBonus, 12000);
+  try { casino().on("BonusModeActivated", () => refreshBonus()); } catch (_) {}
   tick();
 }
 

@@ -291,6 +291,10 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         if (changeBps > 1500) {
             try casino.adjustSlotRTP(uint8(Casino.GameType.SLOTS), 9000, "auto: bankroll growth >15%") {} catch {}
             try casino.adjustSlotRTP(uint8(Casino.GameType.CLUSTER), 9000, "auto: bankroll growth >15%") {} catch {}
+            // Roulette has a fixed math edge (can't flex RTP), so the agent's
+            // lever here is the per-round max bet: tighten it to 2% of free
+            // bankroll on strong growth (more retentive, caps tail risk).
+            try casino.setGameMaxBet(Casino.GameType.ROULETTE, (free * 200) / 10000) {} catch {}
             emit ReasoningRequested("LOWER_SLOT_RTP", changeBps, free, nowTs);
         } else if (changeBps > 1000) {
             try casino.activateBonusMode(60, "auto: bankroll growth >10%, rewarding players") {} catch {}
@@ -299,10 +303,16 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             try casino.pauseGame(Casino.GameType.CRASH) {} catch {}
             try casino.pauseGame(Casino.GameType.CLUSTER) {} catch {}
             try casino.pauseGame(Casino.GameType.SLOTS) {} catch {}
+            // Roulette can't lower RTP to protect the bankroll, so on a hard
+            // drop the agent pauses it alongside the other hot games.
+            try casino.pauseGame(Casino.GameType.ROULETTE) {} catch {}
             emit ReasoningRequested("PAUSE_HOT_GAMES", changeBps, free, nowTs);
         } else if (changeBps < -1000) {
             try casino.adjustSlotRTP(uint8(Casino.GameType.SLOTS), 9400, "auto: bankroll drop >10%, rebuilding trust") {} catch {}
             try casino.adjustSlotRTP(uint8(Casino.GameType.CLUSTER), 9400, "auto: bankroll drop >10%, rebuilding trust") {} catch {}
+            // Loosen roulette's max bet back up (5% of free bankroll) to keep
+            // it inviting while we rebuild trust on the slot side.
+            try casino.setGameMaxBet(Casino.GameType.ROULETTE, (free * 500) / 10000) {} catch {}
             emit ReasoningRequested("RAISE_SLOT_RTP", changeBps, free, nowTs);
         }
 
@@ -318,8 +328,13 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         // (~60s) and read that fresh value. Order isn't guaranteed but the
         // LLM tolerates "competitorRtp = 0" with a graceful fallback
         // ("unknown - research feed not yet fetched") in the prompt.
-        try this.requestCompetitorRtp(uint8(Casino.GameType.SLOTS))   {} catch {}
-        try this.requestCompetitorRtp(uint8(Casino.GameType.CLUSTER)) {} catch {}
+        try this.requestCompetitorRtp(uint8(Casino.GameType.SLOTS))    {} catch {}
+        try this.requestCompetitorRtp(uint8(Casino.GameType.CLUSTER))  {} catch {}
+        // Roulette too - the LLM compares our fixed 94.74% (5.26% edge) against
+        // the competitor benchmark and the result feeds the agent's max-bet /
+        // pause decisions above, so the autonomous house reasons about roulette
+        // every hour like it does the slots.
+        try this.requestCompetitorRtp(uint8(Casino.GameType.ROULETTE)) {} catch {}
         // Stage 3: ask the Parse Website Agent for the latest crypto news
         // headline. The callback fires an LLM Inference to decide BIG_BONUS
         // vs HOLD - bullish headlines auto-activate Bonus Mode 60 min.

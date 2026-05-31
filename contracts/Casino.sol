@@ -1191,6 +1191,14 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant ROULETTE_BET_WINDOW = 15 seconds;
     uint256 public constant ROULETTE_ROUND_TIMEOUT = 5 minutes;
     uint8   public constant ROULETTE_MAX_BETS_PER_PLAYER = 5;
+    // Bonus Mode payout boost for roulette (basis 100). The wheel's multipliers
+    // are fixed (36x/3x/2x), so unlike slots we can't halve a bps edge - instead
+    // a winning round pays this much extra while the agent-triggered bonus
+    // window is active (+8% here). The reserve already locks the full base
+    // multiplier; the boost is only added on an actual win and is still subject
+    // to the free-bankroll guard, so it can never overpay the house. This is
+    // what makes the news-driven Bonus Mode agent visibly reach roulette too.
+    uint256 public constant ROULETTE_BONUS_BOOST_X100 = 108;
 
     enum RouletteBetKind {
         STRAIGHT, RED, BLACK, EVEN, ODD, LOW, HIGH, DOZEN_1, DOZEN_2, DOZEN_3
@@ -1307,6 +1315,10 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         _hasOpenRouletteRound = false;
         emit RouletteRoundSettled(r.roundId, result, stored, randomness);
 
+        // Bonus Mode (agent-triggered) lifts roulette payouts by
+        // ROULETTE_BONUS_BOOST_X100 while the window is open. Snapshot it once
+        // for the whole round so every bettor in this round gets the same deal.
+        bool roundBonus = bonusModeActive();
         for (uint256 i; i < r.bettors.length; i++) {
             address p = r.bettors[i];
             RouletteBetInput[] storage bets = rouletteBets[r.roundId][p];
@@ -1318,7 +1330,15 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
                 uint256 reserveAdd = uint256(bets[j].amount) * mult - bets[j].amount;
                 lockedReserve -= reserveAdd;
                 if (_rouletteWins(bets[j].kind, bets[j].number, result)) {
-                    totalPayout += uint256(bets[j].amount) * mult;
+                    uint256 win = uint256(bets[j].amount) * mult;
+                    // Bonus boost: only the extra above the base payout, and
+                    // only if free bankroll can cover it (never overpay house).
+                    if (roundBonus) {
+                        uint256 boosted = (win * ROULETTE_BONUS_BOOST_X100) / 100;
+                        uint256 extra = boosted - win;
+                        if (extra <= freeBankroll()) win = boosted;
+                    }
+                    totalPayout += win;
                 }
             }
             if (totalPayout > 0) {
