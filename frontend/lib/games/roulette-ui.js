@@ -1217,6 +1217,16 @@ export class RouletteGame {
     const idx = this._wheel.indexOfNumber(resultNumber);
     if (idx < 0) { this._error({ kind: "resolve", message: "Unknown result number: " + resultNumber }); return; }
 
+    // The fast reveal-bot can settle a round a second or two after its window
+    // closes - which may be BEFORE the visible countdown has ticked down to 0.
+    // Starting the spin at "3" looks broken. So if the betting clock still has
+    // time on it, hold the result and let the countdown drain to 0 first, then
+    // lock + spin. The spin always begins exactly when the timer hits zero.
+    const msToZero = this._countEnd - performance.now();
+    if (this.phase === "open" && msToZero > 0) {
+      await this._wait(Math.min(msToZero, 12000)); // cap so a bad clock can't hang us
+    }
+
     if (this.phase === "open") this._enterLock();
     await this._wait(this.phase === "lock" ? 300 : 0);
 
