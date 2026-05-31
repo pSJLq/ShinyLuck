@@ -350,9 +350,13 @@ async function main() {
   const pendingRounds = new Map();
 
   const loop = async () => {
-    let cur;
-    try { cur = BigInt(await provider.getBlockNumber()); }
-    catch (e) { console.warn(`[reveal-bot] getBlockNumber: ${e.message}`); return; }
+    let cur, chainNowSec;
+    try {
+      const blk = await provider.getBlock("latest");
+      cur = BigInt(blk.number);
+      chainNowSec = Number(blk.timestamp); // chain clock, NOT Date.now()
+    }
+    catch (e) { console.warn(`[reveal-bot] getBlock: ${e.message}`); return; }
 
     // 1. eth_getLogs for ALL relevant topics in the new window.
     const fromBlock = lastScannedBlock + 1;
@@ -422,7 +426,10 @@ async function main() {
       }
     }
 
-    const nowSec = Math.floor(Date.now() / 1000);
+    // Use the chain clock (latest block timestamp), not Date.now() - the host
+    // wall-clock can drift from chain time and make windowClosed/timeout checks
+    // wrong (rounds settling too late -> refund -> result 0).
+    const nowSec = chainNowSec;
 
     // 2. Sweep per-bet pending.
     for (const [betId, info] of pending) {
@@ -691,15 +698,23 @@ async function main() {
   // No pending map, no scan dependency. This is what guarantees a real result
   // instead of a timeout-refund (result 0).
   const fastSettleOne = async (label, currentFn, getFn, settleFn) => {
-    let id, r;
-    try { id = await casino[currentFn](); r = await casino[getFn](id); }
-    catch (_) { return; }
+    let id, r, blk;
+    try {
+      id = await casino[currentFn]();
+      r = await casino[getFn](id);
+      blk = await provider.getBlock("latest");
+    } catch (_) { return; }
     if (r.settled) return;
-    const nowS = Math.floor(Date.now() / 1000);
-    if (nowS < Number(r.betWindowEnd)) return;        // window still open
-    let head;
-    try { head = BigInt(await provider.getBlockNumber()); } catch (_) { return; }
-    const age = head - BigInt(r.commitBlock);
+    // Gate on the CHAIN clock + block age, never on Date.now(). The contract
+    // closes the window when block.timestamp >= betWindowEnd, and the Railway
+    // server's wall-clock can drift seconds from chain time - gating on
+    // Date.now() made the settler think the window was "still open" until its
+    // clock caught up, by which point the entropy block (age 257) had already
+    // expired -> forced refund -> result 0. Using the latest block's timestamp
+    // removes that skew entirely.
+    const chainNow = Number(blk.timestamp);
+    if (chainNow < Number(r.betWindowEnd)) return;    // window still open (chain time)
+    const age = BigInt(blk.number) - BigInt(r.commitBlock);
     if (age <= REVEAL_DELAY) return;                  // not revealable yet
     if (age > REVEAL_DELAY + BLOCKHASH_WINDOW) return;// expired -> main loop refunds
     const seed = seedStore.get(Number(r.seedIdx));
