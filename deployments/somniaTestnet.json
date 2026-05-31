@@ -2,20 +2,20 @@
   "network": "somniaTestnet",
   "chainId": "50312",
   "deployer": "0x3fFa302E620492C8Fb43426a0e54E537C0d937A6",
-  "deploymentBlock": 393518558,
+  "deploymentBlock": 396676068,
   "addresses": {
-    "casino": "0x7983E6D858cd683C243ABe71b8729861E8020F6f",
-    "houseManager": "0x6fa6fb34C3864072fd27d63Cc1D136cD9833D402",
-    "agentQuorumVerifier": "0x7AFEbafc0727fe654285eCA0656E83c56028bAF5",
-    "playerAgentRegistry": "0x8D220A04231b7E473032eD0D00B3fc7061512d59"
+    "casino": "0x0e969E514E86e7608966921a4D381088623ccf39",
+    "houseManager": "0x6E2676b66A6f39BfeD2f27bFF4b4472459C48708",
+    "agentQuorumVerifier": "0x60FC484fA79AEBCdeCE35e1FC64744Eb77Db1838",
+    "playerAgentRegistry": "0x2d854fC59c14D641beA8694bed51F9d3eB25228E"
   },
   "agents": {
     "platform": "0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776",
     "llmAgentId": "12847293847561029384"
   },
   "seedBatch": {
-    "size": 200,
+    "size": 1000,
     "firstHashIdx": 0
   },
-  "deployedAt": "2026-05-27T13:42:37.194Z"
+  "deployedAt": "2026-05-31T06:01:08.862Z"
 }
