@@ -163,7 +163,6 @@ async function onSettled(id, resultNumber, fair) {
   resolvedRounds.add(id);
   resolving = true;
   try { await game.resolveRound(displayResult(resultNumber)); } catch (_) {}
-  resolving = false;
   // Provably-fair: show the REAL revealed server seed + randomness from the
   // RouletteRoundSettled event, with a Shannon Explorer link to verify.
   try {
@@ -176,7 +175,10 @@ async function onSettled(id, resultNumber, fair) {
     });
   } catch (_) {}
   if (placedRounds.has(id)) { placedRounds.delete(id); claimAndRefresh(); }
-  tick();
+  // Hold the landed result on screen for a beat before opening the next round,
+  // so the winning number is readable (resolving stays true so the
+  // RoundStarted handler defers). Then release + reconcile to the next round.
+  setTimeout(() => { resolving = false; tick(); }, 2500);
 }
 
 // Pull serverSeed + randomness for a settled round from its event log so the
@@ -286,10 +288,15 @@ function mount() {
       onSettled(Number(roundId), Number(resultNumber), { serverSeed, randomness, txHash });
     });
     // Open the round the INSTANT it starts, straight from the event payload -
-    // no RPC round-trip. This is what gives players the full ~10s window
-    // instead of however many seconds were left by the time a poll noticed.
+    // no RPC round-trip. This is what gives players the full window instead of
+    // whatever was left by the time a poll noticed. BUT never open a new round
+    // while the previous round's spin animation is still playing (resolving) -
+    // that reset the countdown to "10 / BETTING OPEN" on top of the PAYOUT
+    // wheel and froze the timer. If we're mid-spin, just let onSettled's
+    // trailing tick() open the next round once the animation finishes.
     c.on("RouletteRoundStarted", (roundId, betWindowEnd, commitBlock, seedIdx, ev) => {
       try {
+        if (resolving) return;
         const id = Number(roundId);
         if (resolvedRounds.has(id) || id === uiRoundId) return;
         const endMs = endMsFromChain(Number(betWindowEnd));
@@ -299,7 +306,7 @@ function mount() {
           game.setRound({ roundId: id, betWindowEndMs: endMs, isOpen: true, bettorCount: 0 });
         }
       } catch (_) {}
-      tick();
+      if (!resolving) tick();
     });
     c.on("RouletteBetPlaced", (roundId, player, kind, number, amount) => {
       // Surface OTHER players' bets in the live feed (our own already show).
