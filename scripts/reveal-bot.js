@@ -484,43 +484,43 @@ async function main() {
     //      - refund is allowed only after the round timeout (5 min + buffer)
     //    Checking settled flag onchain before either action keeps us from
     //    bouncing reverts forever on already-finished rounds.
-    for (const [key, info] of pendingRounds) {
-      const age = cur - info.commitBlock;
-      if (age < 0n) continue;
-      // First - check if the round is already settled on-chain (some other
-      // caller may have done it).
-      let roundState;
-      try {
-        roundState = info.kind === "crash"
-          ? await casino.getCrashRound(info.roundId)
-          : await casino.getRouletteRound(info.roundId);
-      } catch (_) { roundState = null; }
-      if (roundState && roundState.settled) { pendingRounds.delete(key); continue; }
-
-      // Try settle when window closed + REVEAL_DELAY blocks elapsed.
+    // CRITICAL TIMING: at ~0.1s/block the 256-block blockhash window is only
+    // ~28s. A round's bet window closes ~10s after open, leaving < 18s to
+    // settle before the entropy block expires (-> forced refund -> result 0).
+    // So round settle MUST be eager: we (a) sort pending rounds by how close
+    // they are to expiry and settle the most urgent first, (b) skip the
+    // redundant getRouletteRound pre-check (the settle tx reverts harmlessly
+    // if already settled), and (c) do NOT await tx.wait() - blocking the loop
+    // on each receipt is what let rounds pile up past the window. Fire and
+    // let the next tick confirm via the on-chain settled flag.
+    const roundList = [...pendingRounds.entries()]
+      .map(([key, info]) => ({ key, info, age: cur - info.commitBlock }))
+      .filter((x) => x.age >= 0n)
+      .sort((a, b) => Number(b.age - a.age)); // oldest (closest to expiry) first
+    for (const { key, info, age } of roundList) {
+      // Try settle when window closed + REVEAL_DELAY blocks elapsed, and the
+      // entropy block has NOT yet expired (else go straight to refund below).
       const windowClosed = nowSec >= info.betWindowEnd;
       const readyToReveal = age > REVEAL_DELAY;
-      if (windowClosed && readyToReveal) {
+      const expired = age > REVEAL_DELAY + BLOCKHASH_WINDOW;
+      if (windowClosed && readyToReveal && !expired) {
         const seed = seedStore.get(info.seedIdx);
-        if (!seed) {
-          // No seed yet - HM cron will refill; keep this round around.
-          continue;
-        }
+        if (!seed) continue; // no seed yet - keep the round around
         const fn = info.kind === "crash" ? "settleCrashRound" : "settleRouletteRound";
         try {
+          // No tx.wait(): submit and move on so a backlog can't blow the
+          // ~28s window. Optimistically drop from pending; if the tx fails
+          // the cold-start scan re-adds the round next sweep.
           const tx = await casino[fn](info.roundId, seed);
-          await tx.wait();
-          console.log(`[reveal-bot] settled ${info.kind} round ${info.roundId} tx=${tx.hash}`);
+          console.log(`[reveal-bot] settle ${info.kind} round ${info.roundId} submitted tx=${tx.hash} (age=${age})`);
           pendingRounds.delete(key);
           continue;
         } catch (e) {
           const msg = e.shortMessage || e.message;
           if (/RoundAlreadySettled/.test(msg)) { pendingRounds.delete(key); continue; }
-          // Try refund path below only on RevealExpired (256-block window).
-          if (!/RevealExpired/.test(msg)) {
-            // RevealTooEarly / RoundClosed → wait next tick
-            continue;
-          }
+          if (/RevealTooEarly|RoundClosed/.test(msg)) continue; // retry next tick
+          if (!/RevealExpired/.test(msg)) { console.warn(`[reveal-bot] settle ${info.roundId}: ${msg}`); continue; }
+          // RevealExpired -> fall through to refund below
         }
       }
       // Refund only on hard timeout (blockhash window expired OR betWindowEnd
