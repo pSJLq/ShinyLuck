@@ -681,13 +681,57 @@ async function main() {
     }
   };
 
-  console.log(`[reveal-bot] running (poll=${POLL_MS}ms, keepalive=${ROUND_KEEPALIVE}, ws=${wsProvider ? "on" : "off"}, gas-autopilot=on)`);
+  // ───────────────── DEDICATED FAST ROUND-SETTLER ─────────────────
+  // The main loop() does a lot (scan + per-bet sweep + keepalive) and can run
+  // late, but round games have a HARD ~26s deadline (256 blocks at 0.1s/block)
+  // from commit to settle, and the bet window eats the first ~10s of that. So
+  // round settle gets its own tight, self-contained ticker that does ONLY:
+  // read the current crash+roulette round, and if its window has closed, it's
+  // unsettled, and the entropy block has NOT expired -> settle it immediately.
+  // No pending map, no scan dependency. This is what guarantees a real result
+  // instead of a timeout-refund (result 0).
+  const fastSettleOne = async (label, currentFn, getFn, settleFn) => {
+    let id, r;
+    try { id = await casino[currentFn](); r = await casino[getFn](id); }
+    catch (_) { return; }
+    if (r.settled) return;
+    const nowS = Math.floor(Date.now() / 1000);
+    if (nowS < Number(r.betWindowEnd)) return;        // window still open
+    let head;
+    try { head = BigInt(await provider.getBlockNumber()); } catch (_) { return; }
+    const age = head - BigInt(r.commitBlock);
+    if (age <= REVEAL_DELAY) return;                  // not revealable yet
+    if (age > REVEAL_DELAY + BLOCKHASH_WINDOW) return;// expired -> main loop refunds
+    const seed = seedStore.get(Number(r.seedIdx));
+    if (!seed) return;
+    try {
+      const tx = await casino[settleFn](id, seed);   // no await wait(): stay snappy
+      console.log(`[reveal-bot] fast-settle ${label} round ${id} tx=${tx.hash} (age=${age})`);
+    } catch (e) {
+      const msg = e.shortMessage || e.message;
+      if (!/RoundAlreadySettled|RevealTooEarly|RoundClosed/.test(msg)) {
+        console.warn(`[reveal-bot] fast-settle ${label} ${id}: ${msg}`);
+      }
+    }
+  };
+  let fastBusy = false;
+  const FAST_SETTLE_MS = parseInt(process.env.FAST_SETTLE_MS || "1000", 10);
+  const fastSettleTick = async () => {
+    if (fastBusy) return; fastBusy = true;
+    try {
+      await fastSettleOne("roulette", "currentRouletteRoundId", "getRouletteRound", "settleRouletteRound");
+      await fastSettleOne("crash", "currentCrashRoundId", "getCrashRound", "settleCrashRound");
+    } catch (_) {} finally { fastBusy = false; }
+  };
+
+  console.log(`[reveal-bot] running (poll=${POLL_MS}ms, fast-settle=${FAST_SETTLE_MS}ms, keepalive=${ROUND_KEEPALIVE}, ws=${wsProvider ? "on" : "off"}, gas-autopilot=on)`);
   await loop();
   await maybeTopup();
   setInterval(() => {
     loop().catch((e) => console.warn(`[reveal-bot] loop: ${e.message}`));
     maybeTopup().catch(() => {});
   }, POLL_MS);
+  setInterval(() => { fastSettleTick().catch(() => {}); }, FAST_SETTLE_MS);
   await new Promise(() => {});
 }
 
