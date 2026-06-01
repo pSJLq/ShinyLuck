@@ -126,10 +126,18 @@ async function rebalanceMaxBets(state) {
 
 async function bankrollSwingCheck(state) {
   const bankroll = await casino.freeBankroll();
+  // Reset the baseline if it is missing, stale, OR was captured against a
+  // DIFFERENT casino. Without the casino-address guard a redeploy carried the
+  // old casino's higher bankroll baseline into the fresh one, so the very first
+  // hourly tick saw a phantom >20% "drop" and paused every game (only Sugar,
+  // on the cluster path, kept working). That is exactly the bug that took the
+  // whole board offline.
   if (state.hourStartBankroll === null || state.hourStartTs === undefined ||
+      state.hourStartCasino !== CASINO_ADDR ||
       Date.now() - state.hourStartTs > BANKROLL_PERIOD) {
     state.hourStartBankroll = bankroll.toString();
     state.hourStartTs = Date.now();
+    state.hourStartCasino = CASINO_ADDR;
     saveState(state);
     return;
   }
@@ -137,6 +145,7 @@ async function bankrollSwingCheck(state) {
   if (startBR === 0n) {
     state.hourStartBankroll = bankroll.toString();
     state.hourStartTs = Date.now();
+    state.hourStartCasino = CASINO_ADDR;
     saveState(state);
     return;
   }
@@ -158,8 +167,11 @@ async function bankrollSwingCheck(state) {
     state.hourStartBankroll = bankroll.toString();
     state.hourStartTs = Date.now();
     saveState(state);
-  } else if (diff < 0n && absBps >= 2000n) {
-    // −20% over the window → pause all games
+  } else if (diff < 0n && absBps >= 2000n && (-diff) >= ethers.parseEther("10")) {
+    // −20% over the window AND a real ≥10 STT loss → pause all games. The
+    // absolute floor stops a tiny swing (or a stale/cross-deploy baseline) from
+    // taking the whole board offline; pausing everything is a heavy action that
+    // should only fire on a genuinely large drawdown the operator must review.
     const reason =
       (await llmNarrate(`The house lost ${ethers.formatEther(-diff)} STT (${absBps}bps) in the past hour. As House Manager Agent, briefly justify pausing all games for operator review.`)) ||
       `-${ethers.formatEther(-diff)} STT (${Number(absBps)/100}%) in 60min → pausing all games for review.`;
