@@ -141,6 +141,15 @@ let game = null;
 let uiRoundId = -1;            // round currently shown OPEN in the UI
 let uiRoundEndMs = 0;          // betWindowEnd (ms) of the round shown OPEN
 let resolving = false;         // true while a settle spin animation is playing
+// True from the moment the shown round's betting window closes until its result
+// has been resolved (spun). The chain opens the NEXT round the instant the
+// current one's window closes - BEFORE the current round settles - so without
+// this guard the UI would roll forward to round N+1's fresh countdown while it
+// still owes the player the spin for round N. That produced the broken order
+// "countdown -> drawing winning number -> a SECOND countdown -> spin". While
+// awaiting, we hold on the locked round so the sequence is simply
+// "countdown -> drawing -> spin -> next countdown".
+let awaitingResult = false;
 const resolvedRounds = new Set();
 const placedRounds = new Set();// rounds where the local player placed a bet
 
@@ -186,6 +195,7 @@ async function onSettled(id, resultNumber, fair) {
   if (!game || resolvedRounds.has(id)) return;
   resolvedRounds.add(id);
   resolving = true;
+  awaitingResult = false;       // result is in; the spin now plays
   try { await game.resolveRound(displayResult(resultNumber)); } catch (_) {}
   // Provably-fair: show the REAL revealed server seed + randomness from the
   // RouletteRoundSettled event, with a Shannon Explorer link to verify.
@@ -239,7 +249,16 @@ async function tick() {
         await onSettled(uiRoundId, Number(r.resultNumber ?? r[5]), fair || { serverSeed: r.serverSeed ?? r[6] });
         return;
       }
+      // Shown round's window has closed but it hasn't settled yet -> we are
+      // waiting for its result. Latch awaitingResult so we DON'T roll forward
+      // to the next open round (which the chain has already started). The
+      // component is showing "drawing winning number"; the next tick that sees
+      // settled=true will spin it. This is what keeps the order correct.
+      const closed = Date.now() >= bettingDeadlineMs(Number(r.betWindowEnd ?? r[1]));
+      if (closed) { awaitingResult = true; return; }
     }
+    // Not awaiting a result -> safe to advance to the latest open round.
+    awaitingResult = false;
     const cur = await readCurrentRound();
     if (!cur) return;
     const endMs = endMsFromChain(cur.betWindowEnd);
@@ -329,7 +348,11 @@ function mount() {
     // trailing tick() open the next round once the animation finishes.
     c.on("RouletteRoundStarted", (roundId, betWindowEnd, commitBlock, seedIdx, ev) => {
       try {
-        if (resolving) return;
+        // Hold while a spin is playing OR while we still owe the shown round its
+        // result. The chain opens this next round the instant the current
+        // window closes, well before the current round settles - rolling the UI
+        // forward now would show a phantom second countdown before the spin.
+        if (resolving || awaitingResult) return;
         const id = Number(roundId);
         if (resolvedRounds.has(id) || id === uiRoundId) return;
         const endMs = endMsFromChain(Number(betWindowEnd));
@@ -340,7 +363,7 @@ function mount() {
           game.setRound({ roundId: id, betWindowEndMs: deadlineMs, isOpen: true, bettorCount: 0 });
         }
       } catch (_) {}
-      if (!resolving) tick();
+      if (!resolving && !awaitingResult) tick();
     });
     c.on("RouletteBetPlaced", (roundId, player, kind, number, amount) => {
       // Surface OTHER players' bets in the live feed (our own already show).
