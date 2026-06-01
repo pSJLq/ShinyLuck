@@ -717,13 +717,10 @@ async function main() {
   // unsettled, and the entropy block has NOT expired -> settle it immediately.
   // No pending map, no scan dependency. This is what guarantees a real result
   // instead of a timeout-refund (result 0).
-  const fastSettleOne = async (label, currentFn, getFn, settleFn) => {
-    let id, r, blk;
-    try {
-      id = await casino[currentFn]();
-      r = await casino[getFn](id);
-      blk = await provider.getBlock("latest");
-    } catch (_) { return; }
+  // Settle ONE specific round id if it is closed, unsettled and not yet expired.
+  const fastSettleRound = async (label, getFn, settleFn, id, blk) => {
+    let r;
+    try { r = await casino[getFn](id); } catch (_) { return; }
     if (r.settled) return;
     // Gate on the CHAIN clock + block age, never on Date.now(). The contract
     // closes the window when block.timestamp >= betWindowEnd, and the Railway
@@ -748,6 +745,21 @@ async function main() {
         console.warn(`[reveal-bot] fast-settle ${label} ${id}: ${msg}`);
       }
     }
+  };
+  // Settle the current round AND the previous one. The keepalive opens round
+  // N+1 the instant round N's window closes, which advances currentRoundId -
+  // so a settler that only looked at "current" ORPHANED the just-closed round
+  // N to the slow main-loop path, and N aged past the 257-block blockhash
+  // window before it settled => result 0 every time. Checking id and id-1 each
+  // tick guarantees the closed round gets settled inside its window.
+  const fastSettleOne = async (label, currentFn, getFn, settleFn) => {
+    let id, blk;
+    try {
+      id = Number(await casino[currentFn]());
+      blk = await provider.getBlock("latest");
+    } catch (_) { return; }
+    if (id >= 1) await fastSettleRound(label, getFn, settleFn, id - 1, blk);
+    await fastSettleRound(label, getFn, settleFn, id, blk);
   };
   let fastBusy = false;
   const FAST_SETTLE_MS = parseInt(process.env.FAST_SETTLE_MS || "1000", 10);
