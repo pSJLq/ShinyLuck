@@ -199,10 +199,15 @@ async function onSettled(id, resultNumber, fair) {
     });
   } catch (_) {}
   if (placedRounds.has(id)) { placedRounds.delete(id); claimAndRefresh(); }
-  // Hold the landed result on screen for a beat before opening the next round,
-  // so the winning number is readable (resolving stays true so the
-  // RoundStarted handler defers). Then release + reconcile to the next round.
-  setTimeout(() => { resolving = false; tick(); }, 2500);
+  // Hold the landed result on screen briefly so the winning number is readable
+  // (resolving stays true so the RoundStarted handler defers), then release +
+  // reconcile to the latest OPEN round. Kept short (1.2s): the full UI cycle
+  // (this hold + lock + 4.2s spin + the chain's 1-4s settle lag) must fit
+  // inside the ~18s on-chain round cadence, else each next countdown starts
+  // mid-window and the visible timer shrinks round over round. tick() always
+  // syncs to the freshest chain round + its REAL remaining window, so a short
+  // hold keeps the UI locked to the chain instead of drifting behind it.
+  setTimeout(() => { resolving = false; tick(); }, 1200);
 }
 
 // Pull serverSeed + randomness for a settled round from its event log so the

@@ -265,14 +265,12 @@ class Wheel {
     this._lastFret = -1;
     this.audio.ballStart();
 
-    // Wall-clock safety net: the per-frame _update() drives the visual + resolves
-    // at p>=1, but rAF can be throttled (background tab, OS window switch, heavy
-    // GPU) which makes the spin compress to a random 1-3s or stall. This timer
-    // is paced by setTimeout (NOT rAF), so the spin ALWAYS resolves at ~D and
-    // settles cleanly even if frames never arrive. _update's p>=1 path clears it
-    // first when frames DO run normally, so this only fires as a fallback.
+    // Wall-clock safety net for a STALLED spin (background tab / OS window
+    // switch froze rAF so _update never reaches p>=1). Generous slack over D so
+    // a few dropped frames on a healthy spin never trips it - it only rescues a
+    // genuinely stuck animation. The normal completion path clears it first.
     clearTimeout(this._spinGuard);
-    this._spinGuard = setTimeout(() => { this.snapFinish(); }, D + 250);
+    this._spinGuard = setTimeout(() => { this.snapFinish(); }, D + 2000);
 
     return new Promise((resolve) => { this.spin.resolve = resolve; });
   }
@@ -1196,6 +1194,26 @@ export class RouletteGame {
     this._after(1700, () => nb.classList.remove("show"));
     this.audio.lock();
     this._updateReadouts();
+    // The on-chain result lands 1-4s (sometimes more) after the window closes -
+    // the reveal-bot has to mine the settle tx. Without an affordance the wheel
+    // just sits on a frozen "0", which reads as a hang. After the lock flash,
+    // switch to an animated "drawing winning number" state (ellipsis ticker +
+    // ring pulse) so the gap looks intentional. resolveRound() clears it the
+    // instant the result arrives and the spin starts.
+    clearInterval(this._settleTick);
+    this._after(1200, () => {
+      if (this.phase !== "lock") return;       // result already arrived -> spinning
+      const dots = ["drawing winning number", "drawing winning number .", "drawing winning number ..", "drawing winning number ..."];
+      let i = 0;
+      this.$.countcap.textContent = dots[0];
+      this.$.countdown.textContent = "*";
+      this.root.classList.add("rl-settling");
+      this._settleTick = setInterval(() => {
+        if (this.phase !== "lock") { clearInterval(this._settleTick); this.root.classList.remove("rl-settling"); return; }
+        i = (i + 1) % dots.length;
+        this.$.countcap.textContent = dots[i];
+      }, 450);
+    });
   }
 
   _engineOpenFromHost() {
@@ -1267,6 +1285,10 @@ export class RouletteGame {
 
     if (this.phase === "open") this._enterLock();
     await this._wait(this.phase === "lock" ? 300 : 0);
+
+    // Result has arrived: kill the "drawing winning number" settling ticker.
+    clearInterval(this._settleTick);
+    this.root.classList.remove("rl-settling");
 
     this._setPhase("spin");
     this.$.countcap.textContent = "spinning";
@@ -1344,6 +1366,7 @@ export class RouletteGame {
     cancelAnimationFrame(this._countRaf);
     cancelAnimationFrame(this._fxRaf);
     clearInterval(this._feedTimer);
+    clearInterval(this._settleTick);
     window.removeEventListener("resize", this._onResize);
     window.removeEventListener("pointerdown", this._unlockOnce);
     document.removeEventListener("visibilitychange", this._onVisibility);

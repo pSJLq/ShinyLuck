@@ -238,6 +238,12 @@
 .rl-ring-cap { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--rl-muted); margin-top: 6px; }
 .rl-root[data-phase="lock"] .rl-ring-num,
 .rl-root[data-phase="spin"] .rl-ring-num { color: var(--rl-red-2); }
+/* Settling: window closed, waiting for the on-chain result (reveal-bot mines
+   the settle tx 1-4s later). Pulse the ring + center so the gap reads as the
+   chain working, not a hang. Cleared the instant resolveRound() spins. */
+.rl-root.rl-settling .rl-ring-prog { stroke: var(--rl-accent); animation: rl-settle-pulse 1.1s ease-in-out infinite; }
+.rl-root.rl-settling .rl-ring-num  { color: var(--rl-accent); animation: rl-settle-pulse 1.1s ease-in-out infinite; }
+@keyframes rl-settle-pulse { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
 
 .rl-mini-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .rl-mini {
