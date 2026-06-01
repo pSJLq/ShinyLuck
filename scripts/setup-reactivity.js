@@ -27,7 +27,12 @@ const path = require("path");
 // ~0.60 STT/hour, ~14.4 STT/day) doesn't drain back below the floor for at
 // least a week unattended.
 const MIN_OWNER_BALANCE  = ethers.parseEther("32");
-const TOPUP_TARGET_TOTAL = ethers.parseEther("33"); // 32 precompile floor + 1 buffer (Railway gas-autopilot refills HM from bet take)
+// 32 precompile floor + 5 buffer. MUST stay clear of the reveal-bot agent
+// watchdog's MIN_HM_BAL (33 STT): funding to exactly 33 meant one cron tick
+// dropped HM to 32.94, below 33, so the watchdog bailed and the agent chain
+// never fired (RTP/bonus/news all silent). 37 gives headroom for several
+// agent calls above the floor before a refill is needed.
+const TOPUP_TARGET_TOTAL = ethers.parseEther("37");
 
 async function main() {
   const [deployer] = await ethers.getSigners();
