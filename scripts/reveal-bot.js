@@ -563,6 +563,31 @@ async function main() {
           if (!round.settled && Number(round.betWindowEnd) > nowSec) return; // open, no-op
           if (Number(round.betWindowEnd) === 0) return; // race - wait
         } catch (_) { /* never started - proceed */ }
+        // SETTLE-BEFORE-OPEN: if the current round's window has closed but it
+        // is still unsettled AND still inside the blockhash window, settle it
+        // RIGHT HERE before opening the next. Opening N+1 first advances
+        // currentRoundId, so N's settle slips to a later tick and its age
+        // creeps past the 257-block reveal window => refund => result 0. Doing
+        // it inline (await wait) guarantees N lands a real result first.
+        try {
+          if (round && !round.settled && Number(round.betWindowEnd) > 0 && nowSec >= Number(round.betWindowEnd)) {
+            const age = Number(cur) - Number(round.commitBlock);
+            if (age > REVEAL_DELAY && age <= REVEAL_DELAY + BLOCKHASH_WINDOW) {
+              const seed = seedStore.get(Number(round.seedIdx));
+              if (seed) {
+                const settleFn = gameLabel === "crash" ? "settleCrashRound" : "settleRouletteRound";
+                const tx = await casino[settleFn](id, seed);
+                await tx.wait();
+                console.log(`[reveal-bot] keepalive settle ${gameLabel} round ${id} (age=${age}) tx=${tx.hash}`);
+              }
+            }
+          }
+        } catch (e) {
+          const msg = e.shortMessage || e.message;
+          if (!/RoundAlreadySettled|RevealTooEarly|RoundClosed/.test(msg)) {
+            console.warn(`[reveal-bot] keepalive settle ${gameLabel}: ${msg}`);
+          }
+        }
         // SELF-HEAL: an unsettled round whose window closed long ago (past the
         // round timeout) blocks startRound forever with RoundClosed. This
         // happens after a bot restart: the round is older than the cold-start
