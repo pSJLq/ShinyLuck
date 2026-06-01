@@ -1194,25 +1194,16 @@ export class RouletteGame {
     this._after(1700, () => nb.classList.remove("show"));
     this.audio.lock();
     this._updateReadouts();
-    // The on-chain result lands 1-4s (sometimes more) after the window closes -
-    // the reveal-bot has to mine the settle tx. Without an affordance the wheel
-    // just sits on a frozen "0", which reads as a hang. After the lock flash,
-    // switch to an animated "drawing winning number" state (ellipsis ticker +
-    // ring pulse) so the gap looks intentional. resolveRound() clears it the
-    // instant the result arrives and the spin starts.
+    // The on-chain result lands a couple of seconds after the window closes
+    // (the reveal-bot mines the settle tx). Keep it visually quiet - no wordy
+    // "drawing winning number" ticker - just a gently pulsing ring so the brief
+    // gap doesn't read as a frozen hang. resolveRound() clears it the instant
+    // the result arrives and the spin starts.
     clearInterval(this._settleTick);
-    this._after(1200, () => {
+    this._after(900, () => {
       if (this.phase !== "lock") return;       // result already arrived -> spinning
-      const dots = ["drawing winning number", "drawing winning number .", "drawing winning number ..", "drawing winning number ..."];
-      let i = 0;
-      this.$.countcap.textContent = dots[0];
-      this.$.countdown.textContent = "*";
+      this.$.countcap.textContent = "no more bets";
       this.root.classList.add("rl-settling");
-      this._settleTick = setInterval(() => {
-        if (this.phase !== "lock") { clearInterval(this._settleTick); this.root.classList.remove("rl-settling"); return; }
-        i = (i + 1) % dots.length;
-        this.$.countcap.textContent = dots[i];
-      }, 450);
     });
   }
 
