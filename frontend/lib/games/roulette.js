@@ -99,6 +99,16 @@ function endMsFromChain(betWindowEndSec) {
   return betWindowEndSec * 1000 + chainSkewMs;
 }
 
+// The instant the UI must STOP accepting bets. It is PLACE_CUTOFF_MS *before*
+// the on-chain window closes, because a bet tx needs time to sign + mine and
+// the contract reverts RoundClosed once block.timestamp >= betWindowEnd. We
+// feed THIS to the component as its countdown/lock deadline so the visible "0"
+// and the board-lock coincide exactly with when placing actually closes - no
+// more "BETTING OPEN" ticking 3,2,1 while every bet bounces.
+function bettingDeadlineMs(betWindowEndSec) {
+  return endMsFromChain(betWindowEndSec) - PLACE_CUTOFF_MS;
+}
+
 async function readCurrentRound() {
   const c = casino();
   const total = Number(await c.totalRouletteRounds());
@@ -228,10 +238,13 @@ async function tick() {
     const cur = await readCurrentRound();
     if (!cur) return;
     const endMs = endMsFromChain(cur.betWindowEnd);
-    if (!cur.settled && cur.id !== uiRoundId && Date.now() < endMs) {
+    const deadlineMs = bettingDeadlineMs(cur.betWindowEnd);
+    // Only show it OPEN if there is still real room to place a bet (past the
+    // cutoff there is no point - the contract would reject it).
+    if (!cur.settled && cur.id !== uiRoundId && Date.now() < deadlineMs) {
       uiRoundEndMs = endMs;
       uiRoundId = cur.id;
-      game.setRound({ roundId: cur.id, betWindowEndMs: endMs, isOpen: true, bettorCount: cur.bettorCount });
+      game.setRound({ roundId: cur.id, betWindowEndMs: deadlineMs, isOpen: true, bettorCount: cur.bettorCount });
     }
   } catch (_) {}
 }
@@ -252,10 +265,11 @@ function mount() {
       await refreshChainSkew();
       const [cur, recentResults] = await Promise.all([readCurrentRound(), fetchRecent(15)]);
       const endMs = cur ? endMsFromChain(cur.betWindowEnd) : 0;
-      if (cur && !cur.settled && Date.now() < endMs) {
+      const deadlineMs = cur ? bettingDeadlineMs(cur.betWindowEnd) : 0;
+      if (cur && !cur.settled && Date.now() < deadlineMs) {
         uiRoundEndMs = endMs;
         uiRoundId = cur.id;
-        return { roundId: cur.id, betWindowEndMs: endMs, isOpen: true, bettorCount: cur.bettorCount, recentResults };
+        return { roundId: cur.id, betWindowEndMs: deadlineMs, isOpen: true, bettorCount: cur.bettorCount, recentResults };
       }
       // No open round yet (between settle + next open) - seed history only and
       // sit in the idle "waiting for round" state. RouletteRoundStarted (or the
@@ -314,10 +328,11 @@ function mount() {
         const id = Number(roundId);
         if (resolvedRounds.has(id) || id === uiRoundId) return;
         const endMs = endMsFromChain(Number(betWindowEnd));
-        if (Date.now() < endMs) {
+        const deadlineMs = bettingDeadlineMs(Number(betWindowEnd));
+        if (Date.now() < deadlineMs) {
           uiRoundEndMs = endMs;
           uiRoundId = id;
-          game.setRound({ roundId: id, betWindowEndMs: endMs, isOpen: true, bettorCount: 0 });
+          game.setRound({ roundId: id, betWindowEndMs: deadlineMs, isOpen: true, bettorCount: 0 });
         }
       } catch (_) {}
       if (!resolving) tick();
