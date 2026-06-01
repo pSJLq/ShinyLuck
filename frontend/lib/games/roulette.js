@@ -217,7 +217,7 @@ async function onSettled(id, resultNumber, fair) {
   // mid-window and the visible timer shrinks round over round. tick() always
   // syncs to the freshest chain round + its REAL remaining window, so a short
   // hold keeps the UI locked to the chain instead of drifting behind it.
-  setTimeout(() => { resolving = false; tick(); }, 1200);
+  setTimeout(() => { resolving = false; tick(); }, 800);
 }
 
 // Pull serverSeed + randomness for a settled round from its event log so the
@@ -280,7 +280,7 @@ function mount() {
   game = new RouletteGame(root, {
     mode: "production",
     chipDenoms: [0.01, 0.05, 0.1, 0.5],
-    spinMs: 4200, turboSpinMs: 2200, payMs: 3000,
+    spinMs: 3200, turboSpinMs: 2000, payMs: 3000,
     startBalance: 0,
     currency: "STT",
 
