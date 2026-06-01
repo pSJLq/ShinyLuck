@@ -674,15 +674,35 @@ async function main() {
       if (dep >= DEPLOYER_LOW) return;
       const need = DEPLOYER_HIGH - dep;
       const room = hmBal > HM_FLOOR_BUF ? (hmBal - HM_FLOOR_BUF) : 0n;
-      if (room === 0n) {
-        console.warn(`[reveal-bot] deployer low (${ethers.formatEther(dep)} STT) but HM at floor - top up manually`);
+      if (room > 0n) {
+        // Preferred source: HM surplus above the Reactivity floor.
+        const amt = need < room ? need : room;
+        const hmContract = await ethers.getContractAt("HouseManager", manifest.addresses.houseManager, signer);
+        const tx = await hmContract.withdrawTo(signer.address, amt);
+        await tx.wait();
+        console.log(`[reveal-bot] gas auto-topup: pulled ${ethers.formatEther(amt)} STT from HM → deployer (tx=${tx.hash})`);
         return;
       }
-      const amt = need < room ? need : room;
-      const hmContract = await ethers.getContractAt("HouseManager", manifest.addresses.houseManager, signer);
-      const tx = await hmContract.withdrawTo(signer.address, amt);
-      await tx.wait();
-      console.log(`[reveal-bot] gas auto-topup: pulled ${ethers.formatEther(amt)} STT from HM → deployer (tx=${tx.hash})`);
+      // FALLBACK: HM is at its floor. Without a second source the signer drains
+      // to zero and EVERY round/bet settle stops (the wheel froze for hours
+      // exactly this way). The bot's signer is the Casino owner, so pull gas
+      // from the casino bankroll via the (zero-delay) owner-withdraw. Leave a
+      // generous bankroll cushion so we never strand player payouts.
+      const free = await casino.freeBankroll().catch(() => 0n);
+      const BANKROLL_CUSHION = ethers.parseEther("5");
+      const bankRoom = free > BANKROLL_CUSHION ? (free - BANKROLL_CUSHION) : 0n;
+      if (bankRoom === 0n) {
+        console.warn(`[reveal-bot] deployer low (${ethers.formatEther(dep)} STT); HM at floor AND casino bankroll thin (${ethers.formatEther(free)} STT) - top up manually`);
+        return;
+      }
+      const amt = need < bankRoom ? need : bankRoom;
+      try {
+        let tx = await casino.scheduleOwnerWithdraw(amt); await tx.wait();
+        tx = await casino.executeOwnerWithdraw(); await tx.wait();
+        console.log(`[reveal-bot] gas auto-topup (fallback): pulled ${ethers.formatEther(amt)} STT from casino bankroll → deployer (tx=${tx.hash})`);
+      } catch (e) {
+        console.warn(`[reveal-bot] casino-bankroll gas fallback failed: ${e.shortMessage || e.message}`);
+      }
     } catch (e) {
       console.warn(`[reveal-bot] gas auto-topup failed: ${e.shortMessage || e.message}`);
     }
