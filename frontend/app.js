@@ -16,8 +16,10 @@ document.addEventListener('click', (e) => {
 // keeps the card clickable through the sticker.
 document.addEventListener('DOMContentLoaded', () => {
   // vault7 graduated out of beta (reels + spin fully working), so it no
-  // longer gets a BETA card sticker - same tier as sugar/dice now.
-  const BETA_GAMES = ['crash', 'mines', 'plinko', 'roulette'];
+  // longer gets a BETA card sticker - same tier as sugar/dice now. Roulette
+  // also graduated: it is round-based, settles on-chain with real results, and
+  // has its own provably-fair panel - no BETA sticker.
+  const BETA_GAMES = ['crash', 'mines', 'plinko'];
   document.querySelectorAll('a.game[href*="games/"]').forEach((card) => {
     const href = (card.getAttribute('href') || '').toLowerCase();
     if (!BETA_GAMES.some((g) => href.includes('/' + g))) return;
