@@ -158,6 +158,11 @@ class Audio {
     if (mult >= 10) base.forEach((f, i) => setTimeout(() => this._env("sine", f * 2, 0.4, 0.1), 300 + i * 60));
   }
   lose() { this._env("sine", 300, 0.25, 0.06, 180); }
+  // Park / wake the whole context when the tab hides/shows. Stops every
+  // scheduled tone at once (belt-and-suspenders vs the ball drone) and frees
+  // the audio thread while backgrounded.
+  suspend() { if (this.ready && this.ctx && this.ctx.state === "running") this.ctx.suspend(); }
+  resume()  { if (this.ready && this.ctx && this.ctx.state === "suspended") this.ctx.resume(); }
 }
 
 /* ---------------------------------------------------------------------------
@@ -260,10 +265,20 @@ class Wheel {
     this._lastFret = -1;
     this.audio.ballStart();
 
+    // Wall-clock safety net: the per-frame _update() drives the visual + resolves
+    // at p>=1, but rAF can be throttled (background tab, OS window switch, heavy
+    // GPU) which makes the spin compress to a random 1-3s or stall. This timer
+    // is paced by setTimeout (NOT rAF), so the spin ALWAYS resolves at ~D and
+    // settles cleanly even if frames never arrive. _update's p>=1 path clears it
+    // first when frames DO run normally, so this only fires as a fallback.
+    clearTimeout(this._spinGuard);
+    this._spinGuard = setTimeout(() => { this.snapFinish(); }, D + 250);
+
     return new Promise((resolve) => { this.spin.resolve = resolve; });
   }
 
   _settleBall(idx) {
+    clearTimeout(this._spinGuard);
     this.spin = null;
     this.spinning = false;
     this.ball.locked = true;
@@ -272,6 +287,19 @@ class Wheel {
     this.spotlightIndex = idx;
     this.spotlightT = performance.now();
     this.audio.ballStop();
+  }
+
+  /** Force any in-progress spin to its final landed state immediately and
+   *  resolve its promise. Used when the tab is backgrounded: rAF is throttled
+   *  to ~0 there, so without this the spin freezes mid-flight (drone sound
+   *  never stops) and then snaps to "done" in ~1s when you return. Snapping it
+   *  finished on blur means you come back to a settled wheel and silence. */
+  snapFinish() {
+    if (!this.spin) return;
+    const idx = this.spin.targetIndex;
+    const res = this.spin.resolve;
+    this._settleBall(idx);            // clears this.spin, stops the ball drone
+    if (res) res();                   // resolve spinTo() so resolveRound() continues
   }
 
   _update(now) {
@@ -541,7 +569,7 @@ class Wheel {
 
   setBonus(b) { this.bonus = b; }
 
-  destroy() { cancelAnimationFrame(this._raf); if (this._ro) this._ro.disconnect(); this.audio.ballStop(); }
+  destroy() { cancelAnimationFrame(this._raf); clearTimeout(this._spinGuard); if (this._ro) this._ro.disconnect(); this.audio.ballStop(); }
 }
 
 /* ---------------------------------------------------------------------------
@@ -878,6 +906,22 @@ export class RouletteGame {
     // first-gesture audio unlock
     this._unlockOnce = () => { this.audio.unlock(); window.removeEventListener("pointerdown", this._unlockOnce); };
     window.addEventListener("pointerdown", this._unlockOnce);
+
+    // Tab visibility: rAF is throttled to ~0 in a hidden/blurred tab, which
+    // froze the spin mid-flight (the ball-drone oscillator kept playing until
+    // you returned) and made the spin look like a random 1-3s when rAF caught
+    // up. On hide: stop ALL sound immediately AND snap any in-progress spin to
+    // its final landed state so you return to a settled wheel and silence.
+    this._onVisibility = () => {
+      if (document.hidden) {
+        try { this._wheel.snapFinish(); } catch (_) {}
+        try { this.audio.ballStop(); } catch (_) {}
+        try { this.audio.suspend(); } catch (_) {}
+      } else {
+        try { this.audio.resume(); } catch (_) {}
+      }
+    };
+    document.addEventListener("visibilitychange", this._onVisibility);
   }
 
   /* ---------------------- betting ---------------------- */
@@ -1302,6 +1346,7 @@ export class RouletteGame {
     clearInterval(this._feedTimer);
     window.removeEventListener("resize", this._onResize);
     window.removeEventListener("pointerdown", this._unlockOnce);
+    document.removeEventListener("visibilitychange", this._onVisibility);
     this._wheel.destroy();
     this.audio.ballStop();
     this.root.innerHTML = "";
