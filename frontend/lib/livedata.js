@@ -190,11 +190,17 @@ export async function refreshLiveStats() {
   if (!deployed()) return;
   try {
     const c = casino();
-    const [bankroll, bonusActive, blockNumber] = await Promise.all([
+    const [bankroll, bonusActive, blockNumber, maxBetBps] = await Promise.all([
       c.freeBankroll(),
       c.bonusModeActive(),
       provider().getBlockNumber(),
+      c.maxBetBps().catch(() => 100n),
     ]);
+    // The contract caps every bet at min(gameMaxBet, freeBankroll * maxBetBps).
+    // On a small bankroll that bps cap is the REAL limit, so showing the raw
+    // gameMaxBet (e.g. 5 STT) overstates what a player can actually wager
+    // (e.g. 0.84 STT at 1% of an 84 STT bankroll). Compute the bps cap once.
+    const bpsCapWei = (bankroll * BigInt(maxBetBps)) / 10000n;
 
     // NOTE: `totalBets` (settled count) is owned by the feed-events path now -
     // see renderFeed(). We removed the c.totalBets() poll so the two paths
@@ -219,8 +225,11 @@ export async function refreshLiveStats() {
           c.gamePaused(id),
           c.getReportedRTP(id).catch(() => 0),
         ]);
+        // Effective cap = min(hard gameMaxBet, bankroll bps cap). Showing the
+        // smaller of the two is the honest "most you can actually bet now".
+        const effMax = (bpsCapWei > 0n && bpsCapWei < maxBet) ? bpsCapWei : maxBet;
         document.querySelectorAll(`[data-sl="maxBet"][data-game="${name}"]`)
-          .forEach((el) => setText(el, fmtSTT(maxBet) + " STT"));
+          .forEach((el) => setText(el, fmtSTT(effMax) + " STT"));
         document.querySelectorAll(`[data-sl="houseEdge"][data-game="${name}"]`)
           .forEach((el) => setText(el, (Number(edge) / 100).toFixed(2) + "%"));
         document.querySelectorAll(`[data-sl="status"][data-game="${name}"]`)

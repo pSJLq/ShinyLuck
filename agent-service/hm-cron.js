@@ -125,7 +125,14 @@ async function rebalanceMaxBets(state) {
 }
 
 async function bankrollSwingCheck(state) {
-  const bankroll = await casino.freeBankroll();
+  // Use the TOTAL casino balance, NOT freeBankroll(). freeBankroll subtracts
+  // the locked reserve of every in-flight bet, so it dives sharply the instant
+  // a player places a bet (e.g. 84 -> 4 STT while a max-payout reserve is held)
+  // and snaps back when it settles. Sampling that mid-bet read the dip as a
+  // phantom >20% "drop" and paused every game. Total balance only moves on a
+  // real win payout / deposit / withdraw, so it is the honest hour-over-hour
+  // house P&L signal.
+  const bankroll = await provider.getBalance(CASINO_ADDR);
   // Reset the baseline if it is missing, stale, OR was captured against a
   // DIFFERENT casino. Without the casino-address guard a redeploy carried the
   // old casino's higher bankroll baseline into the fresh one, so the very first
