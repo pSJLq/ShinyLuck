@@ -157,7 +157,7 @@ const placedRounds = new Set();// rounds where the local player placed a bet
 // before it lands the contract reverts RoundClosed (the CALL_EXCEPTION users
 // hit). Refuse to submit when under this many ms remain, and tell the user to
 // catch the next round instead of firing a doomed tx.
-const PLACE_CUTOFF_MS = 3500;
+const PLACE_CUTOFF_MS = 3000;
 
 function setGate(connected) {
   const g = document.getElementById("roulette-gate");
@@ -280,7 +280,7 @@ function mount() {
   game = new RouletteGame(root, {
     mode: "production",
     chipDenoms: [0.01, 0.05, 0.1, 0.5],
-    spinMs: 3200, turboSpinMs: 2000, payMs: 3000,
+    spinMs: 4200, turboSpinMs: 2200, payMs: 3000,
     startBalance: 0,
     currency: "STT",
 

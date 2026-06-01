@@ -607,6 +607,19 @@ async function main() {
             console.warn(`[reveal-bot] self-heal refund ${gameLabel}: ${msg}`);
           }
         }
+        // INTER-ROUND GAP: hold the next open until ROUND_GAP_S after the
+        // previous round's window closed. The chain used to open N+1 the
+        // instant N closed, but the browser is still playing N's ~4-5s spin
+        // animation - so by the time the UI shows N+1 its window had already
+        // drained and the player saw a jittery 1-5s countdown. Waiting out the
+        // spin means N+1 opens fresh and the UI catches its FULL window, giving
+        // a stable countdown every round. The gap is filled visually by the
+        // spin + result display, so there is no dead time on screen. Only
+        // applies once a round exists (skip on first bootstrap).
+        const ROUND_GAP_S = parseInt(process.env.ROUND_GAP_S || "6", 10);
+        if (round && Number(round.betWindowEnd) > 0 && nowSec < Number(round.betWindowEnd) + ROUND_GAP_S) {
+          return; // still inside the post-round gap - open on a later tick
+        }
         try {
           const startFn = gameLabel === "crash" ? "startCrashRound" : "startRouletteRound";
           const tx = await casino[startFn]();
