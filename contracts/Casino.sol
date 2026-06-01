@@ -300,6 +300,29 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         maxBetBps = bps;
     }
 
+    /// @notice Min/max for the round-based bet windows. The MAX is the hard
+    ///         ceiling that still keeps a round settleable inside the 256-block
+    ///         EVM blockhash window at Somnia's ~0.1s block time: 256 blocks =
+    ///         ~26s total, minus ~4s of settle/mine margin => 22s. Going past it
+    ///         makes the entropy block expire before settle and every round
+    ///         refunds as result 0 (the original "always 0" bug). MIN keeps it
+    ///         sane. Only takes effect on the NEXT round opened.
+    uint256 public constant MIN_BET_WINDOW = 5 seconds;
+    uint256 public constant MAX_BET_WINDOW = 22 seconds;
+    event BetWindowSet(uint8 indexed game, uint256 seconds_);
+
+    function setRouletteBetWindow(uint256 secs) external onlyOwner {
+        require(secs >= MIN_BET_WINDOW && secs <= MAX_BET_WINDOW, "window out of range");
+        rouletteBetWindow = secs;
+        emit BetWindowSet(uint8(GameType.ROULETTE), secs);
+    }
+
+    function setCrashBetWindow(uint256 secs) external onlyOwner {
+        require(secs >= MIN_BET_WINDOW && secs <= MAX_BET_WINDOW, "window out of range");
+        crashBetWindow = secs;
+        emit BetWindowSet(uint8(GameType.CRASH), secs);
+    }
+
     function pauseGame(GameType g) external {
         if (msg.sender != houseManager && msg.sender != owner()) revert NotHouseManager();
         gamePaused[g] = true;
@@ -958,10 +981,11 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     // 256-block EVM blockhash window, or the entropy block (commitBlock +
     // REVEAL_DELAY) expires before settle and every round refunds with result
     // 0. Somnia testnet runs ~0.1s/block, so 256 blocks is only ~26s; a 30s
-    // window made round games physically unsettleable. 15s = ~150 blocks
-    // leaves ~106 blocks (~10s) of settle headroom - comfortable for a human
-    // to place chips while still settling well inside the blockhash window.
-    uint256 public constant CRASH_BET_WINDOW = 15 seconds;
+    // window made round games physically unsettleable. 20s = ~197 blocks
+    // leaves ~59 blocks (~6s) of settle headroom - the safe maximum that still
+    // gives players real time to place chips. Now owner-tunable (capped at
+    // MAX_BET_WINDOW) so the window can be adjusted live without a redeploy.
+    uint256 public crashBetWindow = 20 seconds;
     uint256 public constant CRASH_ROUND_TIMEOUT = 5 minutes;
     uint256 public constant CRASH_MIN_AUTOCASHOUT = 101;
     uint256 public constant CRASH_MAX_AUTOCASHOUT = 10000;
@@ -1000,7 +1024,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         if (nextHashIndex >= seedHashes.length) revert NoSeedAvailable();
         uint32 seedIdx = uint32(nextHashIndex++);
         uint64 commitBlock = uint64(block.number);
-        uint64 betWindowEnd = uint64(block.timestamp + CRASH_BET_WINDOW);
+        uint64 betWindowEnd = uint64(block.timestamp + crashBetWindow);
         _crashRounds.push();
         CrashRound storage r = _crashRounds[_crashRounds.length - 1];
         r.roundId = uint64(_crashRounds.length - 1);
@@ -1185,10 +1209,11 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     // ROULETTE  (round-based · up to 5 bets per player per round)
     // =====================================================================
 
-    // See CRASH_BET_WINDOW: 15s keeps the round inside the 256-block blockhash
-    // reveal window at Somnia's ~0.1s block time (settle headroom ~10s), so
+    // See crashBetWindow: 20s keeps the round inside the 256-block blockhash
+    // reveal window at Somnia's ~0.1s block time (settle headroom ~6s), so
     // rounds settle with real randomness AND humans get enough time to bet.
-    uint256 public constant ROULETTE_BET_WINDOW = 15 seconds;
+    // Owner-tunable (capped at MAX_BET_WINDOW) - adjust live, no redeploy.
+    uint256 public rouletteBetWindow = 20 seconds;
     uint256 public constant ROULETTE_ROUND_TIMEOUT = 5 minutes;
     uint8   public constant ROULETTE_MAX_BETS_PER_PLAYER = 5;
     // Bonus Mode payout boost for roulette (basis 100). The wheel's multipliers
@@ -1246,7 +1271,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         _rouletteRounds.push();
         RouletteRound storage r = _rouletteRounds[_rouletteRounds.length - 1];
         r.roundId = uint64(_rouletteRounds.length - 1);
-        r.betWindowEnd = uint64(block.timestamp + ROULETTE_BET_WINDOW);
+        r.betWindowEnd = uint64(block.timestamp + rouletteBetWindow);
         r.commitBlock = uint64(block.number);
         r.seedIdx = seedIdx;
         currentRouletteRoundId = r.roundId;

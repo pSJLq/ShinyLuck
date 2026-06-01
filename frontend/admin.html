@@ -117,6 +117,23 @@
       </div>
     </div>
 
+    <div class="adm-card">
+      <h3>Round bet windows · roulette / crash</h3>
+      <div class="adm-row"><span class="l">Roulette window</span><span class="v cyan"><span data-sl-adm-roul-window>-</span> s</span></div>
+      <div class="adm-row">
+        <span class="l">Set roulette (5-22s)</span>
+        <span><input class="adm-input" type="text" value="20" data-sl-adm-roul-window-amt /></span>
+        <button class="adm-btn" data-sl-adm-roul-window-set>Set</button>
+      </div>
+      <div class="adm-row"><span class="l">Crash window</span><span class="v cyan"><span data-sl-adm-crash-window>-</span> s</span></div>
+      <div class="adm-row" style="border-bottom:none;">
+        <span class="l">Set crash (5-22s)</span>
+        <span><input class="adm-input" type="text" value="20" data-sl-adm-crash-window-amt /></span>
+        <button class="adm-btn" data-sl-adm-crash-window-set>Set</button>
+      </div>
+      <div class="m" style="opacity:.5; margin-top:10px; font-size:11px; line-height:1.5;">Max 22s: a round must settle inside the 256-block blockhash window (~26s at 0.1s/block), else it expires as result 0. Takes effect on the next round.</div>
+    </div>
+
     <div class="adm-card" style="grid-column: span 2;">
       <h3>Games · status, max-bet, pause control</h3>
       <div data-sl-adm-games>

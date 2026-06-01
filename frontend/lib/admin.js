@@ -27,6 +27,10 @@ const ADMIN_ABI = [
   "function pauseGame(uint8) external",
   "function unpauseGame(uint8) external",
   "function setGameMaxBet(uint8,uint256) external",
+  "function rouletteBetWindow() view returns (uint256)",
+  "function crashBetWindow() view returns (uint256)",
+  "function setRouletteBetWindow(uint256) external",
+  "function setCrashBetWindow(uint256) external",
   "function activateBonusMode(uint256 durationMinutes,string reasoning) external",
   "function scheduleOwnerWithdraw(uint256 amount) external",
   "function executeOwnerWithdraw() external",
@@ -348,12 +352,44 @@ function bindActions() {
       await tx.wait(); refreshBonus();
     } catch (e) { import("./ui.js").then(({ toast }) => toast(e.shortMessage || e.message, { kind: "error", ttl: 6000 })); }
   });
+  $("[data-sl-adm-roul-window-set]")?.addEventListener("click", async () => {
+    if (!isOwner) return;
+    await connect();
+    const secs = parseInt($("[data-sl-adm-roul-window-amt]").value, 10);
+    if (!(secs >= 5 && secs <= 22)) { import("./ui.js").then(({ toast }) => toast("Window must be 5-22s", { kind: "warn" })); return; }
+    try {
+      const tx = await withSigner(casino()).setRouletteBetWindow(secs);
+      await tx.wait(); refreshWindows();
+    } catch (e) { import("./ui.js").then(({ toast }) => toast(e.shortMessage || e.message, { kind: "error", ttl: 6000 })); }
+  });
+  $("[data-sl-adm-crash-window-set]")?.addEventListener("click", async () => {
+    if (!isOwner) return;
+    await connect();
+    const secs = parseInt($("[data-sl-adm-crash-window-amt]").value, 10);
+    if (!(secs >= 5 && secs <= 22)) { import("./ui.js").then(({ toast }) => toast("Window must be 5-22s", { kind: "warn" })); return; }
+    try {
+      const tx = await withSigner(casino()).setCrashBetWindow(secs);
+      await tx.wait(); refreshWindows();
+    } catch (e) { import("./ui.js").then(({ toast }) => toast(e.shortMessage || e.message, { kind: "error", ttl: 6000 })); }
+  });
+}
+
+async function refreshWindows() {
+  try {
+    const c = casinoRO || (casinoRO = new ethers.Contract(CONFIG.casino, ADMIN_ABI, provider()));
+    const [roul, crash] = await Promise.all([
+      c.rouletteBetWindow().catch(() => null),
+      c.crashBetWindow().catch(() => null),
+    ]);
+    const rEl = $("[data-sl-adm-roul-window]"); if (rEl && roul != null) rEl.textContent = roul.toString();
+    const cEl = $("[data-sl-adm-crash-window]"); if (cEl && crash != null) cEl.textContent = crash.toString();
+  } catch (e) { console.warn("[admin] windows:", e.message); }
 }
 
 async function refreshAll() {
   await gateAccess();
   if (!isOwner) return;
-  await Promise.all([refreshTreasury(), refreshBonus(), refreshGames(), refreshReasoning(), refreshAgents(), refreshStats()]);
+  await Promise.all([refreshTreasury(), refreshBonus(), refreshGames(), refreshWindows(), refreshReasoning(), refreshAgents(), refreshStats()]);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
