@@ -2818,6 +2818,53 @@ pre.code-block .cmd { color: #fff; }
    below the four agent cards. Driven by lib/cost-ledger.js which aggregates
    the last 24h of on-chain *Requested events and prices each one using the
    live quoteLlmCost / quoteJsonCost from HouseManager. */
+/* ============== UNIFIED LIVE AGENT STREAM ============== */
+.agent-stream {
+  margin-top: 40px;
+  padding: 24px 28px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  background: linear-gradient(180deg, rgba(139, 92, 246, 0.05) 0%, rgba(34, 211, 238, 0.02) 100%);
+}
+.agent-stream-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 24px; margin-bottom: 16px; flex-wrap: wrap;
+}
+.agent-stream-head h3 {
+  font-size: 16px; letter-spacing: 2px; text-transform: uppercase;
+  margin: 0 0 6px 0; color: var(--fg);
+}
+.agent-stream-sub { font-size: 11px; color: var(--fg-mute); letter-spacing: 0.5px; }
+.agent-stream-pill {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 10px;
+  letter-spacing: 2px; color: var(--green, #4ade80); padding: 4px 10px;
+  border: 1px solid var(--green, #4ade80); border-radius: 2px; font-family: var(--mono);
+}
+.agent-stream-pill .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--green, #4ade80);
+  animation: agent-stream-blink 1.4s ease-in-out infinite;
+}
+@keyframes agent-stream-blink { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+/* Fixed-height scroll body so the panel never resizes as events stream in. */
+.agent-stream-body {
+  height: 340px; overflow-y: auto; font-family: var(--mono); font-size: 12px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.agent-stream-empty { color: var(--fg-dim); opacity: .5; padding: 12px 4px; }
+.agent-stream-row {
+  display: grid; grid-template-columns: 92px 1fr auto; gap: 12px; align-items: baseline;
+  padding: 8px 6px; border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.agent-stream-tag {
+  font-size: 9px; letter-spacing: 1.5px; padding: 2px 6px; border: 1px solid;
+  border-radius: 2px; text-align: center; white-space: nowrap;
+}
+.agent-stream-label {
+  color: var(--fg); line-height: 1.5; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.agent-stream-label a { color: var(--cyan); }
+.agent-stream-ago { color: var(--fg-mute); font-size: 10px; white-space: nowrap; }
+
 .cost-ledger {
   margin-top: 40px;
   padding: 28px 32px;

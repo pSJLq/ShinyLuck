@@ -504,16 +504,16 @@
           <h3>JSON API Agent</h3>
         </div>
         <div class="agent-id">ID: <b data-sl-agent-id="json">-</b></div>
-        <p class="agent-desc">Fetches JSON from public API endpoints and extracts specific values. Available on Somnia Agent Platform; not in the money path.</p>
+        <p class="agent-desc">Fetches competitor casino RTP from a public JSON endpoint. The House Manager calls it before every RTP decision so its edge is set against the live market, not a guess.</p>
         <div class="chips">
+          <span class="chip">competitor RTP</span>
+          <span class="chip">market data</span>
           <span class="chip">oracle</span>
-          <span class="chip">price feed</span>
-          <span class="chip">entropy</span>
         </div>
         <div class="agent-stats">
           <div class="agent-stat"><div class="l">Status</div><div class="v cyan">REGISTERED</div></div>
-          <div class="agent-stat"><div class="l">Used in v1</div><div class="v">no</div></div>
-          <div class="agent-stat"><div class="l">Reserved for</div><div class="v">v2 oracles</div></div>
+          <div class="agent-stat"><div class="l">Role</div><div class="v">RTP benchmark</div></div>
+          <div class="agent-stat"><div class="l">Money path</div><div class="v">yes</div></div>
         </div>
         <div class="agent-bar" style="color: var(--cyan)"></div>
       </div>
@@ -525,16 +525,16 @@
           <h3>LLM Inference Agent</h3>
         </div>
         <div class="agent-id">ID: <b data-sl-agent-id="llm">-</b></div>
-        <p class="agent-desc">String-in, string-out inference. Used by AgentQuorumVerifier as a redundancy check (3-of-4 signers re-derive randomness). Slot themes & HM reasoning narration also flow through here.</p>
+        <p class="agent-desc">The brain. Via inferToolsChat it reads each player-agent's on-chain strategy and calls placeBet itself as an on-chain tool. It also sets slot RTP, narrates House Manager decisions, and backs the 3-of-4 quorum re-derive of every result.</p>
         <div class="chips">
           <span class="chip">qwen3-30b</span>
-          <span class="chip">redundancy check</span>
-          <span class="chip">flavor text</span>
+          <span class="chip">inferToolsChat</span>
+          <span class="chip">on-chain tool calls</span>
         </div>
         <div class="agent-stats">
           <div class="agent-stat"><div class="l">Quorum cfg</div><div class="v purple">3 of 4</div></div>
-          <div class="agent-stat"><div class="l">Consensus</div><div class="v">EXACT</div></div>
-          <div class="agent-stat"><div class="l">Money path</div><div class="v">no</div></div>
+          <div class="agent-stat"><div class="l">Drives</div><div class="v">player bets + RTP</div></div>
+          <div class="agent-stat"><div class="l">Money path</div><div class="v">yes</div></div>
         </div>
         <div class="agent-bar" style="color: var(--purple-2)"></div>
       </div>
@@ -546,15 +546,16 @@
           <h3>Parse Website Agent</h3>
         </div>
         <div class="agent-id">ID: <b data-sl-agent-id="parse">-</b></div>
-        <p class="agent-desc">Scrapes URLs/domains and extracts structured data. Reserved for v2 (external tournament leaderboards). Not yet wired into v1 contracts.</p>
+        <p class="agent-desc">Scrapes a live crypto-news feed each cron tick. A bullish headline lets the House Manager flip Bonus Mode on (house edge × 0.5) - the market literally moves the odds, autonomously.</p>
         <div class="chips">
-          <span class="chip">scraping</span>
-          <span class="chip">v2-reserved</span>
+          <span class="chip">news feed</span>
+          <span class="chip">bonus trigger</span>
+          <span class="chip">sentiment</span>
         </div>
         <div class="agent-stats">
           <div class="agent-stat"><div class="l">Status</div><div class="v" style="color:var(--amber)">REGISTERED</div></div>
-          <div class="agent-stat"><div class="l">Used in v1</div><div class="v">no</div></div>
-          <div class="agent-stat"><div class="l">Money path</div><div class="v">no</div></div>
+          <div class="agent-stat"><div class="l">Role</div><div class="v">bonus signal</div></div>
+          <div class="agent-stat"><div class="l">Money path</div><div class="v">yes</div></div>
         </div>
         <div class="agent-bar" style="color: var(--amber)"></div>
       </div>
@@ -578,6 +579,22 @@
           <div class="agent-stat"><div class="l">Bankroll</div><div class="v" data-sl="bankroll">-</div></div>
         </div>
         <div class="agent-bar" style="color: var(--red)"></div>
+      </div>
+    </div>
+
+    <!-- Unified live agent decision feed: every autonomous action from all four
+         agents in one stream, newest first, straight from on-chain events. This
+         is the single place a visitor SEES the agents acting in real time. -->
+    <div class="agent-stream" data-hover>
+      <div class="agent-stream-head">
+        <div>
+          <h3>Agent activity · live</h3>
+          <span class="agent-stream-sub">every autonomous decision, on-chain, newest first</span>
+        </div>
+        <span class="agent-stream-pill"><span class="dot"></span> LIVE</span>
+      </div>
+      <div class="agent-stream-body" data-sl-agent-stream>
+        <div class="agent-stream-empty">connecting to on-chain agent events…</div>
       </div>
     </div>
 

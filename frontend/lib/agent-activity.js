@@ -146,6 +146,14 @@ function bucketIndex(tsMs) {
   return ACTIVITY_BUCKETS - 1 - Math.floor(age / BUCKET_MS);
 }
 
+// Unified cross-agent stream (newest-first), rendered into the lobby's
+// [data-sl-agent-stream]. Every agent event funnels here so a visitor sees ALL
+// autonomous decisions in one live feed, not split across four cards.
+const STREAM_CAP = 40;
+const _stream = [];   // { agentKey, tsMs, label }
+const STREAM_TAG = { hm: "HOUSE MGR", llm: "LLM", json: "JSON API", parse: "NEWS" };
+const STREAM_COLOR = { hm: "var(--red)", llm: "var(--purple)", json: "var(--cyan)", parse: "var(--amber, #f59e0b)" };
+
 function pushEvent(agentKey, tsMs, label) {
   const s = state[agentKey];
   if (!s) return;
@@ -155,6 +163,35 @@ function pushEvent(agentKey, tsMs, label) {
     s.thoughts.push({ tsMs, label });
     if (s.thoughts.length > 12) s.thoughts.shift();
   }
+  // Feed the unified stream too (dedup by agent+ts+label so the cold-start
+  // scan and the live WS path don't double-insert the same event).
+  if (label) {
+    const uid = `${agentKey}:${tsMs}:${label}`;
+    if (!_stream.some((e) => e.uid === uid)) {
+      _stream.push({ agentKey, tsMs, label, uid });
+      _stream.sort((a, b) => b.tsMs - a.tsMs);
+      if (_stream.length > STREAM_CAP) _stream.length = STREAM_CAP;
+    }
+  }
+}
+
+function renderStream() {
+  const body = document.querySelector("[data-sl-agent-stream]");
+  if (!body) return;
+  if (_stream.length === 0) return; // keep the "connecting…" placeholder
+  const fmtAgo = (ts) => {
+    const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (s < 60) return s + "s ago";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    return Math.floor(s / 3600) + "h ago";
+  };
+  body.innerHTML = _stream.map((e) => (
+    `<div class="agent-stream-row">` +
+      `<span class="agent-stream-tag" style="color:${STREAM_COLOR[e.agentKey] || "var(--fg-mute)"};border-color:${STREAM_COLOR[e.agentKey] || "var(--line)"}">${STREAM_TAG[e.agentKey] || e.agentKey}</span>` +
+      `<span class="agent-stream-label">${e.label}</span>` +
+      `<span class="agent-stream-ago">${fmtAgo(e.tsMs)}</span>` +
+    `</div>`
+  )).join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -331,6 +368,7 @@ const AGENT_COLORS = {
 };
 
 function renderAll() {
+  renderStream();
   for (const key of Object.keys(state)) {
     const card = findCardByAgentKey(key);
     if (!card) continue;
