@@ -451,7 +451,7 @@ async function coldStart() {
 
   for (const ev of events) {
     const tsMs = tsByBlock.get(ev.blockNumber) || (Date.now() - 1000);
-    pushEvent("hm", tsMs, hmLabelFor(ev));
+    pushEvent(hmEventAgentKey(ev), tsMs, hmLabelFor(ev));
   }
   // Paint immediately so the HM card flips from "awaiting first event…" to
   // the latest decision the moment HM data is in - don't wait for the slow
@@ -515,6 +515,15 @@ async function coldStart() {
   renderAll();
   updateHmStats();
   updateLlmStats();
+}
+
+// The HouseManager contract EMITS these events, but the actor differs: player
+// betting decisions are made by the LLM Inference Agent (via inferToolsChat),
+// so they belong under the LLM stream/tag, not "HOUSE MGR". Everything else
+// (reflex, hourly tick, RTP flex, reasoning) is the House Manager itself.
+function hmEventAgentKey(ev) {
+  if (ev.name === "PlayerDecisionResolved" || ev.name === "PlayerAgentToolCall") return "llm";
+  return "hm";
 }
 
 function hmLabelFor(ev) {
@@ -630,7 +639,7 @@ function subscribeRealtime() {
           const log = ev.log || ev;
           const parsedArgs = ev.args || hm.interface.parseLog(log).args;
           const synthetic = { name, args: parsedArgs, blockNumber: log.blockNumber };
-          pushEvent("hm", Date.now(), hmLabelFor(synthetic));
+          pushEvent(hmEventAgentKey(synthetic), Date.now(), hmLabelFor(synthetic));
           if (name === "ReasoningRequested") state.hm.reasoningCount24h++;
           renderAll();
           updateHmStats();
