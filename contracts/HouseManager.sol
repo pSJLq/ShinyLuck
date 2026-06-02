@@ -73,7 +73,11 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
     uint256 public parseAgentId = 12875401142070969085;
     uint256 public llmPricePerWorker   = 0.07 ether;
     uint256 public jsonPricePerWorker  = 0.03 ether;
-    uint256 public parsePricePerWorker = 0.05 ether;
+    // Parse Website agent runs a headless browser, so its per-worker execution
+    // cost is higher than the LLM/JSON agents. 0.05 underfunded it -> the
+    // runner rejected every news fetch with "insufficient budget for execution
+    // cost". 0.12 covers the observed cost with margin.
+    uint256 public parsePricePerWorker = 0.12 ether;
     uint8   public agentSubcommitteeSize = 3;
     uint16  public minRtpBps = 8500;   // 85.00% floor
     uint16  public maxRtpBps = 9700;   // 97.00% ceiling
@@ -574,6 +578,13 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         llmPricePerWorker = llmPerWorker_;
         jsonPricePerWorker = jsonPerWorker_;
         agentSubcommitteeSize = subSize_;
+    }
+
+    /// @notice Parse Website agent per-worker price is tunable on its own (it is
+    ///         pricier than llm/json), so news fetches can be re-funded live
+    ///         without a redeploy if the runner's execution cost shifts.
+    function setParsePricing(uint256 parsePerWorker_) external onlyOwner {
+        parsePricePerWorker = parsePerWorker_;
     }
 
     function setRtpBounds(uint16 minBps, uint16 maxBps) external onlyOwner {

@@ -10,9 +10,9 @@ const { ethers } = require("hardhat");
 // Each redeploy these rotate: previous CURRENT becomes OLD, the freshly
 // deployed pair takes over. Lift them from frontend/lib/config.js's
 // historicalCasinos (oldest entry minus latest) before running.
-const OLD_CASINO = "0xDD9Bf933A1C6E98B559427881201d06DF77BAf3d"; // gen-13 (drained)
-const CUR_CASINO = "0x2367ffbb1f6d90e3Ee116287d4533063ceBf8AB4"; // gen-14 (current, to drain)
-const CUR_HM     = "0x57871fA7c1e54c2F56B708d320bCB4427BEb3eCb"; // gen-14 HM (to drain)
+const OLD_CASINO = "0x2367ffbb1f6d90e3Ee116287d4533063ceBf8AB4"; // gen-14 (drained)
+const CUR_CASINO = "0x47E6600bF736D32E09E4DD1A089C8395734AB12B"; // gen-15 (current, to drain)
+const CUR_HM     = "0xF4BE4b4cA42F99e676d1670FBc0FBF3a2cFdC207"; // gen-15 HM (to drain)
 
 async function main() {
   const [signer] = await ethers.getSigners();

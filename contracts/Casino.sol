@@ -985,7 +985,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     // leaves ~59 blocks (~6s) of settle headroom - the safe maximum that still
     // gives players real time to place chips. Now owner-tunable (capped at
     // MAX_BET_WINDOW) so the window can be adjusted live without a redeploy.
-    uint256 public crashBetWindow = 20 seconds;
+    uint256 public crashBetWindow = 18 seconds;
     uint256 public constant CRASH_ROUND_TIMEOUT = 5 minutes;
     uint256 public constant CRASH_MIN_AUTOCASHOUT = 101;
     uint256 public constant CRASH_MAX_AUTOCASHOUT = 10000;
@@ -1213,7 +1213,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     // reveal window at Somnia's ~0.1s block time (settle headroom ~6s), so
     // rounds settle with real randomness AND humans get enough time to bet.
     // Owner-tunable (capped at MAX_BET_WINDOW) - adjust live, no redeploy.
-    uint256 public rouletteBetWindow = 20 seconds;
+    uint256 public rouletteBetWindow = 18 seconds;
     uint256 public constant ROULETTE_ROUND_TIMEOUT = 5 minutes;
     uint8   public constant ROULETTE_MAX_BETS_PER_PLAYER = 5;
     // Bonus Mode payout boost for roulette (basis 100). The wheel's multipliers
