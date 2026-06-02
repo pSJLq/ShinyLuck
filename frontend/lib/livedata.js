@@ -70,6 +70,7 @@ const CASINO_ABI = [
   "function freeBankroll() view returns (uint256)",
   "function gameMaxBet(uint8) view returns (uint256)",
   "function gamePaused(uint8) view returns (bool)",
+  "function maxBetBps() view returns (uint256)",
   "function houseEdgeBps(uint8) view returns (uint256)",
   "function getReportedRTP(uint8) view returns (uint16)",
   "function bonusModeActive() view returns (bool)",
