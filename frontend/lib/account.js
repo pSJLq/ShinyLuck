@@ -171,6 +171,7 @@ const CASINO_ABI = [
   "function getBet(uint256) view returns (tuple(address player,uint96 amount,uint8 game,uint8 status,uint64 commitBlock,uint64 nonce,uint256 seedIdx,bytes32 clientSeed,bytes params,bytes32 randomness,uint128 payout,bool won))",
   "event BetPlaced(uint256 indexed betId,address indexed player,uint8 indexed game,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
   "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
+  "event BetRefunded(uint256 indexed betId,address indexed player,uint256 amount,string reason)",
   "event WithdrawalClaimed(address indexed player,uint256 amount)",
   "event WithdrawalCredited(address indexed player,uint256 amount)",
   "event BankrollDeposited(address indexed from,uint256 amount)",
@@ -354,14 +355,21 @@ function renderBetsTab(settled, stakeByBet) {
     else if (net < 0n) { pnlText = "− " + fmtSTT(-net); pnlColor = "var(--red)"; }
     else               { pnlText = "0";                  pnlColor = "var(--fg-mute)"; }
     const gId = Number(ev.args.game);
+    // Refunded bets (expired blockhash / round refund) return the stake, so
+    // status is "refunded" and net P&L is 0 - not a win or a loss.
+    const refunded = ev.__refunded === true;
+    const statusText = refunded ? "refunded" : (won ? "won" : "lost");
+    const betIdCell = ev.transactionHash
+      ? `<a href="${explorerTx(ev.transactionHash)}" target="_blank" rel="noopener" class="tbl-dim" style="color:var(--fg-mute);">#${ev.args.betId}</a>`
+      : `#${ev.args.betId}`;
     const tr = document.createElement("tr");
     tr.innerHTML =
-      `<td><a href="${explorerTx(ev.transactionHash)}" target="_blank" rel="noopener" class="tbl-dim" style="color:var(--fg-mute);">#${ev.args.betId}</a></td>` +
+      `<td>${betIdCell}</td>` +
       `<td><span class="game-tag g-${gId}">${game}</span></td>` +
       `<td class="tbl-dim">${stake} STT</td>` +
-      `<td>${won ? "won" : "lost"}</td>` +
-      `<td class="tbl-dim">${mult}</td>` +
-      `<td style="color:${pnlColor}">${pnlText}</td>`;
+      `<td${refunded ? ' class="tbl-dim"' : ""}>${statusText}</td>` +
+      `<td class="tbl-dim">${refunded ? "-" : mult}</td>` +
+      `<td style="color:${refunded ? "var(--fg-mute)" : pnlColor}">${refunded ? "0" : pnlText}</td>`;
     body.appendChild(tr);
   }
   if (panel) mountPager(panel, settled.length, _page.bets, (idx) => {
@@ -484,7 +492,7 @@ async function refresh() {
   const contracts = historicalCasinos();
   const nextDeployBlock = (i) => (i + 1 < contracts.length ? contracts[i + 1].deploymentBlock - 1 : head);
 
-  const allPlaced = [], allSettled = [], allClaims = [], allDeposits = [];
+  const allPlaced = [], allSettled = [], allClaims = [], allDeposits = [], allRefunds = [];
   const perContractFetches = [];
   // Tag fetched events with their source contract address so the BetPlaced →
   // BetSettled stake lookup can use a `${addr}::${betId}` key (betId space
@@ -501,6 +509,11 @@ async function refresh() {
     perContractFetches.push(
       _historyFetch(entry, "BetPlaced",        from, to).then(tag(addr)).then((evs) => allPlaced.push(...evs)).catch(() => {}),
       _historyFetch(entry, "BetSettled",       from, to).then(tag(addr)).then((evs) => allSettled.push(...evs)).catch(() => {}),
+      // Refunds (expired blockhash / round refund) - otherwise a refunded bet
+      // silently vanishes from history. Merged into the bets table as a
+      // "refunded" row (stake returned, P&L 0) so every bet a player made is
+      // accounted for, on every game.
+      _historyFetch(entry, "BetRefunded",      from, to).then(tag(addr)).then((evs) => allRefunds.push(...evs)).catch(() => {}),
       _historyFetch(entry, "WithdrawalClaimed",from, to).then(tag(addr)).then((evs) => allClaims.push(...evs)).catch(() => {}),
       // BankrollDeposited may not exist on the deployed casino (old ABI) -
       // swallowed by .catch so the panel still renders the rest.
@@ -518,6 +531,29 @@ async function refresh() {
   const mySettled = allSettled.filter((ev) => ev.args.player.toLowerCase() === viewAddress);
   const myClaims = allClaims.filter((ev) => ev.args.player.toLowerCase() === viewAddress);
   const myDeposits = allDeposits.filter((ev) => ev.args.from.toLowerCase() === viewAddress);
+
+  // Stake lookup (built below) needs myPlaced; refunds borrow the placed
+  // stake + game so they render as a real row. A refund returns the stake, so
+  // payout == stake and net P&L == 0. We synthesize a BetSettled-shaped object
+  // with a `__refunded` flag the bets table renders as status "refunded".
+  const myRefunds = allRefunds.filter((ev) => ev.args.player.toLowerCase() === viewAddress);
+  const placedByKey = new Map();
+  for (const ev of myPlaced) placedByKey.set(`${ev.__addr || ""}::${ev.args.betId.toString()}`, ev);
+  for (const rf of myRefunds) {
+    const key = `${rf.__addr || ""}::${rf.args.betId.toString()}`;
+    const pl = placedByKey.get(key);
+    mySettled.push({
+      __addr: rf.__addr, __refunded: true,
+      blockNumber: rf.blockNumber, logIndex: rf.logIndex,
+      args: {
+        betId: rf.args.betId,
+        player: rf.args.player,
+        game: pl ? pl.args.game : 0,
+        won: false,
+        payout: rf.args.amount,   // stake returned => P&L 0
+      },
+    });
+  }
   mySettled.sort((a, b) => b.blockNumber - a.blockNumber || b.logIndex - a.logIndex);
 
   // Stake map keyed by `${contractAddress}::${betId}` - betId space is

@@ -1091,12 +1091,21 @@ textarea { resize: none; }
 .feed-table tbody tr {
   border-bottom: 1px solid var(--line);
   transition: background .2s;
+  height: 45px;            /* fixed row height so the panel never resizes */
 }
 .feed-table tbody tr:hover { background: rgba(139,92,246,.04); }
+/* Placeholder rows that pad the feed to a constant FEED_ROW_CAP count. They
+   hold the panel height steady but are visually empty + non-interactive. */
+.feed-table tbody tr.feed-empty { pointer-events: none; }
+.feed-table tbody tr.feed-empty td { color: var(--fg-dim); opacity: .35; }
 .feed-table td {
   padding: 12px 14px;
+  height: 45px;
   color: var(--fg);
   font-feature-settings: "tnum";
+  white-space: nowrap;     /* never wrap to a 2nd line (would change height) */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .feed-table td.dim { color: var(--fg-dim); }
 .feed-table td.win { color: var(--green); }

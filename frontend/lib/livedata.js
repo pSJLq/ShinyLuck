@@ -38,7 +38,10 @@ const AGENT_IDS = {
 // after the deploy aged past that. Chunked at 900 blocks in rpc.js,
 // the larger window is still ~3-4 s on cold start.
 const FEED_LOOKBACK_BLOCKS = 100_000;
-const FEED_ROW_CAP = 30;
+// Fixed display window: the feed always shows exactly the latest FEED_ROW_CAP
+// settled bets. The CSS reserves height for this many rows so the panel never
+// grows/shrinks (and the page never jumps) no matter how fast bets stream in.
+const FEED_ROW_CAP = 12;
 
 function effectiveLookback(maxLookback) {
   if (_deploymentBlock <= 0) return maxLookback;
@@ -282,12 +285,20 @@ function renderFeed() {
 
   const body = document.querySelector("#feed-body");
   if (!body) return;
-  if (_feedRows.length === 0) {
-    body.innerHTML = `<tr><td class="dim" colspan="5">no settled bets in window</td></tr>`;
-    return;
-  }
   body.innerHTML = "";
-  for (const ev of _feedRows.slice(0, FEED_ROW_CAP)) appendFeedRow(body, ev, false);
+  const rows = _feedRows.slice(0, FEED_ROW_CAP);
+  for (const ev of rows) appendFeedRow(body, ev, false);
+  // Pad to a constant FEED_ROW_CAP rows with empty placeholders so the panel
+  // height never changes - whether 0, 3 or 12 bets have streamed in, the feed
+  // table is always the same size and the page never jumps as rows arrive.
+  for (let i = rows.length; i < FEED_ROW_CAP; i++) {
+    const tr = document.createElement("tr");
+    tr.className = "feed-empty";
+    tr.innerHTML =
+      `<td class="feed-dim">${rows.length === 0 && i === 0 ? "awaiting settled bets…" : ""}</td>` +
+      `<td></td><td></td><td></td><td></td>`;
+    body.appendChild(tr);
+  }
 }
 
 function appendFeedRow(body, ev, animate) {
