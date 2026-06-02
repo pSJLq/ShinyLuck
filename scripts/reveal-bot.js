@@ -263,6 +263,51 @@ async function main() {
   setTimeout(() => { agentWatchdog().catch(() => {}); }, 90_000);
   setInterval(() => { agentWatchdog().catch(() => {}); }, WATCHDOG_CHECK_MS);
 
+  // ───────────────── PLAYER-AGENT TICKER ─────────────────
+  // The HouseManager's on-chain hourly cron iterates active players and fires
+  // requestPlayerDecision per player - but Somnia testnet's scheduled-sub
+  // delivery is flaky, so a demo can't rely on it firing reliably. The bot's
+  // signer is the casino owner (authorised on requestPlayerDecision), so it
+  // also pokes each registered+active player on a tight interval. Each call
+  // pulls the user's LLM-fee share from THEIR vault (spam-safe: empty vault =>
+  // skipped), so this never spends the house's money. Set PLAYER_TICK_MS=0 to
+  // disable. This is what makes registered player-agents visibly bet during a
+  // demo instead of waiting up to an hour for the cron.
+  const PLAYER_TICK_MS = parseInt(process.env.PLAYER_TICK_MS || "180000", 10); // 3 min
+  let playerTickBusy = false;
+  async function playerAgentTick() {
+    if (PLAYER_TICK_MS === 0 || playerTickBusy) return;
+    playerTickBusy = true;
+    try {
+      const regAddr = manifest.addresses.playerAgentRegistry;
+      if (!regAddr) return;
+      const reg = new ethers.Contract(regAddr,
+        ["function getActivePlayers(uint256,uint256) view returns (address[])"], signer);
+      const hm = await ethers.getContractAt("HouseManager", manifest.addresses.houseManager, signer);
+      // HM must hold the casino-share + Reactivity floor to fire (same gate the
+      // contract checks); skip quietly if underfunded.
+      const hmBal = await provider.getBalance(manifest.addresses.houseManager);
+      if (hmBal < MIN_HM_BAL) return;
+      let players = [];
+      try { players = await reg.getActivePlayers(0, 10); } catch (_) { return; }
+      for (const p of players) {
+        try {
+          const tx = await hm.requestPlayerDecision(p);
+          await tx.wait();
+          console.log(`[reveal-bot] player-agent tick fired for ${p.slice(0, 10)}… (${tx.hash.slice(0, 12)}…)`);
+        } catch (e) {
+          // insufficient-vault-budget / inactive / not-wired are normal skips
+        }
+      }
+    } catch (e) {
+      console.warn(`[reveal-bot] player-agent tick: ${e.shortMessage || e.message}`);
+    } finally {
+      playerTickBusy = false;
+    }
+  }
+  setTimeout(() => { playerAgentTick().catch(() => {}); }, 120_000);
+  setInterval(() => { playerAgentTick().catch(() => {}); }, PLAYER_TICK_MS);
+
   const currentBlock0 = await provider.getBlockNumber();
 
   // ───────────────────────── PUSH PATH (WebSocket) ──────────────────────────
