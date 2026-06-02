@@ -1326,6 +1326,25 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         game = g; stakeWei = uint256(s);
         if (stakeWei == 0) return (g, 0, 0, false);
 
+        // Clamp the model's chosen stake to what will actually pass executeBet.
+        // An over-eager LLM can ask for e.g. 20 STT on a 0.2 STT/day budget; we
+        // never trust the raw number. Cap = min(remaining daily budget, ~90% of
+        // the vault balance, the per-game max bet) so the bet always lands
+        // instead of wasting the decision on a guaranteed revert.
+        {
+            ( , address vlt, , uint256 dailyLimit, , , , uint256 spentToday, , ) = _readPermission(player);
+            uint256 remDaily = dailyLimit > spentToday ? dailyLimit - spentToday : 0;
+            uint256 vbal = vlt.balance;
+            uint256 vcap = vbal - vbal / 10; // keep 10% for the next agent fee
+            uint256 cap = remDaily < vcap ? remDaily : vcap;
+            if (game <= 6) {
+                uint256 gmax = casino.gameMaxBet(Casino.GameType(game));
+                if (gmax != 0 && gmax < cap) cap = gmax;
+            }
+            if (stakeWei > cap) stakeWei = cap;
+        }
+        if (stakeWei == 0) return (game, 0, 0, false);
+
         bytes memory cd = _buildPlaceCalldata(game, stakeWei, player, requestId);
         if (cd.length == 0) return (game, stakeWei, 0, false); // unsupported game id
 
