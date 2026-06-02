@@ -791,6 +791,46 @@ async function main() {
     }
   };
 
+  // ============== HOUSE-MANAGER AGENT-BUDGET AUTO-REFILL ==============
+  // The HM pays for every agent call (player decisions via inferToolsChat,
+  // competitor RTP via the JSON agent, RTP-analysis + news via the LLM agent).
+  // Its balance must stay ABOVE the Reactivity subscription floor (32 STT) by
+  // enough to cover a tick's worth of calls, otherwise createRequest reverts
+  // with "insufficient-balance" and EVERY agent goes silent. The bot's signer
+  // is the casino owner, so when the HM dips below the working floor we pull
+  // free bankroll surplus from the casino (zero-delay owner-withdraw) and
+  // forward it to the HM, keeping a generous casino payout cushion. This makes
+  // the agent budget self-sustaining: no manual top-ups, no agents stalling.
+  const HM_REFILL_FLOOR  = ethers.parseEther(process.env.HM_REFILL_FLOOR  || "38"); // refill when HM < this (6 above the 32 floor)
+  const HM_REFILL_TARGET = ethers.parseEther(process.env.HM_REFILL_TARGET || "48"); // top HM up to this
+  const CASINO_MIN_KEEP  = ethers.parseEther(process.env.CASINO_MIN_KEEP  || "40"); // never pull casino free bankroll below this
+  let lastHMRefillAt = 0;
+  const HM_REFILL_CHECK_MS = 60_000;
+  const maybeRefillHM = async () => {
+    const now = Date.now();
+    if (now - lastHMRefillAt < HM_REFILL_CHECK_MS) return;
+    lastHMRefillAt = now;
+    try {
+      const hmBal = await provider.getBalance(manifest.addresses.houseManager);
+      if (hmBal >= HM_REFILL_FLOOR) return; // HM healthy, nothing to do
+      const need = HM_REFILL_TARGET - hmBal;
+      const free = await casino.freeBankroll().catch(() => 0n);
+      const room = free > CASINO_MIN_KEEP ? (free - CASINO_MIN_KEEP) : 0n;
+      if (room === 0n) {
+        console.warn(`[reveal-bot] HM agent budget low (${ethers.formatEther(hmBal)} STT) but casino free bankroll at cushion (${ethers.formatEther(free)} STT) - manual refill needed`);
+        return;
+      }
+      const amt = need < room ? need : room;
+      // casino free bankroll -> deployer (owner) -> HM. Owner-withdraw is zero-delay.
+      let tx = await casino.scheduleOwnerWithdraw(amt); await tx.wait();
+      tx = await casino.executeOwnerWithdraw(); await tx.wait();
+      tx = await signer.sendTransaction({ to: manifest.addresses.houseManager, value: amt }); await tx.wait();
+      console.log(`[reveal-bot] HM agent-budget refill: moved ${ethers.formatEther(amt)} STT casino -> HM (HM ${ethers.formatEther(hmBal)} -> ~${ethers.formatEther(hmBal + amt)} STT, tx=${tx.hash})`);
+    } catch (e) {
+      console.warn(`[reveal-bot] HM auto-refill failed: ${e.shortMessage || e.message}`);
+    }
+  };
+
   // ───────────────── DEDICATED FAST ROUND-SETTLER ─────────────────
   // The main loop() does a lot (scan + per-bet sweep + keepalive) and can run
   // late, but round games have a HARD ~26s deadline (256 blocks at 0.1s/block)
@@ -857,9 +897,11 @@ async function main() {
   console.log(`[reveal-bot] running (poll=${POLL_MS}ms, fast-settle=${FAST_SETTLE_MS}ms, keepalive=${ROUND_KEEPALIVE}, ws=${wsProvider ? "on" : "off"}, gas-autopilot=on)`);
   await loop();
   await maybeTopup();
+  await maybeRefillHM();
   setInterval(() => {
     loop().catch((e) => console.warn(`[reveal-bot] loop: ${e.message}`));
     maybeTopup().catch(() => {});
+    maybeRefillHM().catch(() => {});
   }, POLL_MS);
   setInterval(() => { fastSettleTick().catch(() => {}); }, FAST_SETTLE_MS);
   await new Promise(() => {});
