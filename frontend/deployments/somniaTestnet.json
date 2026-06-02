@@ -5,7 +5,7 @@
   "deploymentBlock": 398356916,
   "addresses": {
     "casino": "0x8Ce0eA2fC7aBDeD1F90A4A9CCAB6A66B9469633b",
-    "houseManager": "0x5f81E1F8a3365D261B80FCAfC81b6Ca6b78cbbfA",
+    "houseManager": "0x8a5fC8aDDC1ebEE37c55B22C88b9C44Ba002Da28",
     "agentQuorumVerifier": "0xAd320c486fca8102DB2744B127576F9990228831",
     "playerAgentRegistry": "0xED735D38B6A430AEeD0Dd999Fd2fDA240932148a"
   },

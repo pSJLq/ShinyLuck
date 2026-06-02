@@ -82,15 +82,16 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
     uint16  public minRtpBps = 8500;   // 85.00% floor
     uint16  public maxRtpBps = 9700;   // 97.00% ceiling
 
-    // News-driven Bonus Mode trigger via Parse Website Agent. Every hourly
-    // tick we ask the agent to extract the latest crypto headline from a
-    // configured URL (e.g. cryptopanic.com / coindesk). The headline goes
-    // straight into an LLM Inference call with allowedValues = [BIG_BONUS,
-    // HOLD]: bullish news → activate Bonus Mode 60 min, neutral → skip.
-    // Cheap (~0.15 + 0.24 STT per tick) AND uses the 3rd agent type so the
-    // economics widget on the lobby shows all four platform tracks active.
-    string public newsFeedUrl = "https://jsonblob.com/api/jsonBlob/019e555c-25db-7e74-a62d-31c135e87539";
-    string public newsCssSelector = "$.headline_top";
+    // News-driven Bonus Mode trigger via the LLM Parse Website agent. Every
+    // hourly tick we ask the agent to read a market-wire page and extract the
+    // top crypto headline using a NATURAL-LANGUAGE prompt (ExtractString) -
+    // not a CSS selector. The headline then feeds an LLM Inference call with
+    // allowedValues = [BIG_BONUS, HOLD]: bullish news activates Bonus Mode for
+    // 60 min, neutral skips. Uses the 3rd agent type so the lobby economics
+    // widget shows all platform tracks active. newsExtractPrompt is the NL
+    // extraction instruction; newsFeedUrl is the page the agent reads.
+    string public newsFeedUrl = "https://shiny-luck.vercel.app/agent-news";
+    string public newsExtractPrompt = "Extract the single most important crypto market headline on this page. Return only the headline words as plain text, with no markdown, hashes, asterisks or quotation marks.";
     mapping(uint256 => bool)   public pendingNewsParse;
     mapping(uint256 => string) public pendingNewsHeadline; // requestId → headline awaiting LLM verdict
     string  public lastNewsHeadline;
@@ -115,7 +116,7 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
     // Owner-updatable. Keys this contract reads:
     //   slots_rtp_avg_bps   (uint)  - average RTP across competitor slot games
     //   cluster_rtp_avg_bps (uint)  - average RTP across competitor cluster games
-    string public competitorFeedUrl = "https://jsonblob.com/api/jsonBlob/019e555c-25db-7e74-a62d-31c135e87539";
+    string public competitorFeedUrl = "https://shiny-luck.vercel.app/agent-feed.json";
 
     // Per-requestId routing. analysisGame = SLOTS+1 | CLUSTER+1 (so 0 means
     // "no entry"). competitorGame mirror serves the JSON-API leg.
@@ -661,9 +662,9 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         return agentPlatform.getRequestDeposit() + parsePricePerWorker * agentSubcommitteeSize;
     }
 
-    function setNewsFeed(string calldata url, string calldata selector) external onlyOwner {
+    function setNewsFeed(string calldata url, string calldata extractPrompt) external onlyOwner {
         newsFeedUrl = url;
-        newsCssSelector = selector;
+        newsExtractPrompt = extractPrompt;
     }
 
     function setHourlyTickIntervalSeconds(uint256 s) external onlyOwner {
@@ -741,11 +742,17 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             emit AgentRequestSkipped("news-parse", "insufficient-balance");
             return;
         }
+        string[] memory _opts = new string[](0);
         bytes memory payload = abi.encodeWithSelector(
-            IParseWebsiteAgent.parseText.selector,
-            newsFeedUrl,
-            newsCssSelector,
-            uint8(0)
+            IParseWebsiteAgent.ExtractString.selector,
+            "headline",                                          // key
+            "The single most important crypto market headline",  // description
+            _opts,                                               // options: empty = freeform
+            newsExtractPrompt,                                   // natural-language extraction prompt
+            newsFeedUrl,                                         // page URL to read
+            false,                                               // resolveUrl: scrape this page directly
+            uint8(1),                                            // numPages (capped at 1 when resolveUrl off)
+            uint8(50)                                            // confidenceThreshold (0-100)
         );
         uint256 requestId = agentPlatform.createRequest{value: cost}(
             parseAgentId,

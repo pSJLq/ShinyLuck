@@ -187,17 +187,47 @@ interface IJsonApiAgent {
         external returns (int256 result);
 }
 
-/// @notice Parse Website Agent (agentId = 12875401142070969085). Fetches
-///         a URL and extracts content by CSS selector. Used here to scrape
-///         a public crypto-news / sentiment page once per cron tick and
-///         feed the headline into the LLM decision for Bonus Mode triggers.
-///         Per-worker cost: ~0.05 STT (slightly higher than JSON due to
-///         headless-browser overhead). Consensus = Majority.
+/// @notice LLM Parse Website Agent (agentId = 12875401142070969085). Reads a
+///         web page (or searches a domain) and uses an on-chain LLM to extract
+///         a structured field by NATURAL-LANGUAGE prompt - NOT a CSS selector.
+///         Per-worker cost: 0.10 STT. Consensus = Majority. Signatures
+///         vendored verbatim from
+///         docs.somnia.network/agents/base-agents/llm-parse-website.
+///         NOTE: the earlier in-repo `parseText(string,string,uint8)` was
+///         fabricated and does NOT exist on the agent, so every request failed
+///         consensus (workers cannot decode an unknown function selector).
+///         ExtractString / ExtractANumber are the real entry points.
 interface IParseWebsiteAgent {
-    /// @notice Fetch the inner text of the `index`-th element matching
-    ///         `cssSelector` on `url`. Returns "" if no match.
-    function parseText(string memory url, string memory cssSelector, uint8 index)
-        external returns (string memory result);
+    /// @param key                 field name to extract (e.g. "headline")
+    /// @param description         field description to guide the LLM
+    /// @param options             allowed values; pass an empty array for freeform
+    /// @param prompt              natural-language extraction prompt / search term
+    /// @param url                 page URL (base or direct)
+    /// @param resolveUrl          true = search the domain; false = scrape this URL (1 page)
+    /// @param numPages            max pages to fetch (capped at 1 when resolveUrl is false)
+    /// @param confidenceThreshold min extraction confidence 0-100 to return a result
+    function ExtractString(
+        string memory key,
+        string memory description,
+        string[] memory options,
+        string memory prompt,
+        string memory url,
+        bool resolveUrl,
+        uint8 numPages,
+        uint8 confidenceThreshold
+    ) external returns (string memory result);
+
+    function ExtractANumber(
+        string memory key,
+        string memory description,
+        uint256 min,
+        uint256 max,
+        string memory prompt,
+        string memory url,
+        bool resolveUrl,
+        uint8 numPages,
+        uint8 confidenceThreshold
+    ) external returns (uint256 result);
 }
 
 /// @dev Back-compat aliases - older files in this repo reference these names.
