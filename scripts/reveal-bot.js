@@ -807,6 +807,16 @@ async function main() {
   let lastHMRefillAt = 0;
   const HM_REFILL_CHECK_MS = 60_000;
   const maybeRefillHM = async () => {
+    // DISABLED: pulling casino bankroll into the HM trips the on-chain circuit
+    // breaker (it reads a sharp freeBankroll drop as a loss and pauses every
+    // game) and spends player-payout funds on agent compute. With the agent
+    // fee subsidy at 0 the HM only pays for its own hourly news/RTP/competitor
+    // calls (~1 STT/hour), so a one-time top-up lasts many hours - it does not
+    // need an aggressive auto-pull. The HM is a house-operations budget, funded
+    // directly, kept separate from the payout bankroll. A safe re-enable would
+    // require a casino whose breaker excludes owner-withdrawals.
+    return;
+    // eslint-disable-next-line no-unreachable
     const now = Date.now();
     if (now - lastHMRefillAt < HM_REFILL_CHECK_MS) return;
     lastHMRefillAt = now;
