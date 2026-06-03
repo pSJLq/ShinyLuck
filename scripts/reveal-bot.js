@@ -904,14 +904,40 @@ async function main() {
     } catch (_) {} finally { fastBusy = false; }
   };
 
-  console.log(`[reveal-bot] running (poll=${POLL_MS}ms, fast-settle=${FAST_SETTLE_MS}ms, keepalive=${ROUND_KEEPALIVE}, ws=${wsProvider ? "on" : "off"}, gas-autopilot=on)`);
+  // Auto-unpause watchdog. The casino's on-chain circuit breaker pauses ALL
+  // games when free bankroll drops >20% within an hour (CIRCUIT_BREAKER_LOSS_BPS
+  // is a hard constant). On a busy testnet with a modest bankroll that trips
+  // routinely and freezes every game mid-demo. The keeper signer is the casino
+  // owner, so it just re-opens any paused game. Keeps the testnet always
+  // playable; on mainnet you would leave this off so the breaker can protect
+  // the bankroll.
+  let lastUnpauseAt = 0;
+  const UNPAUSE_CHECK_MS = 20_000;
+  const maybeUnpauseGames = async () => {
+    const now = Date.now();
+    if (now - lastUnpauseAt < UNPAUSE_CHECK_MS) return;
+    lastUnpauseAt = now;
+    for (let g = 0; g < 7; g++) {
+      let paused;
+      try { paused = await casino.gamePaused(g); } catch { continue; }
+      if (!paused) continue;
+      try {
+        const tx = await casino.unpauseGame(g); await tx.wait();
+        console.log(`[reveal-bot] auto-unpaused game ${g} (circuit breaker had tripped)`);
+      } catch (e) { console.warn(`[reveal-bot] unpause game ${g} failed: ${e.shortMessage || e.message}`); }
+    }
+  };
+
+  console.log(`[reveal-bot] running (poll=${POLL_MS}ms, fast-settle=${FAST_SETTLE_MS}ms, keepalive=${ROUND_KEEPALIVE}, ws=${wsProvider ? "on" : "off"}, gas-autopilot=on, unpause-watchdog=on)`);
   await loop();
   await maybeTopup();
   await maybeRefillHM();
+  await maybeUnpauseGames();
   setInterval(() => {
     loop().catch((e) => console.warn(`[reveal-bot] loop: ${e.message}`));
     maybeTopup().catch(() => {});
     maybeRefillHM().catch(() => {});
+    maybeUnpauseGames().catch(() => {});
   }, POLL_MS);
   setInterval(() => { fastSettleTick().catch(() => {}); }, FAST_SETTLE_MS);
   await new Promise(() => {});
