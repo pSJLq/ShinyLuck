@@ -904,31 +904,54 @@ async function main() {
     } catch (_) {} finally { fastBusy = false; }
   };
 
-  // Auto-unpause watchdog. The casino's on-chain circuit breaker pauses ALL
-  // games when free bankroll drops >20% within an hour (CIRCUIT_BREAKER_LOSS_BPS
-  // is a hard constant). On a busy testnet with a modest bankroll that trips
-  // routinely and freezes every game mid-demo. The keeper signer is the casino
-  // owner, so it just re-opens any paused game. Keeps the testnet always
-  // playable; on mainnet you would leave this off so the breaker can protect
-  // the bankroll.
-  let lastUnpauseAt = 0;
-  const UNPAUSE_CHECK_MS = 20_000;
+  // ADAPTIVE circuit-breaker recovery. The casino's on-chain breaker is a real
+  // risk feature we KEEP: a >20% free-bankroll drop in an hour halts the whole
+  // floor to stop the bleeding. The problem was only that it stayed frozen
+  // forever. So instead of defeating it, we make RECOVERY intelligent, like a
+  // market trading halt: when the breaker trips the keeper holds the halt for a
+  // cooldown, then reopens the floor ONLY once the bankroll has stopped
+  // dropping AND sits above a healthy floor. Sharp loss -> timed halt ->
+  // auto-resume when stable; if the bankroll is genuinely depleted it STAYS
+  // halted until it is funded. (The House Manager's RTP / max-bet flex is the
+  // graceful first line of defence; this is the hard stop with smart recovery.)
+  const HALT_COOLDOWN_MS = +(process.env.HALT_COOLDOWN_MS || 90_000);
+  const MIN_HEALTHY_BANKROLL = ethers.parseEther(process.env.MIN_HEALTHY_BANKROLL || "20");
+  let haltSince = 0;
+  let haltBankroll = 0n;
+  let lastHaltLog = 0;
+  let lastRecoveryCheck = 0;
   const maybeUnpauseGames = async () => {
     const now = Date.now();
-    if (now - lastUnpauseAt < UNPAUSE_CHECK_MS) return;
-    lastUnpauseAt = now;
-    for (let g = 0; g < 7; g++) {
-      let paused;
-      try { paused = await casino.gamePaused(g); } catch { continue; }
-      if (!paused) continue;
-      try {
-        const tx = await casino.unpauseGame(g); await tx.wait();
-        console.log(`[reveal-bot] auto-unpaused game ${g} (circuit breaker had tripped)`);
-      } catch (e) { console.warn(`[reveal-bot] unpause game ${g} failed: ${e.shortMessage || e.message}`); }
+    if (now - lastRecoveryCheck < 12_000) return;
+    lastRecoveryCheck = now;
+    // breaker pauses games 0..5; check if any are halted
+    let anyPaused = false;
+    for (let g = 0; g < 6; g++) { try { if (await casino.gamePaused(g)) { anyPaused = true; break; } } catch {} }
+    if (!anyPaused) { haltSince = 0; return; }
+    const free = await casino.freeBankroll().catch(() => 0n);
+    if (haltSince === 0) {
+      haltSince = now;
+      haltBankroll = free;
+      console.log(`[reveal-bot] CIRCUIT HALT: breaker tripped, freeBankroll=${ethers.formatEther(free)} STT. holding the floor ${HALT_COOLDOWN_MS / 1000}s before assessing recovery.`);
+      return;
+    }
+    const cooled = now - haltSince >= HALT_COOLDOWN_MS;
+    const stabilized = free >= (haltBankroll * 999n) / 1000n; // not still bleeding
+    const healthy = free >= MIN_HEALTHY_BANKROLL;
+    if (cooled && stabilized && healthy) {
+      for (let g = 0; g < 7; g++) {
+        try { if (await casino.gamePaused(g)) { const tx = await casino.unpauseGame(g); await tx.wait(); } }
+        catch (e) { console.warn(`[reveal-bot] reopen game ${g}: ${e.shortMessage || e.message}`); }
+      }
+      console.log(`[reveal-bot] CIRCUIT RECOVERED: bankroll stable at ${ethers.formatEther(free)} STT - floor reopened.`);
+      haltSince = 0;
+    } else if (now - lastHaltLog > 30_000) {
+      lastHaltLog = now;
+      console.log(`[reveal-bot] holding halt (cooled=${cooled} stabilized=${stabilized} healthy=${healthy} free=${ethers.formatEther(free)}/${ethers.formatEther(MIN_HEALTHY_BANKROLL)} STT).`);
     }
   };
 
-  console.log(`[reveal-bot] running (poll=${POLL_MS}ms, fast-settle=${FAST_SETTLE_MS}ms, keepalive=${ROUND_KEEPALIVE}, ws=${wsProvider ? "on" : "off"}, gas-autopilot=on, unpause-watchdog=on)`);
+  console.log(`[reveal-bot] running (poll=${POLL_MS}ms, fast-settle=${FAST_SETTLE_MS}ms, keepalive=${ROUND_KEEPALIVE}, ws=${wsProvider ? "on" : "off"}, gas-autopilot=on, circuit-recovery=on)`);
   await loop();
   await maybeTopup();
   await maybeRefillHM();
