@@ -181,10 +181,14 @@ describe("E2E", function () {
   });
 
   it("[8] owner timelocked withdrawal", async function () {
+    // OWNER_WITHDRAW_DELAY is 0 on the testnet build, 24h on mainnet — read it.
+    const delay = await casino.OWNER_WITHDRAW_DELAY();
     await casino.connect(owner).scheduleOwnerWithdraw(ethers.parseEther("0.5"));
-    await expect(casino.connect(owner).executeOwnerWithdraw()).to.be.revertedWith("timelock");
-    await network.provider.send("evm_increaseTime", [24 * 3600 + 1]);
-    await network.provider.send("evm_mine");
+    if (delay > 0n) {
+      await expect(casino.connect(owner).executeOwnerWithdraw()).to.be.revertedWith("timelock");
+      await network.provider.send("evm_increaseTime", [Number(delay) + 1]);
+      await network.provider.send("evm_mine");
+    }
     await casino.connect(owner).executeOwnerWithdraw();
   });
 

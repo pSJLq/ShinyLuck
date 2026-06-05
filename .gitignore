@@ -49,6 +49,13 @@ data/
 .claude/
 slots-from-design/
 
+# Trailer / demo-video capture assets (local-only video tooling, incl. a
+# Python venv under trailer/aigen/venv — must never be committed).
+trailer/
+_trailer_v13_backup/
+frontend/trailer.html
+frontend/lib/trailer-sim.js
+
 # Design scratch (integrated copy lives in frontend/ after wiring)
 Roulettedesign/
 

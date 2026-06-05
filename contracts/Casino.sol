@@ -1779,7 +1779,9 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
             hourStartBankroll > 0 && bankroll < hourStartBankroll &&
             (hourStartBankroll - bankroll) * 10000 / hourStartBankroll >= CIRCUIT_BREAKER_LOSS_BPS
         ) {
-            for (uint8 i; i < 6; i++) { gamePaused[GameType(i)] = true; emit GamePaused(GameType(i), true); }
+            // Pause all 7 GameTypes (0..6). Was `i < 6`, which left CLUSTER
+            // (the flagship Sugar.Lab, id 6) running through a breaker trip.
+            for (uint8 i; i < 7; i++) { gamePaused[GameType(i)] = true; emit GamePaused(GameType(i), true); }
             emit CircuitBreakerTripped(hourStartBankroll, bankroll);
             hourStartTimestamp = nowTs; hourStartBankroll = bankroll;
         }

@@ -76,12 +76,14 @@ describe("AgentQuorumVerifier", function () {
     const { alice, casino, platform, verifier } = await loadFixture(setup);
     const bet = await casino.getBet(0);
     await platform.setNextResponse(bet.randomness);
-    await platform.setNextStatus(2); // FAILED_CONSENSUS
+    // ResponseStatus enum: None=0, Pending=1, Success=2, Failed=3, TimedOut=4.
+    // 3 = Failed (a non-success terminal status) — must force level=0.
+    await platform.setNextStatus(3);
     const price = await verifier.quotePrice();
     await verifier.connect(alice).requestVerification(0, { value: price });
     const args = await fireCallbackAndGetEvent(verifier, platform);
     expect(args.level).to.equal(0);
-    expect(Number(args.status)).to.equal(2);
+    expect(Number(args.status)).to.equal(3);
   });
 
   it("rejects when bet not yet settled", async function () {
@@ -97,20 +99,29 @@ describe("AgentQuorumVerifier", function () {
 
   it("rejects callback from non-platform", async function () {
     const { alice, verifier } = await loadFixture(setup);
+    // Request struct must match the canonical IAgentRequester ABI
+    // (interfaces/ISomniaAgent.sol). The msg.sender check fires first, so the
+    // exact field values are irrelevant — only the shape must decode.
     await expect(verifier.connect(alice).handleResponse(
       999,
       [],
       1,
       {
-        agentId: 0,
+        id: 0,
+        requester: ethers.ZeroAddress,
         callbackAddress: ethers.ZeroAddress,
         callbackSelector: "0x00000000",
-        payload: "0x",
-        subcommitteeSize: 0,
+        subcommittee: [],
+        responses: [],
+        responseCount: 0,
+        failureCount: 0,
         threshold: 0,
+        createdAt: 0,
+        deadline: 0,
+        status: 0,
         consensusType: 0,
-        timeout: 0,
-        deposit: 0,
+        remainingBudget: 0,
+        perAgentBudget: 0,
       }
     )).to.be.revertedWithCustomError(verifier, "WrongCaller");
   });

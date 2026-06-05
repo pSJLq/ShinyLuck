@@ -1,6 +1,8 @@
 const { ethers, network } = require("hardhat");
 
-const REVEAL_DELAY = 3n;
+// Mirror CommitReveal.REVEAL_DELAY (contract constant). Trimmed 3 -> 1 in
+// gen-15 to shave block-time off the spin loop; keep this in sync.
+const REVEAL_DELAY = 1n;
 
 async function mineN(n) {
   for (let i = 0; i < Number(n); i++) await network.provider.send("evm_mine");

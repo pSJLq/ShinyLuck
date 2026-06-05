@@ -1,7 +1,8 @@
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 
-const REVEAL_DELAY = 3n;
+// Must mirror CommitReveal.sol constants (REVEAL_DELAY trimmed 3 -> 1 in gen-15).
+const REVEAL_DELAY = 1n;
 const BLOCKHASH_WINDOW = 256n;
 
 async function mineN(n) {

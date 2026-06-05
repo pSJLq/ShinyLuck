@@ -1,11 +1,11 @@
 # ShinyLuck
 
-**Agent-native on-chain casino on Somnia.** Submission for the Somnia Agentic L1 Hireathon.
+**Agent-native on-chain casino on Somnia.** Submission for the Somnia Agentathon.
 
 > The house is a quorum of autonomous AI agents. Every reel stop, every dice roll, every roulette spin is the `keccak256` of three numbers anyone can audit. House RTP is adjusted hourly by an LLM agent that pulls live competitor data via Somnia's JSON API Agent - no off-chain script, no admin key, fully on-chain.
 
-**Live testnet:** http://localhost:8080 (run `npm run dev:play`)
-**Explorer:** [HouseManager on Shannon Explorer](https://shannon-explorer.somnia.network/address/0xd59C635698c7b368f4b6922c78f589869C8032b7) - watch `RtpAnalysisRequested` / `RtpAnalysisResolved` / `PlayerDecisionRequested` / `PlayerDecisionResolved` events fire hourly
+**Live demo:** https://shiny-luck.vercel.app/ (or run locally with `npm run dev:play` → http://localhost:8080)
+**Explorer:** [HouseManager on Shannon Explorer](https://shannon-explorer.somnia.network/address/0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D) - watch `RtpAnalysisRequested` / `RtpAnalysisResolved` / `PlayerDecisionRequested` / `PlayerDecisionResolved` events fire hourly
 
 ---
 
@@ -18,7 +18,7 @@ Most on-chain "AI casinos" use AI for flavor text. We made the AI **actually run
 3. HM calls the **LLM Inference Agent** (`id 12847293847561029384`, Qwen3-30B) with a prompt that includes our RTP, bankroll, 1h delta, and the just-fetched competitor data. The agent returns one of `LOWER / HOLD / RAISE / BIG_BONUS`.
 4. 3 validator workers reach Majority consensus on byte-identical output. The platform calls back into HM, which applies the decision via `casino.adjustSlotRTP()`.
 
-The whole loop is on Somnia - no Python keeper, no off-chain cron, no oracle middleware. Cost: ~0.72 STT per hour. Verifiable on explorer event-by-event.
+Every casino-**economic** decision - RTP moves, news-driven bonus windows, and player-agent bets - is made on-chain by Somnia Agents, with no oracle middleware in the decision path. (An off-chain keeper handles only operational plumbing - refilling the server-seed pool and nudging per-game max-bet UI caps - and never makes an economic or betting decision; see *Honest disclaimers* below.) Cost of the on-chain loop: ~0.72 STT per hour. Verifiable on explorer event-by-event.
 
 Plus:
 
@@ -123,10 +123,10 @@ All contracts verified on Shannon Explorer.
 
 | Contract              | Address                                                            |
 | --------------------- | ------------------------------------------------------------------ |
-| Casino                | [`0xb17CE5D7bf4eCa28580368FaD1548C99D5a2545C`](https://shannon-explorer.somnia.network/address/0xb17CE5D7bf4eCa28580368FaD1548C99D5a2545C) |
-| HouseManager          | [`0xd59C635698c7b368f4b6922c78f589869C8032b7`](https://shannon-explorer.somnia.network/address/0xd59C635698c7b368f4b6922c78f589869C8032b7) |
-| AgentQuorumVerifier   | [`0xfAe5Fe90252b3b43eE967EaCD9985789fA5BDE77`](https://shannon-explorer.somnia.network/address/0xfAe5Fe90252b3b43eE967EaCD9985789fA5BDE77) |
-| PlayerAgentRegistry   | [`0x3e1dA686c239B95b3d5CbfAE88AD2443c3752D75`](https://shannon-explorer.somnia.network/address/0x3e1dA686c239B95b3d5CbfAE88AD2443c3752D75) |
+| Casino                | [`0xd5dB5F85aDe7e1A6296e15F8E5eB897b24241833`](https://shannon-explorer.somnia.network/address/0xd5dB5F85aDe7e1A6296e15F8E5eB897b24241833) |
+| HouseManager          | [`0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D`](https://shannon-explorer.somnia.network/address/0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D) |
+| AgentQuorumVerifier   | [`0x2FD122E635B6987da4aC4949D88bAcB8b48a9ddF`](https://shannon-explorer.somnia.network/address/0x2FD122E635B6987da4aC4949D88bAcB8b48a9ddF) |
+| PlayerAgentRegistry   | [`0x1aC0D7ddF243ca887e54E4E99545d662c5e08ceC`](https://shannon-explorer.somnia.network/address/0x1aC0D7ddF243ca887e54E4E99545d662c5e08ceC) |
 | SomniaAgentPlatform   | [`0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776`](https://shannon-explorer.somnia.network/address/0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776) |
 | Reactivity precompile | `0x0000000000000000000000000000000000000100`                       |
 
@@ -188,6 +188,8 @@ Plus per-bet:
 - **The competitor RTP feed:** currently hosted on `jsonblob.com` (anonymous, owner-replaceable via `HouseManager.setCompetitorFeedUrl()`). Numbers are manually curated from public casino-review sites (askgamblers, casinoguru, gambling.com). On mainnet we'd self-host with a CI-updated CDN.
 - **Money path is on commit-reveal:** the LLM Inference Agent only adjusts the *published* RTP - actual randomness is `keccak256(serverSeed ‖ clientSeed ‖ blockhash ‖ nonce)`, on-chain, no AI in the path. AgentQuorumVerifier is defence-in-depth on randomness, not its source.
 - **No mainnet deploy yet** - every testnet redeploy ID is appended to `historicalCasinos` so user lifetime stats survive.
+- **Off-chain components (full disclosure):** two services run off-chain - the bet-settlement *reveal-bot* (reveals the committed server seed so a bet can settle) and an operational *House keeper* (`agent-service/hm-cron.js`: refills the seed pool, nudges max-bet UI caps). Neither makes a betting or RTP decision - the economic brain (RTP, news bonus, player bets) is 100% on-chain via Somnia Agents. The reveal-bot is the one live-uptime dependency for settlement.
+- **Owner-withdraw timelock disabled on testnet:** `Casino.OWNER_WITHDRAW_DELAY = 0` so the operator can reclaim STT between redeploys. Mainnet restores the 24h timelock - a load-bearing mitigation against a compromised owner key. Until then the owner key is a trusted party for the bankroll.
 
 ## License
 
@@ -197,12 +199,12 @@ MIT
 
 # ShinyLuck (русская версия)
 
-**Agent-native on-chain казино на Somnia.** Сабмишен для Somnia Agentic L1 Hireathon.
+**Agent-native on-chain казино на Somnia.** Сабмишен для Somnia Agentathon.
 
 > Дом - это автономный AI-агент. Каждая остановка барабана, каждый бросок кубика, каждый спин рулетки - это `keccak256` от трёх чисел, которые любой может проверить. RTP казик каждый час подбирает LLM-агент, который через JSON API Agent тащит реальные RTP конкурентов с публичного research-фида - никакого off-chain скрипта, никакого админского ключа, всё на цепи.
 
-**Локальный демо:** http://localhost:8080 (запустить `npm run dev:play`)
-**Explorer:** [HouseManager на Shannon Explorer](https://shannon-explorer.somnia.network/address/0xd59C635698c7b368f4b6922c78f589869C8032b7) - каждый час летят `RtpAnalysisRequested` / `RtpAnalysisResolved`
+**Живое демо:** https://shiny-luck.vercel.app/ (или локально через `npm run dev:play` → http://localhost:8080)
+**Explorer:** [HouseManager на Shannon Explorer](https://shannon-explorer.somnia.network/address/0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D) - каждый час летят `RtpAnalysisRequested` / `RtpAnalysisResolved`
 
 ---
 
@@ -215,7 +217,7 @@ MIT
 3. HM зовёт **LLM Inference Agent** (`id 12847293847561029384`, Qwen3-30B) с промптом где есть наш RTP, банкролл, дельта за час и только что полученные данные конкурентов. Агент возвращает одно из `LOWER / HOLD / RAISE / BIG_BONUS`.
 4. 3 валидатора достигают Majority-консенсуса (байт-в-байт одинаковый ответ). Платформа делает callback в HM, который применяет решение через `casino.adjustSlotRTP()`.
 
-Вся цепочка работает на Somnia - никакого Python-keeper'а, off-chain cron'а, oracle-middleware. Стоит ~0.72 STT в час. Каждый шаг проверяется в эксплорере по событиям.
+Каждое казино-**экономическое** решение - изменение RTP, news-driven бонус-окна и ставки player-агентов - принимается on-chain агентами Somnia, без oracle-middleware в пути решения. (Off-chain keeper делает только операционную сантехнику - рефилл пула server-seed'ов и подгон UI-кэпов max-bet - и никогда не принимает экономических или ставочных решений; см. *Честно* ниже.) Стоимость on-chain петли: ~0.72 STT в час. Каждый шаг проверяется в эксплорере по событиям.
 
 Плюс:
 
@@ -231,10 +233,10 @@ MIT
 
 | Контракт              | Адрес                                                              |
 | --------------------- | ------------------------------------------------------------------ |
-| Casino                | [`0xb17CE5D7bf4eCa28580368FaD1548C99D5a2545C`](https://shannon-explorer.somnia.network/address/0xb17CE5D7bf4eCa28580368FaD1548C99D5a2545C) |
-| HouseManager          | [`0xd59C635698c7b368f4b6922c78f589869C8032b7`](https://shannon-explorer.somnia.network/address/0xd59C635698c7b368f4b6922c78f589869C8032b7) |
-| AgentQuorumVerifier   | [`0xfAe5Fe90252b3b43eE967EaCD9985789fA5BDE77`](https://shannon-explorer.somnia.network/address/0xfAe5Fe90252b3b43eE967EaCD9985789fA5BDE77) |
-| PlayerAgentRegistry   | [`0x3e1dA686c239B95b3d5CbfAE88AD2443c3752D75`](https://shannon-explorer.somnia.network/address/0x3e1dA686c239B95b3d5CbfAE88AD2443c3752D75) |
+| Casino                | [`0xd5dB5F85aDe7e1A6296e15F8E5eB897b24241833`](https://shannon-explorer.somnia.network/address/0xd5dB5F85aDe7e1A6296e15F8E5eB897b24241833) |
+| HouseManager          | [`0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D`](https://shannon-explorer.somnia.network/address/0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D) |
+| AgentQuorumVerifier   | [`0x2FD122E635B6987da4aC4949D88bAcB8b48a9ddF`](https://shannon-explorer.somnia.network/address/0x2FD122E635B6987da4aC4949D88bAcB8b48a9ddF) |
+| PlayerAgentRegistry   | [`0x1aC0D7ddF243ca887e54E4E99545d662c5e08ceC`](https://shannon-explorer.somnia.network/address/0x1aC0D7ddF243ca887e54E4E99545d662c5e08ceC) |
 | SomniaAgentPlatform   | [`0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776`](https://shannon-explorer.somnia.network/address/0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776) |
 | Reactivity precompile | `0x0000000000000000000000000000000000000100`                       |
 
@@ -296,6 +298,8 @@ npm run dev:play
 - **Competitor RTP feed:** сейчас хостится на `jsonblob.com` (анонимный, owner может переключить через `HouseManager.setCompetitorFeedUrl()`). Числа собраны вручную с публичных casino-review сайтов (askgamblers, casinoguru, gambling.com). Для мейннета развернём свой CI-обновляемый CDN.
 - **Деньги идут через commit-reveal:** LLM Inference Agent меняет только *опубликованный* RTP - фактический randomness это `keccak256(serverSeed ‖ clientSeed ‖ blockhash ‖ nonce)` на цепи, без AI в money-path. AgentQuorumVerifier - это защита в глубину на randomness, не его источник.
 - **Мейннет деплоя пока нет** - каждый testnet редеплой добавляется в `historicalCasinos` чтобы lifetime-статистика юзеров переживала.
+- **Off-chain компоненты (полное раскрытие):** off-chain работают два сервиса - *reveal-bot* для settle'а ставок (раскрывает закоммиченный server seed) и операционный *House keeper* (`agent-service/hm-cron.js`: рефилл пула сидов, подгон UI-кэпов max-bet). Ни один из них не принимает ставочных или RTP решений - экономический мозг (RTP, news-bonus, ставки игроков) полностью on-chain через агентов Somnia. Reveal-bot - единственная зависимость по аптайму для settle'а.
+- **Таймлок вывода отключён на тестнете:** `Casino.OWNER_WITHDRAW_DELAY = 0`, чтобы оператор мог забирать STT между редеплоями. На мейннете возвращается 24h timelock - load-bearing защита от скомпрометированного ключа владельца. До тех пор ключ владельца - доверенная сторона для банкролла.
 
 ## Лицензия
 
