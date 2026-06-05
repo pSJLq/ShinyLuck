@@ -449,21 +449,37 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     }
 
     function getReportedRTP(uint8 game) external view returns (uint16) {
+        // SLOTS/CLUSTER publish their TRUE RTP, derived from the live
+        // agent-tuned payout boost - the displayed number IS the real payout
+        // ratio (no cosmetic gap, honest provably-fair).
+        if (game == uint8(GameType.SLOTS))
+            return uint16(VAULT7_BASE_RTP_BPS * vault7PayBoostX100 / VAULT7_BOOST_BASE);
+        if (game == uint8(GameType.CLUSTER))
+            return uint16(CLUSTER_BASE_RTP_BPS * clusterPayBoostX100 / CLUSTER_BOOST_BASE);
         uint16 over = _reportedRtpOverride[game];
         if (over != 0) return over;
         return defaultReportedRtpBps(GameType(game));
     }
 
-    /// @notice Adjust the published RTP for the cluster/classic slot games.
-    ///         Bounded to [9000, 9400] so the agent can't accidentally publish
-    ///         a wildly off-baseline number even if its decision logic glitches.
+    /// @notice The autonomous House Manager tunes the REAL slot/cluster RTP to
+    ///         stay competitive. The target RTP maps to the on-chain payout
+    ///         boost (so it actually changes what players win, not a label).
+    ///         Bounded to [8800, 9600] (house edge 4-12%); combined with the
+    ///         bonus-mode increment the per-game hard-cap keeps effective RTP
+    ///         strictly < 100%, so the agent can never tune the house to a loss.
     function adjustSlotRTP(uint8 game, uint16 newRtpBps, string calldata reasoning) external {
         if (msg.sender != houseManager && msg.sender != owner()) revert NotHouseManager();
-        if (game != uint8(GameType.SLOTS) && game != uint8(GameType.CLUSTER)) revert InvalidGame();
-        if (newRtpBps < 9000 || newRtpBps > 9400) revert InvalidBet("rtp out of band");
-        uint16 prev = _reportedRtpOverride[game];
-        if (prev == 0) prev = defaultReportedRtpBps(GameType(game));
-        _reportedRtpOverride[game] = newRtpBps;
+        if (newRtpBps < 8800 || newRtpBps > 9600) revert InvalidBet("rtp out of band");
+        uint16 prev;
+        if (game == uint8(GameType.SLOTS)) {
+            prev = uint16(VAULT7_BASE_RTP_BPS * vault7PayBoostX100 / VAULT7_BOOST_BASE);
+            vault7PayBoostX100 = VAULT7_BOOST_BASE * uint256(newRtpBps) / VAULT7_BASE_RTP_BPS;
+        } else if (game == uint8(GameType.CLUSTER)) {
+            prev = uint16(CLUSTER_BASE_RTP_BPS * clusterPayBoostX100 / CLUSTER_BOOST_BASE);
+            clusterPayBoostX100 = CLUSTER_BOOST_BASE * uint256(newRtpBps) / CLUSTER_BASE_RTP_BPS;
+        } else {
+            revert InvalidGame();
+        }
         emit RtpAdjusted(game, prev, newRtpBps, reasoning);
     }
 
@@ -521,7 +537,14 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     ///      basis-100 multiplier scales final payout so empirical RTP lands
     ///      at ~91-92%. MUST stay in sync with `frontend/games/vault7/engine.js`
     ///      `VAULT_PAY_BOOST` constant.
-    uint256 internal constant VAULT7_PAY_BOOST_X100 = 560;
+    // Agent-tunable REAL payout boost (was a constant). The autonomous House
+    // Manager moves this to flex true RTP and compete - see setSlotPayoutBoost.
+    // Bounds keep house edge >= ~4% and, combined with the bonus increment,
+    // strictly below 100% RTP (the casino cannot be tuned into a loss).
+    uint256 public vault7PayBoostX100 = 560;
+    uint256 internal constant VAULT7_BOOST_BASE = 560;     // boost at which empirical RTP was measured
+    uint256 internal constant VAULT7_BASE_RTP_BPS = 9107;  // empirical RTP (validate-rtp.js) at base boost
+    uint256 internal constant VAULT7_BOOST_HARDCAP = 608;  // ~99% RTP - base+bonus can never exceed this
 
     /// @notice Place a VAULT.7 spin. `useFreeSpin=true` consumes one of the
     ///         player's earned free spins (msg.value must be 0 in that case)
@@ -566,7 +589,11 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     ///         332 → 92.01% total (base 77.59 + charge ~14.17 + loyalty FS ~0.25)
     ///      MUST stay in sync with `frontend/games/sugar/engine.js`
     ///      `SUGAR_PAY_BOOST` constant.
-    uint256 internal constant CLUSTER_PAY_BOOST_X100 = 332;
+    // Agent-tunable REAL payout boost (was a constant). See vault7PayBoostX100.
+    uint256 public clusterPayBoostX100 = 332;
+    uint256 internal constant CLUSTER_BOOST_BASE = 332;     // boost at which empirical RTP was measured
+    uint256 internal constant CLUSTER_BASE_RTP_BPS = 9228;  // empirical RTP (validate-rtp.js) at base boost
+    uint256 internal constant CLUSTER_BOOST_HARDCAP = 356;  // ~99% RTP - base+bonus can never exceed this
 
     /// @dev Buy Bonus multipliers (megaprompt Section 1.1). Player pays
     ///      `MULT × unitStake`; the bet is settled as a single high-variance
@@ -1603,8 +1630,8 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
             // pay-boost by 32 points (~+4% RTP) during the bonus window.
             // 560 → 592 puts vault7 RTP from ~92% to ~96%.
             uint256 boostX100 = bonusModeActive()
-                ? VAULT7_PAY_BOOST_X100 + 32
-                : VAULT7_PAY_BOOST_X100;
+                ? (vault7PayBoostX100 + 32 < VAULT7_BOOST_HARDCAP ? vault7PayBoostX100 + 32 : VAULT7_BOOST_HARDCAP)
+                : vault7PayBoostX100;
             payout = (p * boostX100) / 100;
             uint256 vaultCap = (uint256(bet.amount) * VAULT7_MAX_MULT_X100) / 100;
             if (payout > vaultCap) payout = vaultCap;
@@ -1625,8 +1652,8 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
             // is a no-op for the zero-edge games.
             uint256 stake = bet.amount;
             uint256 boostX100 = bonusModeActive()
-                ? CLUSTER_PAY_BOOST_X100 + 18
-                : CLUSTER_PAY_BOOST_X100;
+                ? (clusterPayBoostX100 + 18 < CLUSTER_BOOST_HARDCAP ? clusterPayBoostX100 + 18 : CLUSTER_BOOST_HARDCAP)
+                : clusterPayBoostX100;
             uint256 raw = (stake * rr.totalPayoutX100 * boostX100) / 10_000;
             uint256 capped = (stake * CLUSTER_MAX_MULT_X100) / 100;
             payout = raw;

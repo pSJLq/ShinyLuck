@@ -2,7 +2,7 @@
   "name": "shinyluck",
   "version": "0.1.0",
   "private": true,
-  "description": "ShinyLuck — agent-native casino on Somnia",
+  "description": "ShinyLuck - agent-native casino on Somnia",
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
@@ -21,7 +21,8 @@
     "dev:agent-service": "node agent-service/index.js",
     "dev:hm-cron": "node agent-service/hm-cron.js",
     "dev:all": "concurrently -n FRONTEND,REVEAL,AGENT,HMCRON,DEMO -c blue,green,magenta,red,yellow -k --kill-others-on-fail \"npm:dev:frontend\" \"npm:dev:reveal-bot\" \"npm:dev:agent-service\" \"npm:dev:hm-cron\" \"npm:dev:demo-bot\"",
-    "dev:play": "concurrently -n FRONTEND,REVEAL,AGENT,HMCRON -c blue,green,magenta,red -k --kill-others-on-fail \"npm:dev:frontend\" \"npm:dev:reveal-bot\" \"npm:dev:agent-service\" \"npm:dev:hm-cron\""
+    "dev:play": "concurrently -n FRONTEND,REVEAL,AGENT,HMCRON -c blue,green,magenta,red -k --kill-others-on-fail \"npm:dev:frontend\" \"npm:dev:reveal-bot\" \"npm:dev:agent-service\" \"npm:dev:hm-cron\"",
+    "play": "node scripts/_supervise.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",

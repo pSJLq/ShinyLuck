@@ -79,8 +79,8 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
     // cost". 0.12 covers the observed cost with margin.
     uint256 public parsePricePerWorker = 0.12 ether;
     uint8   public agentSubcommitteeSize = 3;
-    uint16  public minRtpBps = 8500;   // 85.00% floor
-    uint16  public maxRtpBps = 9700;   // 97.00% ceiling
+    uint16  public minRtpBps = 8800;   // 88.00% floor (matches casino adjustSlotRTP band)
+    uint16  public maxRtpBps = 9600;   // 96.00% ceiling (agent cap; +bonus stays <100%)
 
     // News-driven Bonus Mode trigger via the LLM Parse Website agent. Every
     // hourly tick we ask the agent to read a market-wire page and extract the

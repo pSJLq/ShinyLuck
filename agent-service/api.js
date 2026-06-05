@@ -110,6 +110,10 @@ function build(ctx) {
         player,
         vault,
         ...parsed,
+        // Per-user agent cadence (seconds). User chooses how often their agent
+        // plays and funds every tick. From the NL strategy ("every 30s") or an
+        // explicit body field; default 30s, floored at 3s. No upper cap.
+        cadenceSec: Math.max(3, Number(parsed.cadenceSec ?? req.body.cadenceSec) || 30),
         active: true,
         consecutiveWins: 0,
         lossesTodaySTT: 0,

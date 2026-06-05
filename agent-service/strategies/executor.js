@@ -11,6 +11,10 @@
 const { ethers } = require("ethers");
 const db = require("../db");
 
+// Per-player last-tick timestamps so each agent runs at ITS OWN cadence (the
+// user chooses how often their agent plays and funds it themselves).
+const lastTickAt = new Map();
+
 function clientSeed() {
   return ethers.hexlify(ethers.randomBytes(32));
 }
@@ -169,8 +173,16 @@ async function reconcileSettlements(ctx) {
 }
 
 async function tick(ctx) {
+  const now = Date.now();
   for (const s of db.listStrategies()) {
     if (!s.active) continue;
+    // Per-user cadence: the player decides how often their agent acts (they
+    // fund every tick). Default 30s; floored at 3s only to avoid nonce chaos.
+    // No upper cap - if a user wants to spend more by playing faster, let them.
+    const cadenceMs = Math.max(3, Number(s.cadenceSec) || 30) * 1000;
+    const k = s.player.toLowerCase();
+    if (now - (lastTickAt.get(k) || 0) < cadenceMs) continue;
+    lastTickAt.set(k, now);
     await tickPlayer(s, ctx);
   }
   try { await reconcileSettlements(ctx); } catch (_) {}

@@ -246,7 +246,7 @@ async function main() {
       // Directly fire one full chain so activity shows immediately - each is
       // try/catch'd so a single failure (e.g. smart-skip) doesn't abort.
       const fire = async (label, fn) => {
-        try { const tx = await fn(); await tx.wait(); console.log(`[reveal-bot] watchdog fired ${label} (${tx.hash.slice(0,12)}…)`); }
+        try { const tx = await fn(); await tx.wait(); console.log(`[reveal-bot] watchdog fired ${label} (${tx.hash.slice(0,12)}...)`); }
         catch (e) { /* smart-skip / insufficient-balance are normal */ }
       };
       await fire("rtp-slots",   () => hm.requestRtpAnalysis(2));
@@ -294,7 +294,7 @@ async function main() {
         try {
           const tx = await hm.requestPlayerDecision(p);
           await tx.wait();
-          console.log(`[reveal-bot] player-agent tick fired for ${p.slice(0, 10)}… (${tx.hash.slice(0, 12)}…)`);
+          console.log(`[reveal-bot] player-agent tick fired for ${p.slice(0, 10)}... (${tx.hash.slice(0, 12)}...)`);
         } catch (e) {
           // insufficient-vault-budget / inactive / not-wired are normal skips
         }
@@ -393,6 +393,11 @@ async function main() {
   const pending = new Map();
   // Round-based pending: roundId → { commitBlock, seedIdx, betWindowEnd, kind: "crash"|"roulette" }
   const pendingRounds = new Map();
+  // round key -> { fails, nextMs }: throttles doomed settle re-submits (e.g. an
+  // orphaned round whose seed no longer matches) so we don't burn gas firing a
+  // reverting settle tx every 100ms. The round still refunds once it crosses the
+  // blockhash window in the refund branch below.
+  const roundSettleBackoff = new Map();
 
   const loop = async () => {
     let cur, chainNowSec;
@@ -555,7 +560,9 @@ async function main() {
       const windowClosed = nowSec >= info.betWindowEnd;
       const readyToReveal = age > REVEAL_DELAY;
       const expired = age > REVEAL_DELAY + BLOCKHASH_WINDOW;
-      if (windowClosed && readyToReveal && !expired) {
+      const bo = roundSettleBackoff.get(key);
+      const throttled = bo && bo.fails >= 2 && Date.now() < bo.nextMs;
+      if (windowClosed && readyToReveal && !expired && !throttled) {
         const seed = seedStore.get(info.seedIdx);
         if (!seed) continue; // no seed yet - keep the round around
         const fn = info.kind === "crash" ? "settleCrashRound" : "settleRouletteRound";
@@ -565,13 +572,22 @@ async function main() {
           // the cold-start scan re-adds the round next sweep.
           const tx = await casino[fn](info.roundId, seed);
           console.log(`[reveal-bot] settle ${info.kind} round ${info.roundId} submitted tx=${tx.hash} (age=${age})`);
-          pendingRounds.delete(key);
+          pendingRounds.delete(key); roundSettleBackoff.delete(key);
           continue;
         } catch (e) {
           const msg = e.shortMessage || e.message;
-          if (/RoundAlreadySettled/.test(msg)) { pendingRounds.delete(key); continue; }
+          if (/RoundAlreadySettled/.test(msg)) { pendingRounds.delete(key); roundSettleBackoff.delete(key); continue; }
           if (/RevealTooEarly|RoundClosed/.test(msg)) continue; // retry next tick
-          if (!/RevealExpired/.test(msg)) { console.warn(`[reveal-bot] settle ${info.roundId}: ${msg}`); continue; }
+          if (!/RevealExpired/.test(msg)) {
+            // Non-transient settle failure (orphaned/seed-mismatch round). Back
+            // off per-round (3s, 6s, 9s ... capped 30s) so we stop firing a
+            // reverting settle tx every 100ms; the refund branch reclaims it.
+            const cur = roundSettleBackoff.get(key) || { fails: 0, nextMs: 0 };
+            cur.fails++; cur.nextMs = Date.now() + Math.min(30000, 3000 * cur.fails);
+            roundSettleBackoff.set(key, cur);
+            if (cur.fails <= 2) console.warn(`[reveal-bot] settle ${info.roundId}: ${msg} (backing off)`);
+            continue;
+          }
           // RevealExpired -> fall through to refund below
         }
       }
@@ -592,7 +608,7 @@ async function main() {
             console.warn(`[reveal-bot] ${fn} ${info.roundId}: ${msg}`);
           }
         }
-        pendingRounds.delete(key);
+        pendingRounds.delete(key); roundSettleBackoff.delete(key);
       }
     }
 
@@ -965,5 +981,22 @@ async function main() {
   setInterval(() => { fastSettleTick().catch(() => {}); }, FAST_SETTLE_MS);
   await new Promise(() => {});
 }
+
+// Survive transient RPC/socket errors (undici ConnectTimeoutError etc.) on a
+// flaky testnet RPC. Without this, one unhandled network blip exits the process
+// and `concurrently --kill-others-on-fail` drops the WHOLE stack (seed pool then
+// drains → NoSeedAvailable → bets revert). Log and keep running; the poll loop
+// retries every tick.
+process.on("unhandledRejection", (e) => {
+  console.warn(`[reveal-bot] unhandledRejection (continuing): ${(e && (e.shortMessage || e.message)) || e}`);
+});
+process.on("uncaughtException", (e) => {
+  const msg = (e && (e.shortMessage || e.message)) || String(e);
+  if (/timeout|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket|network|fetch failed|Connect Timeout/i.test(msg)) {
+    console.warn(`[reveal-bot] recovered from transient network error (continuing): ${msg}`);
+  } else {
+    console.error(`[reveal-bot] uncaughtException (continuing): ${msg}`);
+  }
+});
 
 main().catch((e) => { console.error(e); process.exit(1); });

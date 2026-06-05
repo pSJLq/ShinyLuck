@@ -28,8 +28,16 @@ const crypto = require("crypto");
 // reliable than the public dream-rpc.somnia.network mirror.
 const RPC = process.env.RPC_URL || "https://api.infra.testnet.somnia.network";
 const HM_KEY = process.env.HM_PRIVATE_KEY || process.env.RELAYER_KEY;
-const HM_ADDR = process.env.HM_ADDRESS;
-const CASINO_ADDR = process.env.CASINO_ADDRESS;
+// Addresses from the COMMITTED manifest (single source of truth, shipped to
+// Railway via git) so a redeploy can't leave the cron on a stale HM/casino -
+// that exact drift silently took the agent chain offline once. Env = fallback.
+function _loadManifest() {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, "..", "deployments", `${process.env.NETWORK_NAME || "somniaTestnet"}.json`), "utf8")); }
+  catch (_) { return null; }
+}
+const _manifest = _loadManifest();
+const HM_ADDR = (_manifest && _manifest.addresses && _manifest.addresses.houseManager) || process.env.HM_ADDRESS;
+const CASINO_ADDR = (_manifest && _manifest.addresses && _manifest.addresses.casino) || process.env.CASINO_ADDRESS;
 const LLM_URL = process.env.SOMNIA_LLM_URL; // optional - POST {prompt} → {text}
 const NETWORK = process.env.NETWORK_NAME || "somniaTestnet";
 
@@ -296,8 +304,33 @@ async function tick() {
   }
   tasks.push(bankrollSwingCheck(state).catch((e) => console.warn("[hm-cron] swing:", e.message)));
   tasks.push(themeRotation(state).catch((e) => console.warn("[hm-cron] theme:", e.message)));
+  tasks.push(bonusModeWatchdog().catch((e) => console.warn("[hm-cron] bonus watchdog:", e.message)));
   await Promise.all(tasks);
 }
+
+// ── Bonus-mode safety watchdog ──────────────────────────────────────────────
+// The LLM agent can ignite Bonus Mode (halved edge / boosted payouts). The
+// on-chain activateBonusMode has NO bankroll guard, so if the house runs low we
+// wind it down here. There is no on-chain "off" - setting it to 1 minute is the
+// fastest expiry. Floor uses the honest house balance (not freeBankroll, which
+// dips mid-bet while a payout reserve is locked). Routed through the HM contract
+// because the agent wallet is the HM's hmAgent, not the casino's houseManager.
+const BONUS_FLOOR = ethers.parseEther(process.env.HM_BONUS_FLOOR_STT || "20");
+async function bonusModeWatchdog() {
+  const [total, active] = await Promise.all([
+    provider.getBalance(CASINO_ADDR),
+    casino.bonusModeActive(),
+  ]);
+  if (active && total < BONUS_FLOOR) {
+    const tx = await hm.activateBonusMode(1, "watchdog: house balance below safety floor");
+    await tx.wait();
+    console.warn(`[hm-cron] BONUS WATCHDOG: balance=${ethers.formatEther(total)} STT < floor=${ethers.formatEther(BONUS_FLOOR)} STT → winding Bonus Mode down (tx=${tx.hash})`);
+  }
+}
+
+// Survive transient RPC/socket errors instead of exiting on them.
+process.on("unhandledRejection", (e) => console.warn(`[hm-cron] unhandledRejection (continuing): ${(e && (e.shortMessage || e.message)) || e}`));
+process.on("uncaughtException", (e) => console.warn(`[hm-cron] uncaughtException (continuing): ${(e && (e.shortMessage || e.message)) || e}`));
 
 (async () => {
   console.log("[hm-cron] starting - wallet:", await wallet.getAddress());

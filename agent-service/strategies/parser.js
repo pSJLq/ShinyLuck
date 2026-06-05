@@ -63,6 +63,15 @@ function parseStrategy(text) {
   else if (/\beven\b/.test(t)) rouletteKind = "EVEN";
   else if (/\bodd\b/.test(t)) rouletteKind = "ODD";
 
+  // cadence: "every 30 seconds" / "every 2 minutes" / "every 30s" / "every 2m".
+  // The user decides how often their agent plays (they fund every tick).
+  let cadenceSec;
+  const cadMatch = t.match(/every\s+(\d+(?:\.\d+)?)\s*(seconds|second|secs|sec|s|minutes|minute|mins|min|m)\b/);
+  if (cadMatch) {
+    const n = parseFloat(cadMatch[1]);
+    cadenceSec = /^m/.test(cadMatch[2]) ? Math.round(n * 60) : Math.round(n);
+  }
+
   return {
     game,
     gameId: GAMES[game],
@@ -74,6 +83,7 @@ function parseStrategy(text) {
     autoCashout,
     risk,
     rouletteKind,
+    cadenceSec,
     raw: text,
   };
 }

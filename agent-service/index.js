@@ -7,7 +7,10 @@ const relayer = require("./relayer");
 const apiMod = require("./api");
 const executor = require("./strategies/executor");
 
-const TICK_INTERVAL_MS = parseInt(process.env.TICK_INTERVAL_MS, 10) || 30_000;
+// Base scheduler resolution. Each player's OWN cadence (strategy.cadenceSec) is
+// enforced inside executor.tick(); this only needs to be fine enough to honour
+// the smallest cadence a user might pick (so 5s, not 30s).
+const TICK_INTERVAL_MS = parseInt(process.env.TICK_INTERVAL_MS, 10) || 5_000;
 const PORT = parseInt(process.env.PORT, 10) || 3001;
 
 async function main() {
@@ -33,5 +36,10 @@ async function main() {
     }
   }, TICK_INTERVAL_MS);
 }
+
+// Survive transient RPC/socket errors instead of exiting (the supervisor would
+// restart us, but staying up avoids churn and dropped HTTP requests).
+process.on("unhandledRejection", (e) => console.warn(`[agent-service] unhandledRejection (continuing): ${(e && (e.shortMessage || e.message)) || e}`));
+process.on("uncaughtException", (e) => console.warn(`[agent-service] uncaughtException (continuing): ${(e && (e.shortMessage || e.message)) || e}`));
 
 main().catch((e) => { console.error(e); process.exit(1); });

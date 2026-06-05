@@ -10,11 +10,22 @@ function loadAbi(name) {
   return JSON.parse(fs.readFileSync(p, "utf8")).abi;
 }
 
+function loadManifest() {
+  try {
+    const net = process.env.NETWORK_NAME || "somniaTestnet";
+    return JSON.parse(fs.readFileSync(path.join(__dirname, "..", "deployments", `${net}.json`), "utf8"));
+  } catch (_) { return null; }
+}
+
 function init() {
   const rpc = process.env.RPC_URL;
   const key = process.env.RELAYER_KEY;
-  const casinoAddr = process.env.CASINO_ADDRESS;
-  const regAddr = process.env.REGISTRY_ADDRESS;
+  // Addresses come from the COMMITTED deployment manifest (single source of
+  // truth, auto-written by deploy.js and shipped to Railway via git), so a
+  // redeploy can never strand the bots on a stale casino. Env is fallback only.
+  const m = loadManifest();
+  const casinoAddr = (m && m.addresses && m.addresses.casino) || process.env.CASINO_ADDRESS;
+  const regAddr = (m && m.addresses && m.addresses.playerAgentRegistry) || process.env.REGISTRY_ADDRESS;
   if (!rpc || !key || !casinoAddr || !regAddr) {
     throw new Error("missing RPC_URL / RELAYER_KEY / CASINO_ADDRESS / REGISTRY_ADDRESS");
   }
