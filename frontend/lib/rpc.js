@@ -24,26 +24,81 @@ export function provider() {
       batchMaxCount: 1,
       staticNetwork: true,
     });
-    // Best-effort: try the WS endpoint for push subscriptions (block ticker,
-    // live feed). Falls back silently to the JSON-RPC provider if the gateway
-    // doesn't speak websockets.
-    try {
-      const wsUrl = (net.wsUrls && net.wsUrls[0])
-        || (net.rpcUrls[0] || "").replace(/^http/, "ws");
-      if (wsUrl && wsUrl.startsWith("ws")) {
-        _wsProvider = new ethers.WebSocketProvider(wsUrl);
-      }
-    } catch (_) { _wsProvider = null; }
   }
   return _provider;
 }
 
+// ---------------------------------------------------------------------------
+// WebSocket provider - self-healing.
+//
+// Somnia's gateway drops idle WS connections, and a stale socket made every
+// `.on(...)` / unsubscribe throw "WebSocket is already in CLOSING or CLOSED
+// state" and forced waitForSettle onto the ~1s-slower HTTP poll. We now treat
+// the socket as disposable: detect close/error, tear it down, and lazily
+// rebuild on the next wsProvider() call (debounced so a flapping gateway can't
+// spin up a socket per call). A 25s keepalive ping stops idle disconnects.
+// Anything failing => returns null => callers fall back to HTTP (old behaviour).
+// ---------------------------------------------------------------------------
+
 let _wsProvider = null;
-/// Returns a WebSocketProvider if Somnia's gateway accepts the upgrade, else
-/// null. Callers should subscribe via `.on(...)` and fall back to polling.
+let _wsKeepalive = null;
+let _wsRebuiltAt = 0;
+
+function _wsUrl() {
+  const net = CHAINS[CONFIG.network] || CHAINS.somniaTestnet;
+  const url = (net.wsUrls && net.wsUrls[0]) || (net.rpcUrls[0] || "").replace(/^http/, "ws");
+  return url && url.startsWith("ws") ? url : null;
+}
+
+function _wsAlive() {
+  try {
+    const sock = _wsProvider && _wsProvider.websocket;
+    // readyState: 0 CONNECTING, 1 OPEN, 2 CLOSING, 3 CLOSED
+    return !!sock && (sock.readyState === 0 || sock.readyState === 1);
+  } catch (_) { return false; }
+}
+
+function _teardownWs() {
+  if (_wsKeepalive) { clearInterval(_wsKeepalive); _wsKeepalive = null; }
+  const old = _wsProvider;
+  _wsProvider = null;
+  if (old) { try { old.destroy(); } catch (_) {} }
+}
+
+/// Returns a live WebSocketProvider if Somnia's gateway accepts the upgrade,
+/// else null. Callers should subscribe via `.on(...)` and fall back to polling
+/// when this is null. Safe to call every time you need the socket - it
+/// rebuilds a dropped connection transparently.
 export function wsProvider() {
-  // touch provider() so we attempt the WS handshake exactly once
-  provider();
+  provider(); // ensure config/network resolved
+  if (_wsAlive()) return _wsProvider;
+
+  // Socket is missing or CLOSING/CLOSED - clean up and (debounced) rebuild.
+  if (_wsProvider) _teardownWs();
+  const now = Date.now();
+  if (now - _wsRebuiltAt < 1500) return null; // just tried; let callers use HTTP
+  _wsRebuiltAt = now;
+
+  const url = _wsUrl();
+  if (!url) return null;
+  try {
+    const wsp = new ethers.WebSocketProvider(url);
+    _wsProvider = wsp;
+    const sock = wsp.websocket;
+    if (sock && sock.addEventListener) {
+      // Null ourselves out when the socket drops so the next call rebuilds.
+      // addEventListener (not onclose=) so ethers' own handler survives.
+      sock.addEventListener("close", () => { if (_wsProvider === wsp) _teardownWs(); });
+      sock.addEventListener("error", () => { if (_wsProvider === wsp) _teardownWs(); });
+    }
+    // Keepalive: a cheap call keeps the gateway from closing an idle socket.
+    _wsKeepalive = setInterval(() => {
+      if (_wsProvider !== wsp || !_wsAlive()) { if (_wsProvider === wsp) _teardownWs(); return; }
+      wsp.send("eth_blockNumber", []).catch(() => { if (_wsProvider === wsp) _teardownWs(); });
+    }, 25_000);
+  } catch (_) {
+    _wsProvider = null;
+  }
   return _wsProvider;
 }
 
