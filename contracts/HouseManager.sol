@@ -345,11 +345,11 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         // ("unknown - research feed not yet fetched") in the prompt.
         try this.requestCompetitorRtp(uint8(Casino.GameType.SLOTS))    {} catch {}
         try this.requestCompetitorRtp(uint8(Casino.GameType.CLUSTER))  {} catch {}
-        // Roulette too - the LLM compares our fixed 94.74% (5.26% edge) against
-        // the competitor benchmark and the result feeds the agent's max-bet /
-        // pause decisions above, so the autonomous house reasons about roulette
-        // every hour like it does the slots.
-        try this.requestCompetitorRtp(uint8(Casino.GameType.ROULETTE)) {} catch {}
+        // NOTE: only SLOTS/CLUSTER have a flexible RTP, so only they have a
+        // competitor-RTP selector + an RTP-analysis stage. Roulette runs a
+        // fixed-edge (5.26%) model, so we don't pull a competitor benchmark for
+        // it - doing so only ever emitted AgentRequestSkipped("game-not-supported"),
+        // which read like an error in the activity feed.
         // Stage 3: ask the Parse Website Agent for the latest crypto news
         // headline. The callback fires an LLM Inference to decide BIG_BONUS
         // vs HOLD - bullish headlines auto-activate Bonus Mode 60 min.

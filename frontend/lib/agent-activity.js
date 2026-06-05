@@ -538,10 +538,30 @@ function hmLabelFor(ev) {
       return `→ asking LLM for ${gameName(ev.args.game)} RTP (our ${fmtBpsPct(ev.args.ourRtpBps)}%, Δ${fmtBps(ev.args.bankrollChangeBps)}%, competitor ${ev.args.competitorRtpBps > 0n ? fmtBpsPct(ev.args.competitorRtpBps) + "%" : "unknown"})${receiptLink(ev.args.requestId)}`;
     case "RtpAnalysisResolved":
       return `← LLM decision "${ev.args.decision}": ${gameName(ev.args.game)} ${fmtBpsPct(ev.args.oldRtpBps)}% → ${fmtBpsPct(ev.args.newRtpBps)}%${receiptLink(ev.args.requestId)}`;
-    case "AgentRequestSkipped":
+    case "AgentRequestSkipped": {
       // `kind` is indexed bytes32 (string-hashed by event semantics) - ethers
       // surfaces it as a Result. `reason` is the plain string we emitted.
-      return `agent request skipped: ${ev.args.reason}`;
+      // Most "skips" are intelligent no-ops (cost-saving smart-skip, the
+      // spam-firewall, fixed-edge games) - frame them honestly instead of as
+      // errors so the activity feed reads as decisions, not failures.
+      const r = String(ev.args.reason || "");
+      const friendly = {
+        "no-meaningful-change": "RTP held — competitors in band & bankroll flat, no LLM call needed",
+        "game-not-adjustable": "roulette uses a fixed-edge model — no RTP flex needed",
+        "game-not-supported": "roulette uses a fixed-edge model — no competitor pull needed",
+        "insufficient-vault-budget": "player vault below the LLM fee — agent paused (spam-safe)",
+        "insufficient-casino-share": "house reserve low — deferring this tick",
+        "insufficient-balance": "house reserve low — deferring this tick",
+        "collect-fee-failed": "player vault couldn't cover the LLM fee — skipped",
+        "no-consensus": "validators didn't reach consensus — skipped",
+        "decode-failed": "agent reply didn't parse — skipped",
+        "platform-not-wired": "agent platform not configured",
+        "not-wired": "player registry not configured",
+        "inactive": "player agent is paused",
+        "url-not-set": "news feed URL not set",
+      };
+      return friendly[r] || `request skipped: ${r}`;
+    }
     case "PlayerDecisionResolved": {
       // gen-14: the per-player LLM Player Agent (inferToolsChat). It either
       // yielded a placeBet tool call (placed a real bet from the vault) or
