@@ -31,6 +31,10 @@ let mineCount = 5;
 let minesBitmap = 0n;
 let openedBitmap = 0n;
 let cellsOpened = 0;
+// Mines is turn-based: exactly ONE openMinesCell may be in flight at a time.
+// Without this lock, rapid clicks fire concurrent txs; the first mine settles
+// the bet on-chain and every other in-flight tx reverts BetAlreadySettled.
+let cellPending = false;
 
 function clearGrid() {
   $$("[data-sl-cell]").forEach((el) => {
@@ -206,65 +210,98 @@ async function onPlaceBet() {
   }
 }
 
-async function onCellClick(ev) {
-  if (activeBetId === null) return;
-  const idx = parseInt(ev.currentTarget.dataset.idx, 10);
-  const mask = 1n << BigInt(idx);
-  if (openedBitmap & mask) return; // already opened locally
+function endRoundUI() {
+  activeBetId = null;
+  const cashoutBtn = $("[data-sl-cashout]");
+  if (cashoutBtn) cashoutBtn.style.display = "none";
+  const placeBtn = $("[data-sl-place]");
+  if (placeBtn) { placeBtn.disabled = false; placeBtn.textContent = "Start new round"; }
+  refreshRecent();
+}
 
-  // optimistic: gray out
-  ev.currentTarget.disabled = true;
+/// The round may have ended on-chain (a prior/concurrent cell busted, or a
+/// cashout landed) while the UI still thinks it's active. Re-read the bet; if
+/// it's no longer pending, render the final state instead of leaving the board
+/// stuck. Returns true if it handled a finished round.
+async function finishMinesFromChain(betId, txHash) {
   try {
-    const tx = await SL.casino.openMinesCell(activeBetId, idx);
+    const b = await SL.casino.getBet(betId);
+    if (Number(b.status) === 0) return false; // still live
+    const ms = await SL.casino.minesState(betId);
+    if (ms.busted) {
+      const board = document.querySelector("#mines-board");
+      if (board) { board.classList.remove("mines-anim-shake"); void board.offsetWidth; board.classList.add("mines-anim-shake"); }
+      const bm = BigInt(ms.minesBitmap);
+      for (let i = 0; i < TOTAL_CELLS; i++) if (bm & (1n << BigInt(i))) showCell(i, "bomb");
+      setStagePill("lost", "BUSTED");
+      setMinesStatus(`bet #${betId} · BUSTED`);
+      setResultBanner({ won: false, txt: `<b>BUSTED</b> · − ${fmtSTT(activeStakeWei)} STT`, txHash });
+    } else {
+      setStagePill("won", "ROUND CLOSED");
+      setMinesStatus(`bet #${betId} · round closed`);
+    }
+    populateFairPanel({
+      clientSeed: b.clientSeed, betId, nonce: betId,
+      serverSeed: (b.randomness && b.randomness !== ethers.ZeroHash) ? b.randomness : ethers.ZeroHash,
+      txHash,
+    });
+    endRoundUI();
+    return true;
+  } catch (_) { return false; }
+}
+
+async function onCellClick(ev) {
+  if (activeBetId === null || cellPending) return; // turn-based: one cell at a time
+  const cell = ev.currentTarget;                   // capture BEFORE any await (currentTarget is null afterwards)
+  const betId = activeBetId;
+  const idx = parseInt(cell.dataset.idx, 10);
+  const mask = 1n << BigInt(idx);
+  if (openedBitmap & mask) return;                 // already opened locally
+
+  cellPending = true;
+  cell.disabled = true;
+  setMinesStatus(`opening cell ${idx}…`);
+  try {
+    const tx = await SL.casino.openMinesCell(betId, idx);
     const r = await tx.wait();
     const events = (r.logs || []).map((l) => { try { return SL.casino.interface.parseLog(l); } catch { return null; } }).filter(Boolean);
     const bust = events.find((p) => p.name === "MinesBust");
     const opened = events.find((p) => p.name === "MinesCellOpened");
     if (bust) {
-      // shake the board, then reveal every mine.
       const board = document.querySelector("#mines-board");
-      if (board) {
-        board.classList.remove("mines-anim-shake");
-        void board.offsetWidth;
-        board.classList.add("mines-anim-shake");
-      }
-      for (let i = 0; i < TOTAL_CELLS; i++) {
-        const m = 1n << BigInt(i);
-        if (minesBitmap & m) showCell(i, "bomb");
-      }
+      if (board) { board.classList.remove("mines-anim-shake"); void board.offsetWidth; board.classList.add("mines-anim-shake"); }
+      for (let i = 0; i < TOTAL_CELLS; i++) { const m = 1n << BigInt(i); if (minesBitmap & m) showCell(i, "bomb"); }
       setStagePill("lost", "BUSTED");
-      setMinesStatus(`bet #${activeBetId} · BUSTED at cell ${idx}`);
+      setMinesStatus(`bet #${betId} · BUSTED at cell ${idx}`);
       setResultBanner({ won: false, txt: `<b>BUSTED</b> at cell ${idx} · − ${fmtSTT(activeStakeWei)} STT`, txHash: tx.hash });
-      // grab settled event for fair-panel server-seed
       const settled = events.find((p) => p.name === "BetSettled");
       if (settled) populateFairPanel({
         clientSeed: settled.args.clientSeed,
         betId: settled.args.betId, nonce: settled.args.nonce,
         serverSeed: settled.args.serverSeed, txHash: tx.hash,
       });
-      activeBetId = null;
-      const cashoutBtn = $("[data-sl-cashout]");
-      if (cashoutBtn) cashoutBtn.style.display = "none";
-      const placeBtn = $("[data-sl-place]");
-      placeBtn.disabled = false;
-      placeBtn.textContent = "Start new round";
-      refreshRecent();
-      return;
-    }
-    if (opened) {
+      endRoundUI();
+    } else if (opened) {
       showCell(idx, "safe");
       openedBitmap |= mask;
       cellsOpened++;
       const multX100 = Number(opened.args.multiplierX100);
       setText("[data-sl-mines-mult]", (multX100 / 100).toFixed(2) + "×");
       setText("[data-sl-mines-opened]", String(cellsOpened));
-      const cashout = (activeStakeWei * BigInt(multX100)) / 100n;
-      setText("[data-sl-mines-cashout-amount]", fmtSTT(cashout) + " STT");
+      setText("[data-sl-mines-cashout-amount]", fmtSTT((activeStakeWei * BigInt(multX100)) / 100n) + " STT");
+      setMinesStatus(`${cellsOpened} open · pick another or cash out`);
     }
   } catch (e) {
-    ev.currentTarget.disabled = false;
-    console.error("[mines] open cell:", e);
-    setMinesStatus(`open cell failed: ${friendlyError(e)}`);
+    cell.disabled = false;
+    // If the round already ended on-chain, render the final state instead of
+    // surfacing a raw "BetAlreadySettled" revert.
+    const handled = await finishMinesFromChain(betId, undefined);
+    if (!handled) {
+      console.error("[mines] open cell:", e);
+      setMinesStatus(`open cell failed: ${friendlyError(e)}`);
+    }
+  } finally {
+    cellPending = false;
   }
 }
 
@@ -326,7 +363,9 @@ async function tryRestoreActiveRound() {
   if (!SL.address || activeBetId !== null) return;
   try {
     const ids = await SL.casino.getPlayerBets(SL.address);
-    const tail = ids.slice(-10).reverse();
+    // ethers v6 returns a frozen Result array - copy before reverse() or it
+    // throws "Cannot assign to read only property".
+    const tail = Array.from(ids).slice(-10).reverse();
     for (const idStr of tail) {
       const id = BigInt(idStr);
       const b = await SL.casino.getBet(id);
