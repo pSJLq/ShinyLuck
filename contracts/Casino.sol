@@ -89,6 +89,14 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
 
     uint256 public maxBetBps = 100;
 
+    // EXPOSURE model (how real on-chain casinos manage a shared bankroll):
+    // instead of escrowing each bet's full max-payout (which freezes the pool
+    // under concurrent load), we only require that a single bet's max payout is
+    // <= maxExposureBps of the free bankroll. No per-bet lock, so hundreds of
+    // simultaneous bets don't tie up the pool; solvency is the per-bet exposure
+    // cap + the house edge + a settle-time clamp to available funds. Owner-set.
+    uint256 public maxExposureBps = 2000; // 20% of pool max payout per bet
+
     uint256 public bonusModeUntil;
 
     uint256 public hourStartTimestamp;
@@ -267,9 +275,13 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     // ---------------------------------------------------------------------
 
     function freeBankroll() public view returns (uint256) {
+        // EXPOSURE model: the pool is balance minus what it already owes
+        // (unclaimed winnings). We do NOT subtract per-bet reserves anymore -
+        // bets aren't escrowed; each is bounded by maxExposureBps at placement
+        // and clamped to available funds at settle. This is what lets many
+        // concurrent bets coexist without freezing the pool.
         uint256 b = address(this).balance;
-        uint256 sub = lockedReserve + totalPendingWithdrawals;
-        return b > sub ? b - sub : 0;
+        return b > totalPendingWithdrawals ? b - totalPendingWithdrawals : 0;
     }
 
     receive() external payable { emit BankrollDeposited(msg.sender, msg.value); }
@@ -299,6 +311,14 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         require(bps > 0 && bps <= 1000, "bps out of range");
         maxBetBps = bps;
     }
+
+    /// @notice Max single-bet payout as a fraction of the free bankroll (bps).
+    ///         Capped at 50% so one bet can never risk more than half the pool.
+    function setMaxExposureBps(uint256 bps) external onlyOwner {
+        require(bps > 0 && bps <= 5000, "exposure out of range");
+        maxExposureBps = bps;
+    }
+
 
     /// @notice Min/max for the round-based bet windows. The MAX is the hard
     ///         ceiling that still keeps a round settleable inside the 256-block
@@ -527,10 +547,15 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     /// @dev Hard cap on a single VAULT.7 payout, basis 100.
     /// @dev Hard cap on a single VAULT.7 payout, basis 100. STATS.md quotes
     ///      10,000× as a "max-win" headline, but the live bankroll can't
-    ///      reserve that per bet (see CLUSTER_MAX_MULT_X100 note). 2,000× is
+    ///      reserve that per bet (see clusterMaxMultX100 note). 2,000× is
     ///      the practical ceiling under the current boost; the cap binds on
     ///      jackpot pulls (5 WILDs + FS 2× mult).
-    uint256 internal constant VAULT7_MAX_MULT_X100 = 200000;
+    // Max-win cap (basis 100). Effective max stake = maxExposureBps * pool /
+    // maxMult, so playability is tuned at runtime via maxExposureBps (and a
+    // bigger pool). 1000x is a strong, mostly-honest headline (real big wins
+    // top out ~500x per STATS.md); the theoretical pay-table max (10,000x)
+    // needs a far larger pool to support.
+    uint256 public vault7MaxMultX100 = 30000;
 
     /// @dev Pay-table boost applied to Vault7Lib.resolve output. STATS.md
     ///      tables intrinsically yield ~30% RTP per validate-rtp.js. This
@@ -557,13 +582,13 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
             if (freeSpinsAvailable(msg.sender) == 0) revert InvalidBet("no free spins");
             if (msg.value != 0) revert InvalidBet("free spin: send 0");
             playerSlotState[msg.sender].freeSpinsUsed += 1;
-            uint256 maxFree = (FREE_SPIN_REFERENCE_STAKE * VAULT7_MAX_MULT_X100) / 100;
+            uint256 maxFree = (FREE_SPIN_REFERENCE_STAKE * vault7MaxMultX100) / 100;
             return _openFreeSpinBet(GameType.SLOTS, FREE_SPIN_REFERENCE_STAKE, clientSeed, maxFree, abi.encode(true));
         }
         if (msg.value == 0) revert InvalidBet("zero stake");
         if (msg.value < 20) revert InvalidBet("stake too small");
         _tickSlotCounter(msg.sender, msg.value);
-        uint256 maxPayout = (msg.value * VAULT7_MAX_MULT_X100) / 100;
+        uint256 maxPayout = (msg.value * vault7MaxMultX100) / 100;
         return _openBet(GameType.SLOTS, msg.value, clientSeed, maxPayout, abi.encode(false));
     }
 
@@ -577,7 +602,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     ///      We cap at 2,500× to keep bankroll reservations sane; empirical
     ///      single-spin payouts under the boost rarely exceed ~100× stake
     ///      outside of long sticky-mult free-spin chains (see validate-rtp.js).
-    uint256 internal constant CLUSTER_MAX_MULT_X100 = 250000;
+    uint256 public clusterMaxMultX100 = 30000;
 
     /// @dev Pay-table boost applied to ClusterLib.resolve output. The STATS.md
     ///      pay tables, run through the cluster engine, intrinsically yield
@@ -712,7 +737,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         uint256 unitStake = msg.value / BUY_BONUS_SUGAR_MULTIPLIER;
         if (unitStake == 0) revert InvalidBet("stake too small");
         _tickSlotCounter(msg.sender, msg.value);
-        uint256 maxPayout = (msg.value * CLUSTER_MAX_MULT_X100) / 100;
+        uint256 maxPayout = (msg.value * clusterMaxMultX100) / 100;
         // params = abi.encode(useFreeSpin=false, buyBonus=true) - settle path
         // ignores the buyBonus flag for now (resolver still runs unmodified),
         // but it's stored so the frontend / subgraph can surface it.
@@ -728,7 +753,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         uint256 unitStake = msg.value / BUY_BONUS_VAULT_MULTIPLIER;
         if (unitStake == 0) revert InvalidBet("stake too small");
         _tickSlotCounter(msg.sender, msg.value);
-        uint256 maxPayout = (msg.value * VAULT7_MAX_MULT_X100) / 100;
+        uint256 maxPayout = (msg.value * vault7MaxMultX100) / 100;
         betId = _openBet(GameType.SLOTS, msg.value, clientSeed, maxPayout, abi.encode(false, true));
         emit BuyBonusPlaced(betId, msg.sender, uint8(GameType.SLOTS), msg.value, unitStake);
     }
@@ -741,13 +766,13 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
             if (freeSpinsAvailable(msg.sender) == 0) revert InvalidBet("no free spins");
             if (msg.value != 0) revert InvalidBet("free spin: send 0");
             playerSlotState[msg.sender].freeSpinsUsed += 1;
-            uint256 maxFree = (FREE_SPIN_REFERENCE_STAKE * CLUSTER_MAX_MULT_X100) / 100;
+            uint256 maxFree = (FREE_SPIN_REFERENCE_STAKE * clusterMaxMultX100) / 100;
             return _openFreeSpinBet(GameType.CLUSTER, FREE_SPIN_REFERENCE_STAKE, clientSeed, maxFree, abi.encode(true));
         }
         if (msg.value == 0) revert InvalidBet("zero stake");
         if (msg.value < 20) revert InvalidBet("stake too small");
         _tickSlotCounter(msg.sender, msg.value);
-        uint256 maxPayout = (msg.value * CLUSTER_MAX_MULT_X100) / 100;
+        uint256 maxPayout = (msg.value * clusterMaxMultX100) / 100;
         return _openBet(GameType.CLUSTER, msg.value, clientSeed, maxPayout, abi.encode(false));
     }
 
@@ -762,7 +787,8 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         bytes memory params
     ) internal returns (uint256 betId) {
         uint256 free = freeBankroll();
-        if (maxPayout > free) revert BankrollInsufficient();
+        uint256 maxExposureFs = (free * maxExposureBps) / 10000;
+        if (maxExposureFs > 0 && maxPayout > maxExposureFs) revert BankrollInsufficient();
         if (nextHashIndex >= seedHashes.length) revert NoSeedAvailable();
         uint256 seedIdx = nextHashIndex++;
         _circuitBreakerTick();
@@ -1082,7 +1108,8 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         uint256 maxPayout = (msg.value * (autoCashoutX100 == 0 ? CRASH_MAX_AUTOCASHOUT : autoCashoutX100)) / 100;
         if (maxPayout < msg.value) revert InvalidBet("payout < stake");
         uint256 reserveAdd = maxPayout - msg.value;
-        if (reserveAdd > free + msg.value) revert BankrollInsufficient();
+        uint256 maxExposureC = (free * maxExposureBps) / 10000;
+        if (maxExposureC > 0 && maxPayout > maxExposureC) revert BetTooLarge();
         lockedReserve += reserveAdd;
 
         CrashBet storage cb = crashBets[r.roundId][msg.sender];
@@ -1336,7 +1363,10 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         uint256 free = freeBankroll();
         uint256 bpsCap = (free * maxBetBps) / 10000;
         if (bpsCap > 0 && total > bpsCap) revert BetTooLarge();
-        if (reserveAdd > free + total) revert BankrollInsufficient();
+        // EXPOSURE cap on the round's total worst-case payout (reserveAdd is the
+        // sum of per-bet (maxPayout - stake); + total = total max payout).
+        uint256 maxExposureR = (free * maxExposureBps) / 10000;
+        if (maxExposureR > 0 && (reserveAdd + total) > maxExposureR) revert BetTooLarge();
         lockedReserve += reserveAdd;
         if (list.length == bets.length) r.bettors.push(msg.sender);
         for (uint256 i; i < bets.length; i++) {
@@ -1508,7 +1538,10 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
 
         if (maxPayout < amount) revert InvalidBet("payout < stake");
         uint256 reserveAdd = maxPayout - amount;
-        if (reserveAdd > free + amount) revert BankrollInsufficient();
+        // EXPOSURE cap (no escrow): this bet's max payout must fit within
+        // maxExposureBps of the pool. Many concurrent bets coexist freely.
+        uint256 maxExposure = (free * maxExposureBps) / 10000;
+        if (maxExposure > 0 && maxPayout > maxExposure) revert BetTooLarge();
 
         if (nextHashIndex >= seedHashes.length) revert NoSeedAvailable();
         uint256 seedIdx = nextHashIndex++;
@@ -1573,6 +1606,16 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         bytes32 randomness = CommitReveal.deriveRandomness(storedSeed, bet.clientSeed, bet.commitBlock, bet.nonce);
         (bool won, uint256 payout, bytes memory resultData) = _resolve(bet, randomness);
 
+        // Solvency clamp (exposure model): never credit more than the pool can
+        // actually pay, so claim() can never fail. The placement exposure cap
+        // makes this rarely bind - it's the last-line guarantee under no-escrow.
+        if (won && payout > 0) {
+            uint256 avail = address(this).balance > totalPendingWithdrawals
+                ? address(this).balance - totalPendingWithdrawals : 0;
+            if (payout > avail) payout = avail;
+            won = payout > 0;
+        }
+
         bet.status = 1; bet.randomness = randomness; bet.won = won; bet.payout = uint128(payout);
         // Free-spin bets reserved the FULL maxPayout (no user contribution).
         // Regular bets reserved maxPayout - stake.
@@ -1633,7 +1676,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
                 ? (vault7PayBoostX100 + 32 < VAULT7_BOOST_HARDCAP ? vault7PayBoostX100 + 32 : VAULT7_BOOST_HARDCAP)
                 : vault7PayBoostX100;
             payout = (p * boostX100) / 100;
-            uint256 vaultCap = (uint256(bet.amount) * VAULT7_MAX_MULT_X100) / 100;
+            uint256 vaultCap = (uint256(bet.amount) * vault7MaxMultX100) / 100;
             if (payout > vaultCap) payout = vaultCap;
             // For a free spin, ANY non-zero payout is a "win" (we don't have a
             // stake to compare against on the user side).
@@ -1645,7 +1688,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
             ClusterLib.ResolveResult memory rr = ClusterLib.resolve(randomness);
             // ClusterLib.totalPayoutX100 is basis-100 of stake (per STATS.md
             // pay tables). Multiply by CLUSTER_PAY_BOOST_X100 to land at the
-            // STATS.md ~92% RTP target, then clamp at CLUSTER_MAX_MULT_X100.
+            // STATS.md ~92% RTP target, then clamp at clusterMaxMultX100.
             // Bonus Mode adds +18 to the boost (~+5.4% RTP, lifting cluster
             // from ~92% to ~97% while the bonus window is active). See the
             // SLOTS branch above for the rationale - bps/2 in houseEdgeBps()
@@ -1655,7 +1698,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
                 ? (clusterPayBoostX100 + 18 < CLUSTER_BOOST_HARDCAP ? clusterPayBoostX100 + 18 : CLUSTER_BOOST_HARDCAP)
                 : clusterPayBoostX100;
             uint256 raw = (stake * rr.totalPayoutX100 * boostX100) / 10_000;
-            uint256 capped = (stake * CLUSTER_MAX_MULT_X100) / 100;
+            uint256 capped = (stake * clusterMaxMultX100) / 100;
             payout = raw;
             if (payout > capped) payout = capped;
             bool useFreeSpin = _isFreeSpin(bet);
@@ -1688,8 +1731,8 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
             uint256 winChance = over ? uint256(100 - target) : uint256(target - 1);
             return _dicePayout(bet.amount, winChance);
         }
-        if (bet.game == GameType.SLOTS)   return (uint256(bet.amount) * VAULT7_MAX_MULT_X100) / 100;
-        if (bet.game == GameType.CLUSTER) return (uint256(bet.amount) * CLUSTER_MAX_MULT_X100) / 100;
+        if (bet.game == GameType.SLOTS)   return (uint256(bet.amount) * vault7MaxMultX100) / 100;
+        if (bet.game == GameType.CLUSTER) return (uint256(bet.amount) * clusterMaxMultX100) / 100;
         if (bet.game == GameType.MINES)  return (uint256(bet.amount) * MINES_MAX_MULT_X100) / 100;
         if (bet.game == GameType.PLINKO) {
             uint8 risk = abi.decode(bet.params, (uint8));

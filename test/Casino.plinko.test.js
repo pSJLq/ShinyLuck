@@ -70,9 +70,10 @@ describe("Casino — PlinkoGame", function () {
     const { casino, hm, alice } = await loadFixture(setup);
     await provisionSeeds(casino, hm, 1);
     const cs = ethers.hexlify(ethers.randomBytes(32));
-    // bankroll 100 ETH, 1% bps cap = 1 ETH bet, but high-risk reserve = 999*bet
-    // For 1 ETH bet, reserve = 999 ETH > free → should fail bankroll check.
+    // Exposure model: a 1 ETH high-risk plinko bet has maxPayout ≈ 999 ETH,
+    // far above maxExposureBps (20%) of the 100 ETH pool, so the per-bet
+    // exposure cap rejects it (BetTooLarge).
     await expect(casino.connect(alice).placeplinkoBet(2, cs, { value: ethers.parseEther("1") }))
-      .to.be.revertedWithCustomError(casino, "BankrollInsufficient");
+      .to.be.revertedWithCustomError(casino, "BetTooLarge");
   });
 });
