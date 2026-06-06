@@ -118,10 +118,21 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
     //   cluster_rtp_avg_bps (uint)  - average RTP across competitor cluster games
     string public competitorFeedUrl = "https://shiny-luck.vercel.app/agent-feed.json";
 
+    // REAL per-game competitor RTP sources. The Somnia JSON API agent fetches
+    // these live on-chain and extracts the `rtp` field (decimals=2 -> bps).
+    // slot.report is a free public slot-RTP API (no key). We benchmark against
+    // real competitor games of the SAME type: Gates of Olympus (5-reel) for
+    // VAULT.7, Sugar Rush (cluster-pays) for SUGAR.LAB. Owner-settable.
+    string public competitorUrlSlots   = "https://slot.report/api/v1/slots/gates-of-olympus.json";
+    string public competitorUrlCluster = "https://slot.report/api/v1/slots/sugar-rush.json";
+
     // Per-requestId routing. analysisGame = SLOTS+1 | CLUSTER+1 (so 0 means
     // "no entry"). competitorGame mirror serves the JSON-API leg.
     mapping(uint256 => uint8) public pendingAnalysisGame;
     mapping(uint256 => uint8) public pendingCompetitorGame;
+    // 1h bankroll trend captured at request time, read by the decision guard
+    // rails in handleResponse (so they can't be fooled by a stale read).
+    mapping(uint256 => int256) public pendingAnalysisChangeBps;
 
     // Last-fetched competitor RTP per game, in basis points. Used as input
     // to the next LLM decision. Stale window enforced by the hourly cron.
@@ -670,6 +681,13 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         emit CompetitorFeedUrlSet(url);
     }
 
+    /// @notice Point the JSON API agent at real per-game competitor RTP sources
+    ///         (e.g. slot.report endpoints). Owner-only.
+    function setCompetitorUrls(string calldata slotsUrl, string calldata clusterUrl) external onlyOwner {
+        competitorUrlSlots = slotsUrl;
+        competitorUrlCluster = clusterUrl;
+    }
+
     // ---------------------------------------------------------------------
     // STAGE 1 - JSON API Agent fetches REAL competitor RTP from research feed
     // ---------------------------------------------------------------------
@@ -684,21 +702,23 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             emit AgentRequestSkipped("competitor-rtp", "platform-not-wired");
             return;
         }
-        string memory selector;
-        if (game == uint8(Casino.GameType.SLOTS))      selector = "slots_rtp_avg_bps";
-        else if (game == uint8(Casino.GameType.CLUSTER)) selector = "cluster_rtp_avg_bps";
+        // REAL competitor RTP: a per-game public slot.report endpoint, fetched
+        // live on-chain by the Somnia JSON API agent. Same game type as ours.
+        string memory url;
+        if (game == uint8(Casino.GameType.SLOTS))        url = competitorUrlSlots;
+        else if (game == uint8(Casino.GameType.CLUSTER)) url = competitorUrlCluster;
         else { emit AgentRequestSkipped("competitor-rtp", "game-not-supported"); return; }
         uint256 cost = quoteJsonCost();
         if (address(this).balance < cost + SomniaExtensions.SUBSCRIPTION_OWNER_MINIMUM_BALANCE) {
             emit AgentRequestSkipped("competitor-rtp", "insufficient-balance");
             return;
         }
-        // fetchUint(url, selector, decimals=0) → integer at JSONPath selector.
+        // fetchUint(url, "rtp", 2): real slot RTP (e.g. 96.5) scaled to bps (9650).
         bytes memory payload = abi.encodeWithSelector(
             IJsonApiAgent.fetchUint.selector,
-            competitorFeedUrl,
-            selector,
-            uint8(0)
+            url,
+            "rtp",
+            uint8(2)
         );
         uint256 requestId = agentPlatform.createRequest{value: cost}(
             jsonAgentId,
@@ -707,7 +727,7 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             payload
         );
         pendingCompetitorGame[requestId] = game + 1;
-        emit CompetitorRtpRequested(requestId, game, competitorFeedUrl);
+        emit CompetitorRtpRequested(requestId, game, url);
     }
 
     // -------------------------------------------------------------------
@@ -858,6 +878,7 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             payload
         );
         pendingAnalysisGame[requestId] = game + 1; // +1 so 0 means "no entry"
+        pendingAnalysisChangeBps[requestId] = changeBps; // for handleResponse guard rails
         emit RtpAnalysisRequested(requestId, game, currentRtp, changeBps, competitorRtp);
     }
 
@@ -971,6 +992,24 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         uint16 oldRtp = casino.getReportedRTP(game);
         uint16 newRtp = oldRtp;
         bytes32 decH = keccak256(bytes(decision));
+
+        // GUARD RAILS: the LLM decides, but these on-chain invariants make an
+        // economically-perverse move impossible regardless of the word it
+        // returned. (1) never RAISE the payout while the bankroll is clearly
+        // dropping (>3% in 1h); (2) never LOWER when we're already materially
+        // below the competitor AND not bleeding (that would only hurt
+        // competitiveness for no protective reason). Either case → HOLD.
+        {
+            int256 chg = pendingAnalysisChangeBps[requestId];
+            uint256 comp = lastCompetitorRtpBps[game];
+            if (decH == keccak256(bytes("RAISE")) && chg < -300) {
+                decision = "HOLD"; decH = keccak256(bytes("HOLD"));
+            } else if (decH == keccak256(bytes("LOWER")) && chg >= -300
+                       && comp > 0 && uint256(oldRtp) + 50 < comp) {
+                decision = "HOLD"; decH = keccak256(bytes("HOLD"));
+            }
+        }
+        delete pendingAnalysisChangeBps[requestId];
 
         // 300 bps step: larger than the per-game payout-boost granularity
         // (~16-28 bps/integer), so a RAISE/LOWER always crosses at least one
