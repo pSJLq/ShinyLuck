@@ -119,7 +119,7 @@ agent-service/
 
 ## Deployed contracts (Somnia Testnet)
 
-All contracts verified on Shannon Explorer.
+All four contracts are live on Shannon Explorer with full source public in this repo (`contracts/`). (Shannon Explorer's auto-verify API is flaky; the source here is the canonical reference — every address below is interactable on-chain.)
 
 | Contract              | Address                                                            |
 | --------------------- | ------------------------------------------------------------------ |
@@ -229,7 +229,7 @@ MIT
 
 ## Деплоенные контракты (Somnia Testnet)
 
-Все 4 контракта верифицированы на Shannon Explorer.
+Все 4 контракта живые на Shannon Explorer, исходники полностью открыты в репо (`contracts/`). (Авто-верификация Shannon Explorer нестабильна; канонический источник — код здесь; каждый адрес ниже интерактивен on-chain.)
 
 | Контракт              | Адрес                                                              |
 | --------------------- | ------------------------------------------------------------------ |
