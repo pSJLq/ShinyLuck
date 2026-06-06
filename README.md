@@ -5,7 +5,7 @@
 > The house is a quorum of autonomous AI agents. Every reel stop, every dice roll, every roulette spin is the `keccak256` of three numbers anyone can audit. House RTP is adjusted hourly by an LLM agent that pulls live competitor data via Somnia's JSON API Agent - no off-chain script, no admin key, fully on-chain.
 
 **Live demo:** https://shiny-luck.vercel.app/ (or run locally with `npm run dev:play` → http://localhost:8080)
-**Explorer:** [HouseManager on Shannon Explorer](https://shannon-explorer.somnia.network/address/0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D) - watch `RtpAnalysisRequested` / `RtpAnalysisResolved` / `PlayerDecisionRequested` / `PlayerDecisionResolved` events fire hourly
+**Explorer:** [HouseManager on Shannon Explorer](https://shannon-explorer.somnia.network/address/0xe3DCbF5222145ECf87f78325052a58DC9cA14105) - watch `RtpAnalysisRequested` / `RtpAnalysisResolved` / `PlayerDecisionRequested` / `PlayerDecisionResolved` events fire hourly
 
 ---
 
@@ -123,10 +123,10 @@ All contracts verified on Shannon Explorer.
 
 | Contract              | Address                                                            |
 | --------------------- | ------------------------------------------------------------------ |
-| Casino                | [`0xd5dB5F85aDe7e1A6296e15F8E5eB897b24241833`](https://shannon-explorer.somnia.network/address/0xd5dB5F85aDe7e1A6296e15F8E5eB897b24241833) |
-| HouseManager          | [`0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D`](https://shannon-explorer.somnia.network/address/0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D) |
-| AgentQuorumVerifier   | [`0x2FD122E635B6987da4aC4949D88bAcB8b48a9ddF`](https://shannon-explorer.somnia.network/address/0x2FD122E635B6987da4aC4949D88bAcB8b48a9ddF) |
-| PlayerAgentRegistry   | [`0x1aC0D7ddF243ca887e54E4E99545d662c5e08ceC`](https://shannon-explorer.somnia.network/address/0x1aC0D7ddF243ca887e54E4E99545d662c5e08ceC) |
+| Casino                | [`0xa8685Ca735F9c9a5F8133A67a1A74bc5005E2dba`](https://shannon-explorer.somnia.network/address/0xa8685Ca735F9c9a5F8133A67a1A74bc5005E2dba) |
+| HouseManager          | [`0xe3DCbF5222145ECf87f78325052a58DC9cA14105`](https://shannon-explorer.somnia.network/address/0xe3DCbF5222145ECf87f78325052a58DC9cA14105) |
+| AgentQuorumVerifier   | [`0x7D62315703ef6C9EA565008e40528B8C5A609561`](https://shannon-explorer.somnia.network/address/0x7D62315703ef6C9EA565008e40528B8C5A609561) |
+| PlayerAgentRegistry   | [`0x2491A0944826EAF3D71558566561D88623A28e2F`](https://shannon-explorer.somnia.network/address/0x2491A0944826EAF3D71558566561D88623A28e2F) |
 | SomniaAgentPlatform   | [`0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776`](https://shannon-explorer.somnia.network/address/0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776) |
 | Reactivity precompile | `0x0000000000000000000000000000000000000100`                       |
 
@@ -204,7 +204,7 @@ MIT
 > Дом - это автономный AI-агент. Каждая остановка барабана, каждый бросок кубика, каждый спин рулетки - это `keccak256` от трёх чисел, которые любой может проверить. RTP казик каждый час подбирает LLM-агент, который через JSON API Agent тащит реальные RTP конкурентов с публичного research-фида - никакого off-chain скрипта, никакого админского ключа, всё на цепи.
 
 **Живое демо:** https://shiny-luck.vercel.app/ (или локально через `npm run dev:play` → http://localhost:8080)
-**Explorer:** [HouseManager на Shannon Explorer](https://shannon-explorer.somnia.network/address/0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D) - каждый час летят `RtpAnalysisRequested` / `RtpAnalysisResolved`
+**Explorer:** [HouseManager на Shannon Explorer](https://shannon-explorer.somnia.network/address/0xe3DCbF5222145ECf87f78325052a58DC9cA14105) - каждый час летят `RtpAnalysisRequested` / `RtpAnalysisResolved`
 
 ---
 
@@ -233,10 +233,10 @@ MIT
 
 | Контракт              | Адрес                                                              |
 | --------------------- | ------------------------------------------------------------------ |
-| Casino                | [`0xd5dB5F85aDe7e1A6296e15F8E5eB897b24241833`](https://shannon-explorer.somnia.network/address/0xd5dB5F85aDe7e1A6296e15F8E5eB897b24241833) |
-| HouseManager          | [`0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D`](https://shannon-explorer.somnia.network/address/0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D) |
-| AgentQuorumVerifier   | [`0x2FD122E635B6987da4aC4949D88bAcB8b48a9ddF`](https://shannon-explorer.somnia.network/address/0x2FD122E635B6987da4aC4949D88bAcB8b48a9ddF) |
-| PlayerAgentRegistry   | [`0x1aC0D7ddF243ca887e54E4E99545d662c5e08ceC`](https://shannon-explorer.somnia.network/address/0x1aC0D7ddF243ca887e54E4E99545d662c5e08ceC) |
+| Casino                | [`0xa8685Ca735F9c9a5F8133A67a1A74bc5005E2dba`](https://shannon-explorer.somnia.network/address/0xa8685Ca735F9c9a5F8133A67a1A74bc5005E2dba) |
+| HouseManager          | [`0xe3DCbF5222145ECf87f78325052a58DC9cA14105`](https://shannon-explorer.somnia.network/address/0xe3DCbF5222145ECf87f78325052a58DC9cA14105) |
+| AgentQuorumVerifier   | [`0x7D62315703ef6C9EA565008e40528B8C5A609561`](https://shannon-explorer.somnia.network/address/0x7D62315703ef6C9EA565008e40528B8C5A609561) |
+| PlayerAgentRegistry   | [`0x2491A0944826EAF3D71558566561D88623A28e2F`](https://shannon-explorer.somnia.network/address/0x2491A0944826EAF3D71558566561D88623A28e2F) |
 | SomniaAgentPlatform   | [`0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776`](https://shannon-explorer.somnia.network/address/0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776) |
 | Reactivity precompile | `0x0000000000000000000000000000000000000100`                       |
 

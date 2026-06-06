@@ -2,12 +2,12 @@
   "network": "somniaTestnet",
   "chainId": "50312",
   "deployer": "0x3fFa302E620492C8Fb43426a0e54E537C0d937A6",
-  "deploymentBlock": 401123935,
+  "deploymentBlock": 401981765,
   "addresses": {
-    "casino": "0xd5dB5F85aDe7e1A6296e15F8E5eB897b24241833",
-    "houseManager": "0xAa41ea7fDF9B38Ab5c5bB0F6d4A3Fc81B2906C5D",
-    "agentQuorumVerifier": "0x2FD122E635B6987da4aC4949D88bAcB8b48a9ddF",
-    "playerAgentRegistry": "0x1aC0D7ddF243ca887e54E4E99545d662c5e08ceC"
+    "casino": "0xa8685Ca735F9c9a5F8133A67a1A74bc5005E2dba",
+    "houseManager": "0xe3DCbF5222145ECf87f78325052a58DC9cA14105",
+    "agentQuorumVerifier": "0x7D62315703ef6C9EA565008e40528B8C5A609561",
+    "playerAgentRegistry": "0x2491A0944826EAF3D71558566561D88623A28e2F"
   },
   "agents": {
     "platform": "0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776",
@@ -17,5 +17,5 @@
     "size": 200,
     "firstHashIdx": 0
   },
-  "deployedAt": "2026-06-05T10:21:09.134Z"
+  "deployedAt": "2026-06-06T10:19:24.591Z"
 }
