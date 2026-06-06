@@ -972,13 +972,38 @@ async function main() {
   await maybeTopup();
   await maybeRefillHM();
   await maybeUnpauseGames();
+  // Heartbeat: timestamp of the last SUCCESSFUL settle-loop completion. The
+  // watchdog below force-restarts the process if this goes stale.
+  let lastLoopOkAt = Date.now();
   setInterval(() => {
-    loop().catch((e) => console.warn(`[reveal-bot] loop: ${e.message}`));
+    loop().then(() => { lastLoopOkAt = Date.now(); }).catch((e) => console.warn(`[reveal-bot] loop: ${e.message}`));
     maybeTopup().catch(() => {});
     maybeRefillHM().catch(() => {});
     maybeUnpauseGames().catch(() => {});
   }, POLL_MS);
   setInterval(() => { fastSettleTick().catch(() => {}); }, FAST_SETTLE_MS);
+
+  // ── WATCHDOG: self-restart on a SILENT stall ─────────────────────────
+  // Root cause of the recurring outages: the settle loop can wedge on a hung
+  // RPC/WS await WITHOUT the process crashing. Railway's ON_FAILURE restart
+  // policy never fires (the process didn't exit), so the bot stays "Online"
+  // but dead — bets stop settling, expired-bet refunds stop, so stuck cluster
+  // bets keep their (huge) maxPayout reserve locked and freeBankroll → 0 →
+  // the whole casino freezes; the on-chain hourly cron also never gets its
+  // watchdog reboot. We detect the wedge by the heartbeat above and exit
+  // non-zero so the host restarts a clean process (which re-scans, refunds
+  // expired bets to release reserve, resumes settling + roulette + the cron
+  // watchdog). Normal loops finish in well under a second, so a multi-minute
+  // gap is unambiguously a hang — no false positives when merely idle.
+  const STALL_EXIT_MS = parseInt(process.env.STALL_EXIT_MS || "300000", 10); // 5 min
+  setInterval(() => {
+    const idle = Date.now() - lastLoopOkAt;
+    if (idle > STALL_EXIT_MS) {
+      console.error(`[reveal-bot] WATCHDOG: settle loop stalled ${Math.round(idle / 1000)}s — exiting(1) for a clean restart`);
+      process.exit(1);
+    }
+  }, 30_000);
+
   await new Promise(() => {});
 }
 
