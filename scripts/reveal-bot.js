@@ -972,11 +972,28 @@ async function main() {
   await maybeTopup();
   await maybeRefillHM();
   await maybeUnpauseGames();
-  // Heartbeat: timestamp of the last SUCCESSFUL settle-loop completion. The
-  // watchdog below force-restarts the process if this goes stale.
+  // PREVENTION layer: heartbeat + per-iteration timeout + single-flight guard.
+  // lastLoopOkAt = last SUCCESSFUL loop() completion (the watchdog below
+  // restarts if it goes stale). The timeout is what stops the loop from
+  // wedging in the first place: a hung RPC/WS await can't freeze it forever -
+  // the iteration rejects after LOOP_TIMEOUT_MS, the busy flag clears, and the
+  // next tick retries fresh. So a transient endpoint blip self-corrects WITHOUT
+  // a restart; only a persistent stall trips the watchdog. pollBusy prevents
+  // overlapping iterations piling up while one is slow.
   let lastLoopOkAt = Date.now();
+  let pollBusy = false;
+  const LOOP_TIMEOUT_MS = parseInt(process.env.LOOP_TIMEOUT_MS || "30000", 10);
   setInterval(() => {
-    loop().then(() => { lastLoopOkAt = Date.now(); }).catch((e) => console.warn(`[reveal-bot] loop: ${e.message}`));
+    if (!pollBusy) {
+      pollBusy = true;
+      Promise.race([
+        loop(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("loop iteration timeout")), LOOP_TIMEOUT_MS)),
+      ])
+        .then(() => { lastLoopOkAt = Date.now(); })
+        .catch((e) => console.warn(`[reveal-bot] loop: ${e.message || e}`))
+        .finally(() => { pollBusy = false; });
+    }
     maybeTopup().catch(() => {});
     maybeRefillHM().catch(() => {});
     maybeUnpauseGames().catch(() => {});
