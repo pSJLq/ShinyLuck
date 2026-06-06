@@ -155,6 +155,28 @@ async function main() {
   const provider = ethers.provider;
   console.log(`[reveal-bot] signer=${signer.address} casino=${casinoAddr} network=${network.name}`);
 
+  // QUORUM VERIFIER activation: every Nth settled bet, ask the independent
+  // 3-of-4 LLM committee (AgentQuorumVerifier) to re-derive the bet's keccak256
+  // randomness on-chain (defence-in-depth on the RNG). Fully fire-and-forget so
+  // it can NEVER block or slow settlement; the signer pays the small quote and
+  // the gas-autopilot keeps it funded. Disable with QUORUM_EVERY=0.
+  const verifier = manifest.addresses.agentQuorumVerifier
+    ? await ethers.getContractAt("AgentQuorumVerifier", manifest.addresses.agentQuorumVerifier, signer)
+    : null;
+  const QUORUM_EVERY = parseInt(process.env.QUORUM_EVERY || "8", 10);
+  let _settleCount = 0;
+  async function maybeFireQuorum(betId) {
+    if (!verifier || QUORUM_EVERY <= 0) return;
+    _settleCount++;
+    if (_settleCount % QUORUM_EVERY !== 0) return;
+    try {
+      const price = await verifier.quotePrice();
+      const tx = await verifier.requestVerification(betId, { value: price });
+      await tx.wait();
+      console.log(`[reveal-bot] quorum verification fired for bet ${betId} (tx=${tx.hash.slice(0, 12)}…)`);
+    } catch (e) { /* defence-in-depth only - never disrupt settlement */ }
+  }
+
   const topics = {
     betPlaced:           casino.interface.getEvent("BetPlaced").topicHash,
     crashRoundStarted:   casino.interface.getEvent("CrashRoundStarted").topicHash,
@@ -508,6 +530,7 @@ async function main() {
           await tx.wait();
           console.log(`[reveal-bot] ${action} bet ${betId} tx=${tx.hash}`);
           pending.delete(betId);
+          if (action === "SETTLE") maybeFireQuorum(betId).catch(() => {});
         } catch (e) {
           const msg = e.shortMessage || e.message;
           if (/BetAlreadySettled|BetNotFound|InvalidGame/.test(msg)) pending.delete(betId);

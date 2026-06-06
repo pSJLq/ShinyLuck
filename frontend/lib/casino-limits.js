@@ -23,6 +23,10 @@ const CASINO_ABI = [
   "function freeBankroll() view returns (uint256)",
   "function maxBetBps() view returns (uint256)",
   "function gameMaxBet(uint8) view returns (uint256)",
+  // EXPOSURE model: max payout per bet <= maxExposureBps of the pool.
+  "function maxExposureBps() view returns (uint256)",
+  "function vault7MaxMultX100() view returns (uint256)",
+  "function clusterMaxMultX100() view returns (uint256)",
 ];
 
 // Numeric ids - must match contracts/Casino.sol::GameType enum order.
@@ -30,20 +34,14 @@ export const GAME = {
   dice: 0, crash: 1, slots: 2, mines: 3, plinko: 4, roulette: 5, cluster: 6,
 };
 
-// Per-game payout cap multiplier (basis 100), mirroring Casino.sol constants.
-// Used to bound max stake so `_openBet`'s `reserveAdd > free + amount` check
-// (=> BankrollInsufficient revert, error 0x8f523bc4) is never triggered.
-// For each game: maxPayout = stake * capX100 / 100. The contract requires
-// `maxPayout - amount <= free + amount` ⇒ `amount <= free / (capX100/100 - 2)`.
-// Games without a static cap (DICE depends on win-chance, CRASH/PLINKO on
-// internal multipliers, ROULETTE on bet kind) are not clamped here - their
-// own pre-submit logic computes payout directly.
-const PAYOUT_CAP_X100 = {
-  [GAME.slots]:   200000,  // VAULT.7  - 2000×
-  [GAME.cluster]: 250000,  // SUGAR.LAB - 2500×
-  [GAME.mines]:    10000,  // 100×
-  // dice, crash, plinko, roulette: no constant cap → omit
-};
+// EXPOSURE model: the contract caps a bet's max payout at maxExposureBps of the
+// free pool. So the binding stake limit for a fixed-max-mult game is:
+//   stake <= free * maxExposureBps / (100 * capX100)   (capX100 = max-mult ×100)
+// slots/cluster max-mults are read LIVE from the contract (vault7/clusterMaxMultX100);
+// mines uses the constant below. dice/crash/plinko/roulette have variable
+// per-bet payouts handled by their own pre-submit logic, so they're not clamped
+// here (the contract's exposure check is the backstop).
+const MINES_CAP_X100 = 10000; // 100×
 
 // Bankroll moves slowly relative to a single spin (5% safetyMargin in
 // `safeStake` absorbs typical drift), so a 30s TTL is conservative even when
@@ -77,25 +75,28 @@ export async function readMaxBet(game = "dice") {
   const casino = getCasino();
   let mb;
   try {
-    const [bankroll, bps, gMax] = await Promise.all([
+    const [bankroll, bps, gMax, exposureBps] = await Promise.all([
       casino.freeBankroll(),
       casino.maxBetBps(),
       casino.gameMaxBet(id),
+      casino.maxExposureBps(),
     ]);
-    // Three independent caps, take the tightest:
-    //   bpsCap     : free × maxBetBps / 10000  (config-controlled risk %)
-    //   gMax       : per-game hardcap (gameMaxBet, set at deploy time)
-    //   payoutCap  : free / (capX100/100 - 2)  ← guards BankrollInsufficient
-    //                                            on the contract's reserveAdd check
+    // Tightest of:
+    //   bpsCap      : free × maxBetBps / 10000   (per-bet stake risk %)
+    //   gMax        : per-game hardcap (gameMaxBet)
+    //   exposureCap : free × maxExposureBps / (100 × capX100)  ← THE binding cap
+    //                 for high-max-mult games (slots/cluster) under the exposure
+    //                 model: keeps maxPayout ≤ maxExposureBps of the pool.
     const free = BigInt(bankroll);
     const bpsCap = (free * BigInt(bps)) / 10_000n;
     const candidates = [bpsCap];
     if (gMax > 0n) candidates.push(BigInt(gMax));
-    const capX100 = PAYOUT_CAP_X100[id];
-    if (capX100) {
-      // stake × (capX100/100 - 2) ≤ free  ⇒  stake ≤ free × 100 / (capX100 - 200)
-      const denom = BigInt(capX100) - 200n;
-      if (denom > 0n) candidates.push((free * 100n) / denom);
+    let capX100 = null;
+    if (id === GAME.slots)        capX100 = BigInt(await casino.vault7MaxMultX100());
+    else if (id === GAME.cluster) capX100 = BigInt(await casino.clusterMaxMultX100());
+    else if (id === GAME.mines)   capX100 = BigInt(MINES_CAP_X100);
+    if (capX100 && capX100 > 0n) {
+      candidates.push((free * BigInt(exposureBps)) / (100n * capX100));
     }
     mb = candidates.reduce((m, c) => (c < m ? c : m));
   } catch (e) {
