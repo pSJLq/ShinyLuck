@@ -464,12 +464,12 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     /// @notice The autonomous House Manager tunes the REAL slot/cluster RTP to
     ///         stay competitive. The target RTP maps to the on-chain payout
     ///         boost (so it actually changes what players win, not a label).
-    ///         Bounded to [8800, 9600] (house edge 4-12%); combined with the
+    ///         Bounded to [8800, 9700] (house edge 3-12%); combined with the
     ///         bonus-mode increment the per-game hard-cap keeps effective RTP
     ///         strictly < 100%, so the agent can never tune the house to a loss.
     function adjustSlotRTP(uint8 game, uint16 newRtpBps, string calldata reasoning) external {
         if (msg.sender != houseManager && msg.sender != owner()) revert NotHouseManager();
-        if (newRtpBps < 8800 || newRtpBps > 9600) revert InvalidBet("rtp out of band");
+        if (newRtpBps < 8800 || newRtpBps > 9700) revert InvalidBet("rtp out of band");
         uint16 prev;
         if (game == uint8(GameType.SLOTS)) {
             prev = uint16(VAULT7_BASE_RTP_BPS * vault7PayBoostX100 / VAULT7_BOOST_BASE);

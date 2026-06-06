@@ -80,7 +80,7 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
     uint256 public parsePricePerWorker = 0.12 ether;
     uint8   public agentSubcommitteeSize = 3;
     uint16  public minRtpBps = 8800;   // 88.00% floor (matches casino adjustSlotRTP band)
-    uint16  public maxRtpBps = 9600;   // 96.00% ceiling (agent cap; +bonus stays <100%)
+    uint16  public maxRtpBps = 9700;   // 97.00% ceiling (agent cap; +bonus stays <100% via the per-game boost hardcap)
 
     // News-driven Bonus Mode trigger via the LLM Parse Website agent. Every
     // hourly tick we ask the agent to read a market-wire page and extract the
@@ -288,47 +288,35 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         lastHourlyTickTs = nowTs;
 
         uint256 hourAgo = _hourlyBankroll[prevIdx];
-        if (hourAgo == 0) {
+        // Need a PLAUSIBLE baseline. A near-zero entry - an uninitialized ring
+        // slot, or a post-outage frozen-bankroll value (e.g. 0.149 STT) - makes
+        // the % explode (the +46000% Δ bug). Treat anything below 1 STT as
+        // "no data yet" so we never feed the LLM a garbage delta.
+        if (hourAgo < 1 ether) {
             emit ReactiveHourlyTick(free, 0);
-            return; // not enough data yet
+            return;
         }
 
-        // changeBps = (free - hourAgo) * 10000 / hourAgo
+        // changeBps = (free - hourAgo) * 10000 / hourAgo, clamped to +/-100%.
         int256 freeS    = int256(free);
         int256 hourAgoS = int256(hourAgo);
         int256 changeBps = ((freeS - hourAgoS) * 10000) / hourAgoS;
+        if (changeBps > 10000)  changeBps = 10000;
+        if (changeBps < -10000) changeBps = -10000;
 
-        // Decide. Order matters - first matching branch wins.
-        // Big growth → lower slot RTP (more retentive).
-        // Mild growth → activate bonus mode (more generous, keep players engaged).
-        // Mild drop  → raise slot RTP (rebuild trust).
-        // Big drop   → pause hot games (protect bankroll).
-        if (changeBps > 1500) {
-            try casino.adjustSlotRTP(uint8(Casino.GameType.SLOTS), 9000, "auto: bankroll growth >15%") {} catch {}
-            try casino.adjustSlotRTP(uint8(Casino.GameType.CLUSTER), 9000, "auto: bankroll growth >15%") {} catch {}
-            // Roulette has a fixed math edge (can't flex RTP), so the agent's
-            // lever here is the per-round max bet: tighten it to 2% of free
-            // bankroll on strong growth (more retentive, caps tail risk).
-            try casino.setGameMaxBet(Casino.GameType.ROULETTE, (free * 200) / 10000) {} catch {}
-            emit ReasoningRequested("LOWER_SLOT_RTP", changeBps, free, nowTs);
-        } else if (changeBps > 1000) {
-            try casino.activateBonusMode(60, "auto: bankroll growth >10%, rewarding players") {} catch {}
-            emit ReasoningRequested("BONUS_MODE", changeBps, free, nowTs);
-        } else if (changeBps < -2000) {
+        // DETERMINISTIC SAFETY ONLY. A hard 1h bankroll drop (>20%) trips an
+        // immediate circuit pause of the hot games. Everything else - all RTP
+        // fine-tuning, bonus windows - is delegated to the LLM agent in
+        // requestRtpAnalysis below, so there is a SINGLE, coherent,
+        // bankroll-first decision-maker. (The old rule-based block here raised
+        // payouts while the bankroll was DROPPING - economically backwards and
+        // in conflict with the LLM; removed.)
+        if (changeBps < -2000) {
             try casino.pauseGame(Casino.GameType.CRASH) {} catch {}
             try casino.pauseGame(Casino.GameType.CLUSTER) {} catch {}
             try casino.pauseGame(Casino.GameType.SLOTS) {} catch {}
-            // Roulette can't lower RTP to protect the bankroll, so on a hard
-            // drop the agent pauses it alongside the other hot games.
             try casino.pauseGame(Casino.GameType.ROULETTE) {} catch {}
             emit ReasoningRequested("PAUSE_HOT_GAMES", changeBps, free, nowTs);
-        } else if (changeBps < -1000) {
-            try casino.adjustSlotRTP(uint8(Casino.GameType.SLOTS), 9400, "auto: bankroll drop >10%, rebuilding trust") {} catch {}
-            try casino.adjustSlotRTP(uint8(Casino.GameType.CLUSTER), 9400, "auto: bankroll drop >10%, rebuilding trust") {} catch {}
-            // Loosen roulette's max bet back up (5% of free bankroll) to keep
-            // it inviting while we rebuild trust on the slot side.
-            try casino.setGameMaxBet(Casino.GameType.ROULETTE, (free * 500) / 10000) {} catch {}
-            emit ReasoningRequested("RAISE_SLOT_RTP", changeBps, free, nowTs);
         }
 
         emit ReactiveHourlyTick(free, changeBps);
@@ -823,8 +811,13 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         {
             uint8 prevIdx = _ringIdx == 0 ? 23 : _ringIdx - 1;
             uint256 hourAgo = _hourlyBankroll[prevIdx];
-            if (hourAgo > 0) {
+            // Only against a plausible baseline (>=1 STT). A near-zero entry
+            // (uninitialized ring slot or post-outage frozen value) otherwise
+            // blows the % up to nonsense like +46000% and poisons the prompt.
+            if (hourAgo >= 1 ether) {
                 changeBps = ((int256(free) - int256(hourAgo)) * 10000) / int256(hourAgo);
+                if (changeBps > 10000)  changeBps = 10000;
+                if (changeBps < -10000) changeBps = -10000;
             }
         }
 
@@ -842,7 +835,7 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         }
 
         string memory prompt = _buildDecisionPrompt(game, currentRtp, free, changeBps, competitorRtp);
-        string memory system = "You are the autonomous RTP regulator for ShinyLuck on Somnia. Reply with EXACTLY one word from the allowed values. Your goal is to be competitive: if our RTP is materially below competitor average, RAISE. If significantly above, LOWER. HOLD if within 0.5%. BIG_BONUS only when bankroll grew strongly AND competitors are loosening too. Protect bankroll first.";
+        string memory system = "You are the autonomous RTP and risk manager for ShinyLuck on Somnia. Reply with EXACTLY one word from the allowed values. Decide by BANKROLL HEALTH FIRST, then competitiveness: (1) if the 1h bankroll change is negative beyond about -3%, the house is bleeding, so LOWER the RTP to protect it; (2) if bankroll is flat or growing AND our RTP is materially below the competitor average, RAISE to stay competitive; (3) if our RTP is well above competitor and bankroll is flat, LOWER; (4) HOLD when within ~0.5% of competitor and bankroll is stable; (5) BIG_BONUS only when bankroll grew strongly (>+5%) AND we are at or above competitor. NEVER RAISE while the bankroll is dropping.";
 
         string[] memory allowed = new string[](4);
         allowed[0] = "LOWER";
@@ -979,10 +972,14 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         uint16 newRtp = oldRtp;
         bytes32 decH = keccak256(bytes(decision));
 
+        // 300 bps step: larger than the per-game payout-boost granularity
+        // (~16-28 bps/integer), so a RAISE/LOWER always crosses at least one
+        // boost integer and produces a VISIBLE, real change (the old 150 step
+        // could round to the same boost = no-op near the cap).
         if      (decH == keccak256(bytes("RAISE"))) {
-            newRtp = _clampBps(uint16(uint256(oldRtp) + 150));
+            newRtp = _clampBps(uint16(uint256(oldRtp) + 300));
         } else if (decH == keccak256(bytes("LOWER"))) {
-            uint256 lowered = oldRtp > 150 ? uint256(oldRtp) - 150 : uint256(oldRtp);
+            uint256 lowered = oldRtp > 300 ? uint256(oldRtp) - 300 : uint256(oldRtp);
             newRtp = _clampBps(uint16(lowered));
         } else if (decH == keccak256(bytes("BIG_BONUS"))) {
             // Activate Bonus Mode for 60 min in addition to leaving RTP alone.
@@ -992,8 +989,12 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
 
         string memory sample = decision;
         if (newRtp != oldRtp) {
-            try casino.adjustSlotRTP(game, newRtp, "LLM consensus via Somnia Agent Platform") {}
-            catch { emit AgentRequestSkipped("rtp-analysis", "casino-rejected"); return; }
+            try casino.adjustSlotRTP(game, newRtp, "LLM consensus via Somnia Agent Platform") {
+                // Report the EFFECTIVE RTP after the bps->boost->bps rounding,
+                // so the on-chain event matches what getReportedRTP (and the UI
+                // card) actually show - no "feed says 96.00, card says 95.89".
+                newRtp = casino.getReportedRTP(game);
+            } catch { emit AgentRequestSkipped("rtp-analysis", "casino-rejected"); return; }
         }
         emit RtpAnalysisResolved(requestId, game, oldRtp, newRtp, decision, sample);
     }
@@ -1030,7 +1031,8 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
             " Competitor average RTP (live from research feed): ", compStr, ".",
             " Free bankroll: ", _wei2eth(freeWei), " STT.",
             " 1h bankroll change: ", _signedBps2pct(changeBps), "%.",
-            " Action: RAISE = +1.5% RTP. LOWER = -1.5% RTP. HOLD = no change.",
+            " Protect the bankroll first: if the 1h change is clearly negative, LOWER.",
+            " Action: RAISE = +3% RTP. LOWER = -3% RTP. HOLD = no change.",
             " BIG_BONUS = activate 60min Bonus Mode for a generous payout window."
         ));
     }
