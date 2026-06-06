@@ -98,6 +98,13 @@ const HM_ABI = [
   "event RtpAnalysisRequested(uint256 indexed requestId, uint8 indexed game, uint16 ourRtpBps, int256 bankrollChangeBps, uint256 competitorRtpBps)",
   "event RtpAnalysisResolved(uint256 indexed requestId, uint8 indexed game, uint16 oldRtpBps, uint16 newRtpBps, string decision, string sample)",
   "event AgentRequestSkipped(string indexed kind, string reason)",
+  // JSON API agent (competitor RTP) + Parse Website agent (news) chains - so
+  // their dashboard cards reflect real on-chain activity, not a placeholder.
+  "event CompetitorRtpRequested(uint256 indexed requestId, uint8 indexed game, string url)",
+  "event CompetitorRtpResolved(uint256 indexed requestId, uint8 indexed game, uint256 rtpBps)",
+  "event NewsHeadlineRequested(uint256 indexed requestId, string url)",
+  "event NewsHeadlineResolved(uint256 indexed requestId, string headline)",
+  "event NewsBonusDecisionResolved(uint256 indexed requestId, string decision)",
   // gen-14: per-player inferToolsChat Player Agent. PlayerDecisionResolved is
   // the umbrella outcome (SKIP / TOOL_PLACEBET / DONE / DECODE_FAIL); the LLM
   // itself decided the game+stake by yielding a placeBet on-chain tool call.
@@ -373,10 +380,10 @@ function renderAll() {
     const card = findCardByAgentKey(key);
     if (!card) continue;
     renderBar(card, state[key].buckets, AGENT_COLORS[key]);
-    if (key === "hm" || key === "llm") {
-      mountThoughtTicker(card, key, AGENT_COLORS[key]);
-      updateThoughtTicker(card, key);
-    }
+    // All four agents now have real on-chain events wired, so every card gets
+    // a live "current thought" ticker (no more hardcoded placeholders).
+    mountThoughtTicker(card, key, AGENT_COLORS[key]);
+    updateThoughtTicker(card, key);
     // "Active" = any event in the last 5 minutes of buckets.
     const recentActivity = state[key].buckets.slice(-5).reduce((a, b) => a + b, 0);
     paintActivePulse(card, recentActivity > 0);
@@ -428,7 +435,7 @@ async function coldStart() {
   // Pull all HM events for the last 30 min in parallel.
   let events = [];
   try {
-    const [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip, playerDec] = await Promise.all([
+    const [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip, playerDec, compReq, compRes, newsReq, newsRes, newsBonus] = await Promise.all([
       rawFetchLogs(hm, "ReactiveBetSettledHandled", from, head).catch(() => []),
       rawFetchLogs(hm, "ReactiveHourlyTick",        from, head).catch(() => []),
       rawFetchLogs(hm, "ReasoningRequested",        from, head).catch(() => []),
@@ -436,8 +443,13 @@ async function coldStart() {
       rawFetchLogs(hm, "RtpAnalysisResolved",       from, head).catch(() => []),
       rawFetchLogs(hm, "AgentRequestSkipped",        from, head).catch(() => []),
       rawFetchLogs(hm, "PlayerDecisionResolved",     from, head).catch(() => []),
+      rawFetchLogs(hm, "CompetitorRtpRequested",     from, head).catch(() => []),
+      rawFetchLogs(hm, "CompetitorRtpResolved",      from, head).catch(() => []),
+      rawFetchLogs(hm, "NewsHeadlineRequested",      from, head).catch(() => []),
+      rawFetchLogs(hm, "NewsHeadlineResolved",       from, head).catch(() => []),
+      rawFetchLogs(hm, "NewsBonusDecisionResolved",  from, head).catch(() => []),
     ]);
-    events = [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip, playerDec].flat();
+    events = [reflex, tick, reasoning, rtpReq, rtpRes, rtpSkip, playerDec, compReq, compRes, newsReq, newsRes, newsBonus].flat();
   } catch (e) { console.warn("[agent-activity] HM cold-start:", e.message); }
 
   // Need timestamps. Use block.timestamp via a small batch read; cap at the
@@ -522,7 +534,16 @@ async function coldStart() {
 // so they belong under the LLM stream/tag, not "HOUSE MGR". Everything else
 // (reflex, hourly tick, RTP flex, reasoning) is the House Manager itself.
 function hmEventAgentKey(ev) {
-  if (ev.name === "PlayerDecisionResolved" || ev.name === "PlayerAgentToolCall") return "llm";
+  const n = ev.name;
+  // LLM Inference agent: it both decides RTP (RtpAnalysis*) and drives player
+  // bets (PlayerDecision*/PlayerAgentToolCall).
+  if (n === "PlayerDecisionResolved" || n === "PlayerAgentToolCall"
+      || n === "RtpAnalysisRequested" || n === "RtpAnalysisResolved") return "llm";
+  // JSON API agent: competitor-RTP fetches.
+  if (n === "CompetitorRtpRequested" || n === "CompetitorRtpResolved") return "json";
+  // Parse Website agent: news headline + its bonus verdict.
+  if (n === "NewsHeadlineRequested" || n === "NewsHeadlineResolved"
+      || n === "NewsBonusDecisionResolved") return "parse";
   return "hm";
 }
 
@@ -538,6 +559,16 @@ function hmLabelFor(ev) {
       return `→ asking LLM for ${gameName(ev.args.game)} RTP (our ${fmtBpsPct(ev.args.ourRtpBps)}%, Δ${fmtBps(ev.args.bankrollChangeBps)}%, competitor ${ev.args.competitorRtpBps > 0n ? fmtBpsPct(ev.args.competitorRtpBps) + "%" : "unknown"})${receiptLink(ev.args.requestId)}`;
     case "RtpAnalysisResolved":
       return `← LLM decision "${ev.args.decision}": ${gameName(ev.args.game)} ${fmtBpsPct(ev.args.oldRtpBps)}% → ${fmtBpsPct(ev.args.newRtpBps)}%${receiptLink(ev.args.requestId)}`;
+    case "CompetitorRtpRequested":
+      return `→ JSON API agent: fetching competitor RTP for ${gameName(ev.args.game)}${receiptLink(ev.args.requestId)}`;
+    case "CompetitorRtpResolved":
+      return `competitor RTP for ${gameName(ev.args.game)}: ${(Number(ev.args.rtpBps) / 100).toFixed(2)}% (live from research feed)${receiptLink(ev.args.requestId)}`;
+    case "NewsHeadlineRequested":
+      return `→ Parse Website agent: scanning the crypto news feed${receiptLink(ev.args.requestId)}`;
+    case "NewsHeadlineResolved":
+      return `headline extracted: "${String(ev.args.headline || "").slice(0, 80)}"${receiptLink(ev.args.requestId)}`;
+    case "NewsBonusDecisionResolved":
+      return `news verdict: ${ev.args.decision}${String(ev.args.decision) === "BIG_BONUS" ? " → Bonus Mode ON" : " (no bonus)"}${receiptLink(ev.args.requestId)}`;
     case "AgentRequestSkipped": {
       // `kind` is indexed bytes32 (string-hashed by event semantics) - ethers
       // surfaces it as a Result. `reason` is the plain string we emitted.
@@ -669,7 +700,9 @@ function subscribeRealtime() {
   };
   ["ReactiveBetSettledHandled", "ReactiveHourlyTick", "ReasoningRequested",
    "RtpAnalysisRequested", "RtpAnalysisResolved", "AgentRequestSkipped",
-   "PlayerDecisionResolved"]
+   "PlayerDecisionResolved",
+   "CompetitorRtpRequested", "CompetitorRtpResolved",
+   "NewsHeadlineRequested", "NewsHeadlineResolved", "NewsBonusDecisionResolved"]
     .forEach(subscribeHm);
 
   if (ver) {
@@ -737,16 +770,9 @@ function boot() {
   // Render once with empty buckets so the bars appear immediately while
   // the cold-start fetch is in flight.
   renderAll();
-  // For JSON / Parse - those agents have no v1 chain wiring. Render a single
-  // "queued" thought so the cards don't look broken.
-  for (const key of ["json", "parse"]) {
-    const card = findCardByAgentKey(key);
-    if (card) {
-      mountThoughtTicker(card, key, AGENT_COLORS[key]);
-      const host = card.querySelector(`.sl-agent-thought[data-agent="${key}"] .sl-thought-line`);
-      if (host) host.textContent = "registered with Somnia Agent Platform - awaiting v2 binding";
-    }
-  }
+  // All four agent cards (HM, LLM Inference, JSON API, Parse Website) are wired
+  // to real on-chain events now; renderAll() mounts their "current thought"
+  // tickers and the cold-start fetch below fills them with the latest activity.
   coldStart().catch((e) => console.warn("[agent-activity] coldStart:", e.message));
   subscribeRealtime();
   startBucketScroller();
