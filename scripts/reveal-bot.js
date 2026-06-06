@@ -117,11 +117,17 @@ function makeSeedStore({ initialSeedsFile, poolFile, masterKey }) {
   }
   return {
     get(idx) {
-      refreshPool();
       const i = Number(idx);
+      // When a master key is set, ALWAYS derive deterministically. Seeds are
+      // keccak(masterKey, idx), so this is correct for ANY deploy and immune to
+      // a stale initial/pool seeds file left on the host from a PREVIOUS deploy
+      // (which would otherwise shadow indices 0..N with the wrong seeds and make
+      // every fresh-deploy settle revert → bets expire). This is what lets a
+      // redeploy "just work" with no Railway seeds-env update.
+      if (masterKey) return deriveSeed(masterKey, i);
+      refreshPool();
       if (poolArray[i]) return poolArray[i];
       if (i < initial.length) return initial[i];
-      if (masterKey) return deriveSeed(masterKey, i);
       return null;
     },
     refresh: refreshPool,
