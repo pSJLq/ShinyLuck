@@ -291,19 +291,26 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         uint256 nowTs = block.timestamp;
         uint256 free = casino.freeBankroll();
 
-        // Sample into the ring buffer.
-        _hourlyBankroll[_ringIdx] = free;
-        _hourlyTs[_ringIdx]       = nowTs;
-        uint8 prevIdx = _ringIdx == 0 ? 23 : _ringIdx - 1;
-        _ringIdx = (_ringIdx + 1) % 24;
         lastHourlyTickTs = nowTs;
 
+        // Δ is measured against the PREVIOUS tick's sample. We deliberately do
+        // NOT advance the ring here: the agent requests fired below recompute Δ
+        // from the ring, and if this tick's new sample were already written they
+        // would read their own value and see Δ=0 (the "prompt says 0.00% but the
+        // tick shows +1.53%" bug). So we write the sample LAST - on the
+        // early-return path and at the very end - after the requests have read
+        // the correct baseline.
+        uint8 prevIdx = _ringIdx == 0 ? 23 : _ringIdx - 1;
         uint256 hourAgo = _hourlyBankroll[prevIdx];
         // Need a PLAUSIBLE baseline. A near-zero entry - an uninitialized ring
         // slot, or a post-outage frozen-bankroll value (e.g. 0.149 STT) - makes
         // the % explode (the +46000% Δ bug). Treat anything below 1 STT as
         // "no data yet" so we never feed the LLM a garbage delta.
         if (hourAgo < 1 ether) {
+            // No usable baseline yet: write this sample so the NEXT tick has one.
+            _hourlyBankroll[_ringIdx] = free;
+            _hourlyTs[_ringIdx]       = nowTs;
+            _ringIdx = (_ringIdx + 1) % 24;
             emit ReactiveHourlyTick(free, 0);
             return;
         }
@@ -369,6 +376,12 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
                 }
             } catch {}
         }
+
+        // Write this tick's bankroll sample LAST, so the agent requests above
+        // read the correct previous-tick baseline (not this tick's own value).
+        _hourlyBankroll[_ringIdx] = free;
+        _hourlyTs[_ringIdx]       = nowTs;
+        _ringIdx = (_ringIdx + 1) % 24;
     }
 
     /// @dev Library `defaultSubscriptionOptions()` returns priorityFeePerGas=0
@@ -1001,6 +1014,7 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         string memory decision;
         try this.tryDecodeString(responses[0].result) returns (string memory s) { decision = s; }
         catch { emit AgentRequestSkipped("rtp-analysis", "decode-failed"); return; }
+        string memory rawLlm = decision; // the LLM's raw word, before guard rails
 
         uint16 oldRtp = casino.getReportedRTP(game);
         uint16 newRtp = oldRtp;
@@ -1009,9 +1023,11 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         // GUARD RAILS: the LLM decides, but these on-chain invariants make an
         // economically-perverse move impossible regardless of the word it
         // returned. (1) never RAISE the payout while the bankroll is clearly
-        // dropping (>3% in 1h); (2) never LOWER when we're already materially
-        // below the competitor AND not bleeding (that would only hurt
-        // competitiveness for no protective reason). Either case → HOLD.
+        // dropping (>3% in 1h) -> force HOLD. (2) if it tries to LOWER while
+        // we're already materially below the competitor AND not bleeding, that's
+        // backwards: the right move is to CLOSE the gap, so override to RAISE
+        // (toward the competitor), not HOLD. The raw LLM word is still emitted
+        // (sample) so the feed can show "LLM X -> guard Y".
         {
             int256 chg = pendingAnalysisChangeBps[requestId];
             uint256 comp = lastCompetitorRtpBps[game];
@@ -1019,7 +1035,7 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
                 decision = "HOLD"; decH = keccak256(bytes("HOLD"));
             } else if (decH == keccak256(bytes("LOWER")) && chg >= -300
                        && comp > 0 && uint256(oldRtp) + 50 < comp) {
-                decision = "HOLD"; decH = keccak256(bytes("HOLD"));
+                decision = "RAISE"; decH = keccak256(bytes("RAISE"));
             }
         }
         delete pendingAnalysisChangeBps[requestId];
@@ -1039,7 +1055,7 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         }
         // HOLD or unrecognized → leave RTP untouched.
 
-        string memory sample = decision;
+        string memory sample = rawLlm; // event carries BOTH: sample=raw LLM word, decision=applied
         if (newRtp != oldRtp) {
             try casino.adjustSlotRTP(game, newRtp, "LLM consensus via Somnia Agent Platform") {
                 // Report the EFFECTIVE RTP after the bps->boost->bps rounding,

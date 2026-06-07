@@ -557,8 +557,15 @@ function hmLabelFor(ev) {
       return `${ev.args.action} · Δ${fmtBps(ev.args.changeBps)}% · bankroll ${fmtSttFromWei(ev.args.freeBankroll)} STT`;
     case "RtpAnalysisRequested":
       return `→ asking LLM for ${gameName(ev.args.game)} RTP (our ${fmtBpsPct(ev.args.ourRtpBps)}%, Δ${fmtBps(ev.args.bankrollChangeBps)}%, competitor ${ev.args.competitorRtpBps > 0n ? fmtBpsPct(ev.args.competitorRtpBps) + "%" : "unknown"})${receiptLink(ev.args.requestId)}`;
-    case "RtpAnalysisResolved":
-      return `← LLM decision "${ev.args.decision}": ${gameName(ev.args.game)} ${fmtBpsPct(ev.args.oldRtpBps)}% → ${fmtBpsPct(ev.args.newRtpBps)}%${receiptLink(ev.args.requestId)}`;
+    case "RtpAnalysisResolved": {
+      // sample = the LLM's raw word; decision = what was applied after the
+      // on-chain guard rails. Show "LLM X → guard Y" when the guard overrode the
+      // model (e.g. it tried to LOWER below the competitor), else just the word.
+      const raw = String(ev.args.sample || ev.args.decision);
+      const applied = String(ev.args.decision);
+      const head = raw !== applied ? `LLM ${raw} → guard ${applied}` : `LLM decision "${applied}"`;
+      return `← ${head}: ${gameName(ev.args.game)} ${fmtBpsPct(ev.args.oldRtpBps)}% → ${fmtBpsPct(ev.args.newRtpBps)}%${receiptLink(ev.args.requestId)}`;
+    }
     case "CompetitorRtpRequested":
       return `→ JSON API agent: fetching competitor RTP for ${gameName(ev.args.game)}${receiptLink(ev.args.requestId)}`;
     case "CompetitorRtpResolved":
@@ -599,7 +606,7 @@ function hmLabelFor(ev) {
       // finished without betting.
       const who = shortAddr(ev.args.player);
       if (ev.args.placed) {
-        return `player ${who} agent bet ${fmtSttFromWei(ev.args.stakeWei)} STT on ${gameName(ev.args.game)} (LLM tool call #${ev.args.betId})`;
+        return `player ${who} agent bet ${fmtSttFromWei(ev.args.stakeWei)} STT on ${gameName(ev.args.game)} (LLM tool call #${ev.args.betId})${receiptLink(ev.args.requestId)}`;
       }
       const d = String(ev.args.decision || "");
       const why = d === "SKIP" ? "chose to skip this tick"
@@ -607,7 +614,7 @@ function hmLabelFor(ev) {
         : d === "NO_CONSENSUS" ? "LLM consensus failed - skipped"
         : d === "DECODE_FAIL" ? "tool-call decode failed - skipped"
         : d.toLowerCase();
-      return `player ${who} agent ${why}`;
+      return `player ${who} agent ${why}${receiptLink(ev.args.requestId)}`;
     }
     default:
       return ev.name;
