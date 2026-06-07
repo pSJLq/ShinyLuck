@@ -308,13 +308,15 @@ async function main() {
       // freshest competitor benchmark from storage.
       const fire = async (label, fn) => {
         try { const tx = await fn(); await tx.wait(); console.log(`[reveal-bot] watchdog fired ${label} (${tx.hash.slice(0,12)}...)`); }
-        catch (e) { /* smart-skip / insufficient-balance are normal */ }
+        catch (e) { console.warn(`[reveal-bot] watchdog ${label}: ${e.shortMessage || e.message}`); }
       };
-      await fire("comp-slots",   () => hm.requestCompetitorRtp(2));
-      await fire("comp-cluster", () => hm.requestCompetitorRtp(6));
-      await fire("news",         () => hm.requestNewsHeadline());
-      await fire("rtp-slots",    () => hm.requestRtpAnalysis(2));
-      await fire("rtp-cluster",  () => hm.requestRtpAnalysis(6));
+      // ONE call runs the full on-chain hourly tick: sample the bankroll ring,
+      // compute the LIVE 1-tick Δ, run the circuit check, and fire the whole
+      // agent chain (competitor×2 + news + rtp×2 + player decisions). Doing it
+      // via pokeHourlyTick (instead of the individual request fns) keeps the
+      // bankroll ring FRESH, so the RTP agent reads a real delta instead of a
+      // stale baseline frozen at deploy time.
+      await fire("hourly-tick", () => hm.pokeHourlyTick());
     } catch (e) {
       console.warn(`[reveal-bot] agent-watchdog: ${e.shortMessage || e.message}`);
     } finally {

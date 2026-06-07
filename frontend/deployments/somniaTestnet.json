@@ -5,7 +5,7 @@
   "deploymentBlock": 402025580,
   "addresses": {
     "casino": "0x01D31a1aD1D82F0409dD1d5a7680065F71a3dbB3",
-    "houseManager": "0x74f189f46E37d742101a8242cC0E88B658c8d75d",
+    "houseManager": "0x7E6417Cb10D815Ab1044628D7b1485f79b1EEE89",
     "agentQuorumVerifier": "0xaB37e48a5FF59a49e450ea380D270619Efc1ce02",
     "playerAgentRegistry": "0x54f686118588Ec935530C84d4752Dd7eAA95E9c9"
   },
@@ -17,5 +17,6 @@
     "size": 200,
     "firstHashIdx": 0
   },
-  "deployedAt": "2026-06-06T11:32:53.505Z"
+  "deployedAt": "2026-06-06T11:32:53.505Z",
+  "houseManagerBlock": 402872081
 }

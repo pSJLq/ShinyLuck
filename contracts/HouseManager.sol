@@ -465,6 +465,19 @@ contract HouseManager is SomniaEventHandler, Ownable, IAgentRequesterHandler {
         emit SubscriptionCreated(hourlyCronSubId, "hourly-cron-reboot");
     }
 
+    /// @notice Off-chain keeper entry: run ONE full hourly tick (sample the
+    ///         bankroll ring, compute the live 1-tick Δ, run the deterministic
+    ///         circuit check, and fire the whole agent chain) WITHOUT touching
+    ///         the native Reactivity cron. The reveal-bot calls this on its
+    ///         budgeted cadence so the bankroll ring buffer stays FRESH and the
+    ///         RTP agent reads a LIVE delta instead of a stale baseline. This is
+    ///         the mainnet-safe driver (Somnia Reactivity is testnet-only and
+    ///         drops re-schedules; we no longer depend on it). Auth: owner / agent.
+    function pokeHourlyTick() external {
+        require(msg.sender == owner() || msg.sender == hmAgent, "auth");
+        _onHourlyTick();
+    }
+
     /// @notice Owner can rescue stuck balance (e.g. before redeploy). Cancels
     ///         active reactive subscriptions first to avoid stranding gas.
     function withdrawTo(address payable to, uint256 amount) external onlyOwner {
