@@ -229,7 +229,15 @@ async function main() {
         const slice = hashes.slice(i, i + SEED_TOPUP_CHUNK);
         const tx = await casino.provisionSeedHashes(slice);
         console.log(`[reveal-bot] seed auto-topup chunk ${i}..${i + slice.length} tx=${tx.hash}`);
-        await tx.wait();
+        // Bound the confirmation wait: a dropped/stuck tx must NOT wedge the
+        // topup loop forever (seedTopupBusy would stay true => pool never
+        // refills => rounds eventually revert NoSeedAvailable - the exact
+        // failure that froze the casino). On timeout we throw; the catch logs
+        // it and `finally` clears seedTopupBusy so the next tick retries clean.
+        await Promise.race([
+          tx.wait(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("provision confirm timeout")), 90_000)),
+        ]);
       }
       console.log(`[reveal-bot] seed auto-topup done. pool now has ${SEED_TOPUP_BATCH + available} seeds`);
     } catch (e) {
@@ -255,39 +263,52 @@ async function main() {
   // through the demo window. Disable with AGENT_WATCHDOG=0.
   const AGENT_WATCHDOG       = process.env.AGENT_WATCHDOG !== "0";
   const WATCHDOG_CHECK_MS    = parseInt(process.env.AGENT_WATCHDOG_CHECK_MS || "600000", 10); // 10 min
-  const WATCHDOG_STALE_S     = parseInt(process.env.AGENT_WATCHDOG_STALE_S  || "1800", 10);   // 30 min
-  const MIN_HM_BAL           = ethers.parseEther("33"); // 32 floor + headroom for one chain
+  // The Somnia native Reactivity cron is (a) testnet-only - it does NOT exist on
+  // mainnet - and (b) flaky on testnet: validators drop the re-schedule, so it
+  // stops firing after a tick or two. So THIS BOT is the real, sole agent
+  // driver. The full agent chain costs ~0.8-0.9 STT per run, so we must NOT fire
+  // it every check (the old code did - when the native cron was permanently
+  // "stale" it fired every 10 min ≈ 115 STT/day and drained the HM in hours).
+  // Instead we fire on a budgeted cadence (default 3h => ~8 runs/day => ~6 days
+  // runway on a ~40 STT HM), tracked IN-MEMORY because our direct fires don't
+  // bump the on-chain lastHourlyTickTs. We no longer reboot the native cron at
+  // all, so spend is single-sourced and predictable (no surprise double-fires
+  // if a stray scheduled callback ever lands).
+  const AGENT_FIRE_INTERVAL_MS = parseInt(process.env.AGENT_FIRE_INTERVAL_MS || "10800000", 10); // 3h
+  const MIN_HM_BAL           = ethers.parseEther("33"); // 32 precompile floor + headroom for one chain
   let watchdogBusy = false;
+  let lastChainFireMs = 0; // 0 => fire once shortly after boot, then every AGENT_FIRE_INTERVAL_MS
   async function agentWatchdog() {
     if (!AGENT_WATCHDOG || watchdogBusy) return;
+    if (Date.now() - lastChainFireMs < AGENT_FIRE_INTERVAL_MS) return; // budgeted cadence
     watchdogBusy = true;
     try {
       const hm = await ethers.getContractAt("HouseManager", manifest.addresses.houseManager, signer);
       const bal = await provider.getBalance(manifest.addresses.houseManager);
-      if (bal < MIN_HM_BAL) return; // can't afford an agent call; leave it
-      const lastTick = await hm.lastHourlyTickTs();
-      const ageS = Math.floor(Date.now() / 1000) - Number(lastTick);
-      if (Number(lastTick) > 0 && ageS < WATCHDOG_STALE_S) return; // cron is healthy
-      console.log(`[reveal-bot] agent-watchdog: cron stale (${ageS}s) - rebooting + firing agent chain`);
-      // Reboot the self-cron so the on-chain mechanism resumes too.
-      try { const tx = await hm.rebootHourlyTick(); await tx.wait(); } catch (e) { console.warn(`[reveal-bot] watchdog reboot: ${e.shortMessage || e.message}`); }
-      // Directly fire one full chain so activity shows immediately - each is
-      // try/catch'd so a single failure (e.g. smart-skip) doesn't abort.
+      if (bal < MIN_HM_BAL) { console.log(`[reveal-bot] agent-watchdog: HM ${ethers.formatEther(bal)} STT below floor - skipping chain`); return; }
+      // Reserve the slot up-front so a mid-run crash can't double-fire next check.
+      lastChainFireMs = Date.now();
+      console.log(`[reveal-bot] agent-watchdog: firing agent chain (HM ${ethers.formatEther(bal)} STT, next in ${(AGENT_FIRE_INTERVAL_MS/3600000).toFixed(1)}h)`);
+      // Each is try/catch'd so a single failure (e.g. smart-skip) doesn't abort.
+      // Competitor (cheap JSON fetch) first so the LLM RTP analysis reads the
+      // freshest competitor benchmark from storage.
       const fire = async (label, fn) => {
         try { const tx = await fn(); await tx.wait(); console.log(`[reveal-bot] watchdog fired ${label} (${tx.hash.slice(0,12)}...)`); }
         catch (e) { /* smart-skip / insufficient-balance are normal */ }
       };
-      await fire("rtp-slots",   () => hm.requestRtpAnalysis(2));
-      await fire("rtp-cluster", () => hm.requestRtpAnalysis(6));
-      await fire("comp-slots",  () => hm.requestCompetitorRtp(2));
-      await fire("news",        () => hm.requestNewsHeadline());
+      await fire("comp-slots",   () => hm.requestCompetitorRtp(2));
+      await fire("comp-cluster", () => hm.requestCompetitorRtp(6));
+      await fire("news",         () => hm.requestNewsHeadline());
+      await fire("rtp-slots",    () => hm.requestRtpAnalysis(2));
+      await fire("rtp-cluster",  () => hm.requestRtpAnalysis(6));
     } catch (e) {
       console.warn(`[reveal-bot] agent-watchdog: ${e.shortMessage || e.message}`);
     } finally {
       watchdogBusy = false;
     }
   }
-  // First check 90s after boot (let the chain settle), then every 10 min.
+  // First fire 90s after boot, then re-check every 10 min (only actually fires
+  // once the budgeted AGENT_FIRE_INTERVAL_MS has elapsed).
   setTimeout(() => { agentWatchdog().catch(() => {}); }, 90_000);
   setInterval(() => { agentWatchdog().catch(() => {}); }, WATCHDOG_CHECK_MS);
 
@@ -645,6 +666,14 @@ async function main() {
     //    round so players can hop in.
     if (ROUND_KEEPALIVE) {
       const startIfNoOpen = async (gameLabel, currentFn, hasFn, refundFn) => {
+        // Skip entirely if this round-game is paused on-chain. Crash/roulette
+        // auto-open a round every betWindow (~18s) and settling each one costs
+        // gas even with ZERO players - on a scarce-STT testnet that idle burn
+        // drains the relayer in hours. When the owner pauses them to conserve
+        // STT (re-enabled on mainnet), this guard stops the bot from hammering
+        // startRound (which would just revert GameIsPaused) and spamming logs.
+        const gid = gameLabel === "crash" ? 1 : 5;
+        try { if (await casino.gamePaused(gid)) return; } catch (_) {}
         let round = null, id = null;
         try {
           id = await casino[currentFn]();
