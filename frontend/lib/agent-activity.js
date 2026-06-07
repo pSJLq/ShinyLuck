@@ -625,7 +625,13 @@ function casinoLabelFor(ev) {
       return `Bonus Mode ON · ${dur} · ${ev.args.reasoning}`;
     }
     case "RtpAdjusted":
-      return `RTP ${gameName(ev.args.game)}: ${(Number(ev.args.oldRtpBps)/100).toFixed(2)}% → ${(Number(ev.args.newRtpBps)/100).toFixed(2)}% · ${ev.args.reasoning}`;
+      // Casino's RtpAdjusted carries the agent's REQUESTED target. Integer
+      // pay-boost rounding can land the EFFECTIVE RTP ~0.2% below it, so showing
+      // "old → requested" here read as a contradiction next to the game page +
+      // the LLM "decision" line (RtpAnalysisResolved), which both show the true
+      // effective value. Show the reasoning only; the honest old→new delta lives
+      // on the RtpAnalysisResolved line.
+      return `${gameName(ev.args.game)} RTP retuned on-chain · ${ev.args.reasoning}`;
     default:
       return ev.name;
   }
