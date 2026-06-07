@@ -79,6 +79,20 @@ function hashSeed(seed) {
   );
 }
 
+// Round-based games (crash=GameType 1, roulette=5) the bot keeps cycling AND
+// keeps unpaused via circuit-recovery. They auto-open a round every ~18s and
+// EACH settle costs gas even with zero players, so on a scarce-STT testnet we
+// run NONE by default (idle round-settle gas was draining the relayer in
+// hours). Set ROUND_GAMES=crash,roulette on mainnet to enable them. Player
+// games (dice/slots/mines/plinko/cluster) are unaffected — they only consume
+// seeds/gas when someone actually bets.
+const ROUND_GAMES = new Set(
+  (process.env.ROUND_GAMES ?? "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean),
+);
+function roundGameDisabled(gid) {
+  return (gid === 1 && !ROUND_GAMES.has("crash")) || (gid === 5 && !ROUND_GAMES.has("roulette"));
+}
+
 function makeSeedStore({ initialSeedsFile, poolFile, masterKey }) {
   const initial = initialSeedsFile && fs.existsSync(initialSeedsFile)
     ? JSON.parse(fs.readFileSync(initialSeedsFile, "utf8")).seeds || []
@@ -673,7 +687,8 @@ async function main() {
         // STT (re-enabled on mainnet), this guard stops the bot from hammering
         // startRound (which would just revert GameIsPaused) and spamming logs.
         const gid = gameLabel === "crash" ? 1 : 5;
-        try { if (await casino.gamePaused(gid)) return; } catch (_) {}
+        if (roundGameDisabled(gid)) return;                         // off on testnet (ROUND_GAMES env)
+        try { if (await casino.gamePaused(gid)) return; } catch (_) {} // also respect an on-chain pause
         let round = null, id = null;
         try {
           id = await casino[currentFn]();
@@ -1014,6 +1029,7 @@ async function main() {
     const healthy = free >= MIN_HEALTHY_BANKROLL;
     if (cooled && stabilized && healthy) {
       for (let g = 0; g < 7; g++) {
+        if (roundGameDisabled(g)) continue; // leave intentionally-off round games (crash/roulette) paused
         try { if (await casino.gamePaused(g)) { const tx = await casino.unpauseGame(g); await tx.wait(); } }
         catch (e) { console.warn(`[reveal-bot] reopen game ${g}: ${e.shortMessage || e.message}`); }
       }
