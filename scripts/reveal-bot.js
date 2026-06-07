@@ -1015,7 +1015,10 @@ async function main() {
     lastRecoveryCheck = now;
     // breaker pauses games 0..5; check if any are halted
     let anyPaused = false;
-    for (let g = 0; g < 6; g++) { try { if (await casino.gamePaused(g)) { anyPaused = true; break; } } catch {} }
+    // Skip intentionally-disabled round games (e.g. crash off on testnet): a
+    // deliberate pause there must NOT look like a tripped circuit breaker, or
+    // the bot would report a perpetual "CIRCUIT HALT".
+    for (let g = 0; g < 6; g++) { if (roundGameDisabled(g)) continue; try { if (await casino.gamePaused(g)) { anyPaused = true; break; } } catch {} }
     if (!anyPaused) { haltSince = 0; return; }
     const free = await casino.freeBankroll().catch(() => 0n);
     if (haltSince === 0) {
