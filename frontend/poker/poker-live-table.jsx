@@ -18,6 +18,28 @@ let CHIPS = false;
 const NV = (v) => (CHIPS ? Number(v) : Number(SP.fmt(v, 6)));
 const A = SP.ACTION, ST = SP.STREET;
 
+// Tiny WebAudio synth — no assets, gated by the sound preference.
+let AC = null;
+function sfx(kind, on) {
+  if (!on) return;
+  try {
+    AC = AC || new (window.AudioContext || window.webkitAudioContext)();
+    const t0 = AC.currentTime;
+    const tone = (f, start, dur, g = 0.05, type = "sine") => {
+      const o = AC.createOscillator(), ga = AC.createGain();
+      o.type = type; o.frequency.value = f;
+      ga.gain.setValueAtTime(g, t0 + start);
+      ga.gain.exponentialRampToValueAtTime(0.0001, t0 + start + dur);
+      o.connect(ga); ga.connect(AC.destination);
+      o.start(t0 + start); o.stop(t0 + start + dur + 0.02);
+    };
+    if (kind === "turn") { tone(660, 0, 0.12, 0.06); tone(880, 0.13, 0.15, 0.06); }
+    else if (kind === "deal") { tone(420, 0, 0.05, 0.03, "triangle"); tone(420, 0.07, 0.05, 0.03, "triangle"); }
+    else if (kind === "chip") tone(520, 0, 0.05, 0.035, "square");
+    else if (kind === "win") { tone(523, 0, 0.12, 0.06); tone(659, 0.12, 0.12, 0.06); tone(784, 0.24, 0.2, 0.07); }
+  } catch {}
+}
+
 // pot-collect: chips fly from the center to the winning seat
 function FlyChips({ wrapRef, toX, toY }) {
   const [vec, setVec] = useState(null);
@@ -43,7 +65,15 @@ function LiveTable() {
   const [bal, setBal] = useState(0);
   const [holes, setHoles] = useState({}); // dealId -> [strA,strB]
   const [theme, setTheme] = useState(() => localStorage.getItem("sp_theme") || "b");
-  const [deck, setDeck] = useState("4");
+  // persisted table preferences — every toggle here actually works
+  const [prefs, setPrefs] = useState(() => {
+    const d = { sound: true, deck: "4", turbo: false, reduced: false };
+    try { return Object.assign(d, JSON.parse(localStorage.getItem("sp_prefs") || "{}")); } catch { return d; }
+  });
+  const setPref = (k, v) => setPrefs((p) => { const n = { ...p, [k]: v }; try { localStorage.setItem("sp_prefs", JSON.stringify(n)); } catch {} return n; });
+  const deck = prefs.deck;
+  const [preAct, setPreAct] = useState(null); // "checkfold" | "callany" | "check"
+  const preActRef = useRef({ key: null });
   const [showSettings, setShowSettings] = useState(false);
   const [betValue, setBetValue] = useState(0);
   const [modal, setModal] = useState(null); // {type, seat}
@@ -62,7 +92,7 @@ function LiveTable() {
   const dealTimerRef = useRef(null);
   const winTimerRef = useRef(null);
   const feltWrapRef = useRef(null);
-  const reducedMo = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const reducedMo = prefs.reduced || !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
   const tableId = SP.tableId;
   const canvasRef = useRef(null);
@@ -140,6 +170,26 @@ function LiveTable() {
   // keep the session indicator in sync (Privy = always popup-free; injected = once a session is granted)
   useEffect(() => { setSessionOn(SP.sdk.popupFree()); }, [snap, connected]);
 
+  // your-turn sound + PRE-ACTION execution (check/fold, call any, check)
+  useEffect(() => {
+    if (!snap || snap.mySeat < 0) return;
+    const h = snap.hand;
+    const myTurn = h.inProgress && h.actingSeat === snap.mySeat && h.street <= ST.RIVER;
+    if (!myTurn) return;
+    const key = `${h.dealId}:${h.street}:${h.actingDeadline}`;
+    if (preActRef.current.key === key) return; // already handled this turn
+    preActRef.current.key = key;
+    sfx("turn", prefs.sound);
+    if (!preAct || busy) return;
+    const me2 = snap.seats[snap.mySeat];
+    const owe = h.currentBet > me2.committedStreet;
+    const sel = preAct;
+    setPreAct(null); // one-shot
+    if (sel === "checkfold") act(owe ? A.FOLD : A.CHECK);
+    else if (sel === "callany") act(owe ? A.CALL : A.CHECK);
+    else if (sel === "check" && !owe) act(A.CHECK);
+  }, [snap]);
+
   // 1s tick so countdown timers update smoothly
   useEffect(() => { const id = setInterval(() => setNowMs(Date.now()), 1000); return () => clearInterval(id); }, []);
 
@@ -171,7 +221,9 @@ function LiveTable() {
       if (fieldRef.current && !reducedMo) fieldRef.current.scramble(900);
       setAnim((a) => ({ ...a, dealing: !reducedMo, flipFrom: 99, winnerSeat: -1 }));
       clearTimeout(dealTimerRef.current);
-      dealTimerRef.current = setTimeout(() => setAnim((a) => ({ ...a, dealing: false })), 1300);
+      dealTimerRef.current = setTimeout(() => setAnim((a) => ({ ...a, dealing: false })), prefs.turbo ? 600 : 1300);
+      setPreAct(null); // pre-actions never carry across hands
+      sfx("deal", prefs.sound);
     }
     if (boardLen > prev.boardLen) setAnim((a) => ({ ...a, flipFrom: prev.boardLen }));
     if (!h.inProgress && prev.inProgress) {
@@ -182,6 +234,7 @@ function LiveTable() {
         setAnim((a) => ({ ...a, winnerSeat: winner, won: NV(best) }));
         clearTimeout(winTimerRef.current);
         winTimerRef.current = setTimeout(() => setAnim((a) => ({ ...a, winnerSeat: -1 })), 2600);
+        if (winner === snap.mySeat) sfx("win", prefs.sound);
       }
     }
     const stacks = {}; snap.seats.forEach((s) => { stacks[s.index] = s.stack; });
@@ -221,7 +274,7 @@ function LiveTable() {
     }
     catch (e) { if (e && e.message !== "cancelled") flash(e.message || "connect failed", 5000); }
   }
-  const act = (action, amount = 0) => tx(["Fold", "Check", "Call", "Bet", "Raise", "All-in"][action], () => SP.sdk.act(tableId, action, amount, !!trn));
+  const act = (action, amount = 0) => { sfx("chip", prefs.sound); return tx(["Fold", "Check", "Call", "Bet", "Raise", "All-in"][action], () => SP.sdk.act(tableId, action, amount, !!trn)); };
 
   if (!snap) return <div className="center-load">Loading table…</div>;
 
@@ -242,7 +295,7 @@ function LiveTable() {
 
   return (
     <div className="scaler" id="scaler">
-      <div className="app" data-dir={theme} data-deck={deck} data-anim={reducedMo ? "off" : "on"} data-turbo="0">
+      <div className="app" data-dir={theme} data-deck={deck} data-anim={reducedMo ? "off" : "on"} data-turbo={prefs.turbo ? "1" : "0"}>
         {/* top bar */}
         <header className="topbar">
           <div className="group">
@@ -289,8 +342,8 @@ function LiveTable() {
         </header>
 
         {showSettings && (
-          <SettingsPanel t={{ sound: true, deck, automuck: true, turbo: false, reduced: false, autoblind: true }}
-            set={(k, v) => { if (k === "deck") setDeck(v); }} dir={theme} setDir={setTheme} onClose={() => setShowSettings(false)}
+          <SettingsPanel t={prefs}
+            set={setPref} dir={theme} setDir={setTheme} onClose={() => setShowSettings(false)}
             session={{
               active: sessionOn, busy,
               label: SP.sdk.backend === "privy" ? "Email wallet · headless (no popups)" : null,
@@ -431,7 +484,25 @@ function LiveTable() {
     const myTurn = hand.inProgress && hand.actingSeat === mySeat && hand.street <= ST.RIVER;
     if (!myTurn) {
       const text = hand.inProgress ? (hand.street === ST.SHOWDOWN ? "Showdown — settling on-chain" : "Waiting for your turn") : "Waiting for the next hand";
-      return <StatusStrip text={text} sub="Your chips & action are safe on-chain" accent="var(--muted)" />;
+      const showPre = hand.inProgress && me.inHand && !me.folded && !me.allIn && hand.street <= ST.RIVER;
+      return (
+        <div className="actionbar" style={{ flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          {showPre && (
+            <div style={{ display: "flex", gap: 8 }}>
+              {[["checkfold", "Check / Fold"], ["callany", "Call Any"], ["check", "Check"]].map(([k, l]) => (
+                <button key={k} className="pill" onClick={() => setPreAct(preAct === k ? null : k)}
+                  style={preAct === k ? { background: "var(--accent)", borderColor: "var(--accent)", color: "#fff" } : undefined}>
+                  {preAct === k ? "✓ " : ""}{l}
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+            <div style={{ fontFamily: "var(--label)", fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)" }}>{text}</div>
+            <div style={{ fontFamily: "var(--body)", fontSize: 12.5, color: "var(--muted)" }}>{showPre && preAct ? "Pre-action armed — fires instantly on your turn" : "Your chips & action are safe on-chain"}</div>
+          </div>
+        </div>
+      );
     }
     const cur = hand.currentBet, committed = me.committedStreet;
     const toCallW = cur > committed ? cur - committed : 0n;

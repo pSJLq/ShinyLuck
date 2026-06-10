@@ -165,7 +165,9 @@ function LobbyApp() {
                         <div className="numcell tnum">{r.pot > 0 ? r.pot.toFixed(2) : "—"}<span className="u">{r.pot > 0 ? sym : ""}</span></div>
                         <div className="rowactions">
                           <a className="btn-sm" href={"table.html?t=" + r.id}>Observe</a>
-                          <a className={"btn-sm " + (full ? "full" : "join")} href={"table.html?t=" + r.id}>{full ? "Waitlist" : "Join"}</a>
+                          {full
+                            ? <span className="btn-sm full" style={{ cursor: "default", opacity: 0.6 }}>Full</span>
+                            : <a className="btn-sm join" href={"table.html?t=" + r.id}>Join</a>}
                         </div>
                       </div>
                     );

@@ -130,7 +130,6 @@ function ActionBar({ action, deckMode, onFold, onCheckCall, onRaise, betValue, s
         <span className="helperchip best"><span className="k">Best</span><b>{best}</b></span>
         <div style={{ display: "flex", gap: 7 }}>
           <span className="helperchip"><span className="k">Pot odds</span><b>{potOdds}</b></span>
-          <span className="helperchip"><span className="k">Outs</span><b>{outs}</b></span>
         </div>
       </div>
 
@@ -161,7 +160,6 @@ function ActionBar({ action, deckMode, onFold, onCheckCall, onRaise, betValue, s
               strokeDasharray="125.6" strokeDashoffset={action.timer != null ? (125.6 * (1 - Math.max(0, Math.min(1, action.timer / (action.timerTotal || 45))))) : 34} transform="rotate(-90 24 24)" /></svg>
           <span className="num tnum">{action.timer != null ? action.timer : 18}</span>
         </div>
-        <button className="addtime">+ Time bank</button>
       </div>
 
       <div className="actions" data-anno="actions">
@@ -279,10 +277,8 @@ function SettingsPanel({ t, set, dir, setDir, onClose, session }) {
 
       <Row label="Sound effects"><Sw on={t.sound} onClick={() => set("sound", !t.sound)} /></Row>
       <Row label="4-color deck"><Sw on={t.deck === "4"} onClick={() => set("deck", t.deck === "4" ? "2" : "4")} /></Row>
-      <Row label="Auto-muck losing hands"><Sw on={t.automuck} onClick={() => set("automuck", !t.automuck)} /></Row>
       <Row label="Turbo animations"><Sw on={t.turbo} onClick={() => set("turbo", !t.turbo)} /></Row>
       <Row label="Reduced motion"><Sw on={t.reduced} onClick={() => set("reduced", !t.reduced)} /></Row>
-      <Row label="Auto-post blinds"><Sw on={t.autoblind} onClick={() => set("autoblind", !t.autoblind)} /></Row>
       {session && (
         <div style={{ marginTop: 10, padding: "10px 11px", borderRadius: 8, border: "1px solid var(--accent-32)", background: "var(--accent-12)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: "var(--label)", fontSize: 11, color: "var(--accent-soft)" }}>
