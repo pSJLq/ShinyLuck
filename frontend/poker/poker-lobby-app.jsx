@@ -103,7 +103,7 @@ function LobbyApp() {
         <div className="lobbyhead">
           <div className="lobbytabs">
             {[["cash", "Cash"], ["tournaments", "Tournaments"], ["sng", "Sit & Go"], ["clubs", "Clubs"]].map(([k, l]) => (
-              <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}<span className="ct tnum">{k === "cash" ? cash.length : k === "tournaments" && SP.sdk.hasTournaments() ? trnCount : "soon"}</span></button>
+              <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}<span className="ct tnum">{k === "cash" ? cash.length : (k === "tournaments" || k === "sng") && SP.sdk.hasTournaments() ? trnCount : "soon"}</span></button>
             ))}
           </div>
           <div className="statstrip">
@@ -138,6 +138,8 @@ function LobbyApp() {
             {tab === "tournaments" && SP.sdk.hasTournaments() ? (
               <TournamentsTab connected={connected} connect={connect} addr={addr} onCount={setTrnCount}
                 showCreate={showCreate} closeCreate={() => setShowCreate(false)} />
+            ) : tab === "sng" && SP.sdk.hasTournaments() ? (
+              <SngTab connected={connected} connect={connect} addr={addr} />
             ) : tab !== "cash" ? (
               <div style={{ textAlign: "center", padding: "70px 20px", color: "var(--muted)", fontFamily: "var(--label)" }}>
                 <div style={{ fontSize: 30, marginBottom: 10 }}>♠</div>
@@ -266,6 +268,121 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
         </div>
       )}
     </React.Fragment>
+  );
+}
+
+/* ---------------- Sit & Go (live, one-click presets on the tournament engine) ---------------- */
+const SNG_PRESETS = [
+  { name: "Heads-Up Duel", structure: "turbo", players: 2, buyIn: "0.5", fee: "0.05", stack: 1500, sb: 10, bb: 20, levelMin: 4, split: [10000] },
+  { name: "Hyper 6-Max", structure: "hyper", players: 6, buyIn: "0.5", fee: "0.05", stack: 1000, sb: 25, bb: 50, levelMin: 3, split: [6500, 3500] },
+  { name: "9-Max Standard", structure: "regular", players: 9, buyIn: "0.3", fee: "0.03", stack: 1500, sb: 10, bb: 20, levelMin: 5, split: [5000, 3000, 2000] },
+];
+const SPIN_MULTIS = [{ x: 2 }, { x: 3 }, { x: 5 }, { x: 10 }, { x: 25 }, { x: 120 }, { x: 1000 }];
+
+function SngTab({ connected, connect, addr }) {
+  const [open, setOpen] = uS(null); // registering tournaments
+  const [mine, setMine] = uS({});
+  const [busy, setBusy] = uS(false);
+  const [msg, setMsg] = uS(null);
+  const [display, setDisplay] = uS(SPIN_MULTIS[2]);
+  const sym = SP.NETWORK.currency.symbol;
+  function flash(m) { setMsg(m); setTimeout(() => setMsg(null), 4000); }
+
+  async function load() {
+    try {
+      const ts = (await SP.sdk.tournaments()).filter((t) => t.status === 0).reverse();
+      setOpen(ts);
+      if (SP.sdk.address) { const m = {}; for (const t of ts) m[t.id] = await SP.sdk.isRegisteredIn(t.id); setMine(m); }
+    } catch (e) { setOpen([]); }
+  }
+  uE(() => { load(); const iv = setInterval(load, 4000); return () => clearInterval(iv); }, [connected]);
+
+  // spin reel — pure eye-candy teaser while Spin SNG awaits on-chain randomness
+  uE(() => { const iv = setInterval(() => setDisplay(SPIN_MULTIS[Math.floor(Math.random() * SPIN_MULTIS.length)]), 1400); return () => clearInterval(iv); }, []);
+
+  async function act(label, fn) {
+    setBusy(true);
+    try { await fn(); flash(label + " ✓"); await load(); }
+    catch (e) { flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 70)); console.error(e); }
+    finally { setBusy(false); }
+  }
+
+  /// One click: create the SNG from the preset AND take the first seat.
+  const quickStart = (p) => act("Create & join " + p.name, async () => {
+    await SP.sdk.createTournament({
+      buyInEth: p.buyIn, feeEth: p.fee, maxPlayers: p.players, startStack: p.stack,
+      sbStart: p.sb, bbStart: p.bb, levelDur: p.levelMin * 60, payoutBps: p.split, sponsorEth: 0,
+    });
+    const id = (await SP.sdk.tournamentCount()) - 1;
+    const t = await SP.sdk.tournamentInfo(id);
+    await SP.sdk.registerTournament(id, t.buyIn + t.fee);
+  });
+
+  return (
+    <div className="sngsplit">
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="dtable" style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden", alignSelf: "stretch" }}>
+          <div className="dthead" style={{ gridTemplateColumns: "1.4fr 0.8fr 0.8fr 0.9fr", position: "static" }}>
+            <span className="h">Quick Sit &amp; Go</span><span className="h">Buy-in</span><span className="h c">Format</span><span className="h r">Action</span>
+          </div>
+          {SNG_PRESETS.map((p) => (
+            <div key={p.name} className="sngrow" style={{ gridTemplateColumns: "1.4fr 0.8fr 0.8fr 0.9fr" }}>
+              <div className="cell-tname">
+                <span className="nm">{p.name}</span>
+                <span className="meta"><span>{p.structure}</span><span>{p.stack} chips</span><span>payout {p.split.map((b) => b / 100 + "%").join("/")}</span></span>
+              </div>
+              <div className="buyincell"><span className="bi tnum" style={{ fontSize: 13 }}>{(parseFloat(p.buyIn) + parseFloat(p.fee)).toFixed(2)}<span className="u">{sym}</span></span>
+                <span className="split"><b>{p.buyIn}</b>+{p.fee} fee</span></div>
+              <div className="sizetag" style={{ textAlign: "center" }}>{p.players === 2 ? "Heads-up" : p.players + "-max"}</div>
+              <div className="rowactions">
+                <button className="btn-sm join" disabled={busy} onClick={() => (connected ? quickStart(p) : connect())}>{connected ? "Create & join" : "Connect"}</button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="dtable" style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
+          <div className="dthead" style={{ gridTemplateColumns: "1.4fr 0.8fr 0.8fr 0.9fr", position: "static" }}>
+            <span className="h">Open seats — join now</span><span className="h">Buy-in</span><span className="h c">Seats</span><span className="h r">Action</span>
+          </div>
+          {open == null ? <div style={{ padding: 24, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>Loading…</div>
+            : open.length === 0 ? <div style={{ padding: 24, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>No open Sit &amp; Go right now — start one above.</div>
+            : open.map((t) => {
+              const cost = t.buyIn + t.fee;
+              return (
+                <div key={t.id} className="sngrow" style={{ gridTemplateColumns: "1.4fr 0.8fr 0.8fr 0.9fr" }}>
+                  <div className="cell-tname">
+                    <span className="nm">SNG #{t.id}</span>
+                    <span className="meta"><span>{Number(t.startStack)} chips</span><span>pool {Number(SP.fmt(t.pool, 4))} {sym}</span></span>
+                  </div>
+                  <div className="buyincell"><span className="bi tnum" style={{ fontSize: 13 }}>{Number(SP.fmt(cost, 4))}<span className="u">{sym}</span></span></div>
+                  <div className="seatdots" style={{ justifyContent: "center" }}>
+                    {Array.from({ length: t.maxPlayers }).map((_, i) => <span key={i} className={"sd" + (i < t.registered ? " on" : "")} />)}
+                    <span className="lbl">{t.registered}/{t.maxPlayers}</span>
+                  </div>
+                  <div className="rowactions">
+                    {!connected ? <button className="btn-sm join" onClick={connect}>Connect</button>
+                      : mine[t.id] ? <button className="btn-sm" disabled={busy} onClick={() => act("Unregister", () => SP.sdk.unregisterTournament(t.id))}>Unregister</button>
+                      : <button className="btn-sm join" disabled={busy} onClick={() => act("Register", () => SP.sdk.registerTournament(t.id, cost))}>Register</button>}
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+      </div>
+
+      <div className="spincard">
+        <div className="sptop">
+          <div className="t">◆ Spin &amp; Go</div>
+          <div className="s">3-handed hyper turbo with a random prize multiplier revealed at seating — powered by the same provably-fair on-chain randomness as the deck. Coming soon.</div>
+        </div>
+        <div className="spinreel">
+          <div style={{ fontFamily: "var(--mono)", fontSize: 54, fontWeight: 700, color: "var(--accent-soft)" }}>×{display.x}</div>
+          <button className="spinbtn" disabled>Spin — soon</button>
+        </div>
+      </div>
+      {msg && <div className="lt-toast" style={{ bottom: 60 }}>{msg}</div>}
+    </div>
   );
 }
 
