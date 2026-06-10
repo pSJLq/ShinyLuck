@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ShinyPoker — Provably Fair · zkShuffle</title>
+<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="marketing.css" />
+</head>
+<body class="marketing">
+  <canvas id="mkt-bg"></canvas>
+  <div class="mkt-wrap">
+    <div id="site-header"></div>
+    <div class="legal">
+      <div class="lhead">
+        <span class="eyebrow">Trust model</span>
+        <h1>Provably fair · zkShuffle</h1>
+        <div class="lupd">How ShinyPoker guarantees nobody — not even us — can see your cards or rig the deck.</div>
+      </div>
+
+      <div class="callout"><b>The short version.</b> Cards are shuffled and dealt by the players themselves using zero-knowledge cryptography. A sealed deck commitment is posted on-chain before every hand and the seed is revealed after, so any hand can be independently verified. There is no trusted server holding the deck.</div>
+
+      <h2>1. What "maximally on-chain" means here</h2>
+      <p>On ShinyPoker, the things that decide who wins money live on Somnia mainnet: your escrow balance, buy-ins, blinds and antes, every betting action (fold / check / call / bet / raise / all-in), the main pot and side-pots, rake, payouts, tournament registration and prize pools. Somnia's high throughput and sub-second finality let all of this happen without the table feeling slow.</p>
+
+      <h2>2. Card secrecy via mental poker (zkShuffle)</h2>
+      <p>"Mental poker" is a family of cryptographic protocols that let mutually distrustful players shuffle and deal a deck such that:</p>
+      <ul>
+        <li>The deck is shuffled <b>collaboratively</b> — every player contributes randomness, so no single party controls the order.</li>
+        <li>Each player can read <b>only their own</b> hole cards. Other cards stay encrypted to everyone, including the operator.</li>
+        <li>The shuffle is accompanied by <b>zero-knowledge proofs</b> that it was performed correctly — without revealing the order.</li>
+      </ul>
+      <p>Because the protocol runs between players, there is no server that ever holds the plaintext deck. We literally cannot see your cards.</p>
+
+      <h2>3. Commit → reveal: how you verify a hand</h2>
+      <ul>
+        <li><b>Commit (pre-deal).</b> A cryptographic commitment to the shuffled deck is published on-chain before cards are dealt. It can't be changed mid-hand.</li>
+        <li><b>Play.</b> The hand proceeds; only you can decrypt your own cards.</li>
+        <li><b>Reveal (post-hand).</b> The shuffle seed is revealed. Re-hashing it must reproduce the original commitment. If it does, the shuffle was fair and untampered.</li>
+      </ul>
+      <div class="callout">Open the <b>Verification Center</b> in the Cashier, enter any hand number, and ShinyPoker shows you the pre-hand commitment, the revealed seed, and a pass/fail check — computed in your browser.</div>
+
+      <h2>4. Session keys (convenience without custody)</h2>
+      <p>Signing a wallet transaction for every fold would be unusable. Instead, when you sit down you authorize a <b>session key</b> once, with a spend cap scoped to that table. Your actions are then signed locally and settle on-chain in the background — no popup per hand. You can revoke the session key at any time from Settings, and it expires when you leave.</p>
+
+      <h2>5. Live state</h2>
+      <p>Table updates, timers and pot changes are pushed to your client over standard WebSocket event subscriptions on Somnia mainnet — no polling, no stale screens. (Somnia's "Reactivity" precompile is testnet-only today and is not relied upon for mainnet.)</p>
+
+      <h2>6. What we will never do</h2>
+      <ul>
+        <li>Expose opponents' hidden cards, or show fake "win % vs unknown hands".</li>
+        <li>Hold your funds in a custodial wallet — your balance is in escrow you can withdraw from.</li>
+        <li>Hide rake or fees. Cash rake (with cap) and tournament fee splits are always shown up front.</li>
+      </ul>
+
+      <div style="margin-top:36px"><a class="btn primary" href="ShinyPoker Onboarding.html">Connect Wallet &amp; Play</a> <a class="btn ghost" href="ShinyPoker Landing.html" style="margin-left:8px">Back to home</a></div>
+    </div>
+    <div id="site-footer"></div>
+  </div>
+  <template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#070707"/><rect x="30" y="30" width="40" height="40" rx="6" fill="#6E6EED"/><text x="50" y="62" font-family="monospace" font-size="26" fill="#fff" text-anchor="middle">{s}</text></svg></template>
+  <script src="poker-grid.js"></script>
+  <script src="marketing.js"></script>
+</body>
+</html>

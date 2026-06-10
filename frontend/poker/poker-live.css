@@ -1,0 +1,56 @@
+/* Live-only extras layered on top of the design's styles.css. */
+.center-load { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted, #9a9aa8); font-family: var(--label, monospace); }
+
+.emptyseat {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  width: 86px; height: 86px; border-radius: 50%; border: 1.5px dashed var(--line-2, #3a3a48);
+  background: rgba(255, 255, 255, 0.02); color: var(--muted, #9a9aa8);
+  font-family: var(--label, monospace); font-size: 12px; cursor: pointer; transition: .15s;
+}
+.emptyseat:hover { border-color: var(--accent, #6e6eed); color: var(--accent-soft, #9b9bf4); background: rgba(110, 110, 237, .08); }
+.emptyseat .plus { font-size: 22px; line-height: 1; }
+
+.lt-strip { display: flex !important; align-items: center; justify-content: center; gap: 18px;
+  font-family: var(--label, monospace); color: var(--muted, #9a9aa8); font-size: 14px; }
+.lt-seatctl { display: flex; gap: 8px; }
+
+.lt-toast { position: fixed; left: 50%; bottom: 122px; transform: translateX(-50%); z-index: 200;
+  background: rgba(20, 20, 28, .97); border: 1px solid var(--line-2, #3a3a48); border-radius: 10px;
+  padding: 11px 16px; font-family: var(--label, monospace); font-size: 13px; color: var(--text, #e6e6ee);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .5); max-width: 90vw; }
+
+.lt-modalbg { position: fixed; inset: 0; background: rgba(0, 0, 0, .66); display: grid; place-items: center; z-index: 300; }
+.lt-modal { background: rgba(15, 15, 20, .99); border: 1px solid var(--line-2, #3a3a48); border-radius: 16px;
+  padding: 22px; width: min(380px, 92vw); font-family: var(--label, monospace); }
+.lt-modal h3 { margin: 0 0 12px; font-family: var(--mono, 'IBM Plex Mono', monospace); color: var(--text, #e6e6ee); }
+.lt-modal .note { font-size: 12px; color: var(--muted, #9a9aa8); line-height: 1.5; }
+.lt-modal label { display: block; font-size: 12px; color: var(--muted, #9a9aa8); margin: 12px 0 5px; }
+.lt-modal input { width: 100%; background: rgba(255, 255, 255, .04); border: 1px solid var(--line-2, #3a3a48);
+  color: var(--text, #e6e6ee); border-radius: 9px; padding: 11px; font-family: var(--mono, monospace); font-size: 15px; }
+.lt-modal .row { display: flex; gap: 10px; margin-top: 16px; }
+.lt-modal .row .pill { flex: 1; text-align: center; }
+.pill.primary { background: var(--accent, #6e6eed); border-color: var(--accent, #6e6eed); color: #fff; }
+.abtn:disabled, .pill:disabled { opacity: .45; cursor: not-allowed; }
+
+/* tournament HUD strip (under the topbar on controlled tables) */
+.trn-hud { display: flex; align-items: center; gap: 22px; padding: 8px 18px;
+  font-family: var(--label, 'Source Code Pro', monospace); font-size: 12px; color: var(--muted, #9a9aa8);
+  background: linear-gradient(90deg, rgba(110,110,237,.14), rgba(110,110,237,.05)); border-bottom: 1px solid var(--accent-32, rgba(110,110,237,.32)); }
+.trn-hud .tag { color: var(--accent-soft, #9b9bf4); letter-spacing: .1em; font-size: 10.5px; }
+.trn-hud b { color: var(--text, #e6e6ee); font-family: var(--mono, 'IBM Plex Mono', monospace); font-weight: 600; margin-left: 2px; }
+.trn-hud .done { color: var(--gold, #e8c15a); letter-spacing: .1em; }
+
+/* funding box in the cashier / fund modal */
+.lt-modal .fundbox { margin: 12px 0 4px; padding: 12px; border-radius: 10px; border: 1px solid var(--accent-32, rgba(110,110,237,.32)); background: var(--accent-12, rgba(110,110,237,.1)); }
+.lt-modal .fundbox .fh { font-size: 12.5px; color: var(--text, #e6e6ee); line-height: 1.5; }
+.lt-modal .fundbox .fa { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.lt-modal .fundbox .fa .mono { flex: 1; font-family: var(--mono, monospace); font-size: 11px; color: var(--accent-soft, #9b9bf4); word-break: break-all; }
+.lt-modal .mono { font-family: var(--mono, 'IBM Plex Mono', monospace); }
+
+/* current best-hand label under the hero's hole cards */
+.herocombo {
+  margin: 4px auto 2px; text-align: center; font-family: var(--label, monospace); font-size: 12px;
+  letter-spacing: .02em; color: var(--accent-soft, #9b9bf4); background: var(--accent-12, rgba(110,110,237,.12));
+  border: 1px solid var(--accent-32, rgba(110,110,237,.32)); border-radius: 999px; padding: 3px 12px; width: fit-content;
+  white-space: nowrap;
+}

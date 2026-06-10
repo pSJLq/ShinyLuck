@@ -136,3 +136,6 @@ seeds_b64_gen10.txt
 seeds_b64_*.txt
 
 scripts/_q*.js
+
+# ShinyPoker design source videos (52MB, not needed in repo)
+ShinyPokerDesign/uploads/

@@ -1,0 +1,21 @@
+{
+  "network": "somniaTestnet",
+  "chainId": "50312",
+  "deployer": "0x6E26D7A5f90CD020F7Bee7c4e02f6d1eB3643e41",
+  "operator": "0x6E26D7A5f90CD020F7Bee7c4e02f6d1eB3643e41",
+  "deploymentBlock": 405162962,
+  "addresses": {
+    "pokerRoom": "0xA1B2405b2F4e60fd22a818C207e9dB8F29A5f18B",
+    "commitRevealDealer": "0xBd74e57f0a4ad8f6F1c502a50ff9963701d93a05",
+    "pokerTournament": "0xefE078Fac143796aC50431Beb4e594a0956d2635"
+  },
+  "defaultTable": {
+    "maxSeats": 6,
+    "smallBlind": "10000000000000000",
+    "bigBlind": "20000000000000000",
+    "minBuyIn": "400000000000000000",
+    "maxBuyIn": "2000000000000000000"
+  },
+  "seedBatch": 120,
+  "deployedAt": "2026-06-10T03:12:13.730Z"
+}

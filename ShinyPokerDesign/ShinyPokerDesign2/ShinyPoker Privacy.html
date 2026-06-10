@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ShinyPoker — Privacy Policy</title>
+<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="marketing.css" />
+</head>
+<body class="marketing">
+  <canvas id="mkt-bg"></canvas>
+  <div class="mkt-wrap">
+    <div id="site-header"></div>
+    <div class="legal">
+      <div class="lhead">
+        <span class="eyebrow">Legal</span>
+        <h1>Privacy Policy</h1>
+        <div class="lupd">Last updated: 1 June 2026 · This is a product-design sample, not legal advice.</div>
+      </div>
+
+      <div class="callout"><b>Privacy by architecture.</b> ShinyPoker is non-custodial and pseudonymous. We don't ask for your name, email or KYC to play. Your identity on the felt is your wallet address (or an ENS-style name you choose).</div>
+
+      <h2>1. What we don't collect</h2>
+      <ul>
+        <li>No real names, emails, phone numbers or government IDs for standard play.</li>
+        <li>No custody of funds — balances live in escrow contracts you control.</li>
+        <li>No access to your hole cards — zkShuffle makes that cryptographically impossible.</li>
+      </ul>
+
+      <h2>2. What is inherently public</h2>
+      <p>Because the game is on-chain, certain data is public on Somnia by design: wallet addresses, deposits/withdrawals, buy-ins, betting actions, pots, rake and payouts. Anyone can read these from the block explorer. This is the transparency that makes the game provably fair.</p>
+
+      <h2>3. What the interface stores locally</h2>
+      <ul>
+        <li>Preferences (table theme, 4-color deck, sound, animation speed) in your browser's local storage.</li>
+        <li>Session-key authorizations scoped to a table, until you revoke them or leave.</li>
+      </ul>
+
+      <h2>4. Analytics</h2>
+      <p>We may collect anonymized, aggregate usage metrics (e.g. page performance) that are not linked to your wallet identity. We do not sell data.</p>
+
+      <h2>5. Your control</h2>
+      <p>Disconnect your wallet at any time. Clear local storage to remove preferences. Revoke session keys from Settings. On-chain history cannot be deleted — that is a property of public blockchains.</p>
+
+      <div style="margin-top:36px"><a class="btn ghost" href="ShinyPoker Landing.html">Back to home</a></div>
+    </div>
+    <div id="site-footer"></div>
+  </div>
+  <template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#070707"/><rect x="30" y="30" width="40" height="40" rx="6" fill="#6E6EED"/><text x="50" y="62" font-family="monospace" font-size="26" fill="#fff" text-anchor="middle">{s}</text></svg></template>
+  <script src="poker-grid.js"></script>
+  <script src="marketing.js"></script>
+</body>
+</html>
