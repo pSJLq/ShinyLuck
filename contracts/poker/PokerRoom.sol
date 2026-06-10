@@ -201,6 +201,7 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
     event StreetAdvanced(uint256 indexed tableId, uint64 indexed handId, uint8 street, uint128 pot);
     event ShowdownReached(uint256 indexed tableId, uint64 indexed handId, uint128 pot);
     event HandSettled(uint256 indexed tableId, uint64 indexed handId, uint8 winnerSeat, uint128 amountWon, uint128 rake);
+    event HandCancelled(uint256 indexed tableId, uint64 indexed handId);
     event PotWinner(uint256 indexed tableId, uint64 indexed handId, uint8 potIndex, uint8 seat, uint128 amount);
     event ShowdownSettled(uint256 indexed tableId, uint64 indexed handId, uint128 rake);
 
@@ -476,7 +477,10 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         if (tableController[tableId] != address(0)) revert ControlledTable();
         uint8 seat = _mySeat(tableId);
         SeatHand storage sh = _seatHands[tableId][seat];
-        if (_hands[tableId].inProgress && sh.inHand && !sh.folded) revert InHand();
+        // Anyone dealt into the LIVE hand (even folded) must wait for it to end:
+        // deleting their SeatHand mid-hand would erase committedStreet/Total and
+        // corrupt the pot & side-pot accounting (their chips would be lost).
+        if (_hands[tableId].inProgress && (sh.inHand || sh.folded || sh.committedTotal > 0)) revert InHand();
 
         Seat storage s = _seats[tableId][seat];
         uint128 stack = s.stack;
@@ -857,6 +861,26 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         emit ShowdownReached(tableId, h.handId, h.pot);
         // Multiway distribution happens in resolveShowdown() (next engine section)
         // once the dealer has revealed and proven the cards.
+    }
+
+    /// @notice Emergency escape hatch: abort the current hand and refund every
+    ///         seat's full contribution back to its stack. For hands the dealer
+    ///         can no longer serve (entropy expired past the 256-block blockhash
+    ///         window, lost seed after a bot restart) — without this the table
+    ///         would be stuck in SHOWDOWN forever with the pot locked. Dealer/
+    ///         operator only; same trust level as dealing itself.
+    function cancelHand(uint256 tableId) external onlyDealerOrOperator nonReentrant {
+        Hand storage h = _hands[tableId];
+        if (!h.inProgress) revert NoHandInProgress();
+        uint8 n = _tables[tableId].maxSeats;
+        for (uint8 i = 0; i < n; i++) {
+            SeatHand storage sh = _seatHands[tableId][i];
+            uint128 c = sh.committedTotal;
+            if (c > 0) _seats[tableId][i].stack += c;
+            delete _seatHands[tableId][i];
+        }
+        emit HandCancelled(tableId, h.handId);
+        _clearHand(tableId);
     }
 
     function _clearHand(uint256 tableId) internal {

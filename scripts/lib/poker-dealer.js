@@ -110,11 +110,30 @@ async function tickTable(room, dealer, masterKey, state, tableId, opts = {}) {
     state.set(tableId, st);
   }
 
+  // Unservable hand (seed unknown after a restart) → abort + refund everyone
+  // via cancelHand instead of leaving the table stuck in this hand forever.
+  if (!st.seed) {
+    await (await room.cancelHand(tableId)).wait();
+    state.delete(tableId);
+    return "cancelled:no-seed";
+  }
+
   // 1. Lock the future-blockhash entropy, then compute the deck + hole cards.
   if (!st.entropyLocked) {
     try {
       await (await dealer.lockEntropy(dealId)).wait();
     } catch (e) {
+      // If the 256-block blockhash window has passed, the deck can never be
+      // derived — abort + refund rather than retrying forever.
+      try {
+        const info = await dealer.dealInfo(dealId);
+        const bn = await dealer.runner.provider.getBlockNumber();
+        if (bn > Number(info.commitBlock) + 257) {
+          await (await room.cancelHand(tableId)).wait();
+          state.delete(tableId);
+          return "cancelled:entropy-expired";
+        }
+      } catch (_) {}
       return "lock-wait"; // TooEarly — retry next tick
     }
     const info = await dealer.dealInfo(dealId);

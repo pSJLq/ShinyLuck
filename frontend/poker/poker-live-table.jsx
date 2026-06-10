@@ -12,6 +12,10 @@ const POS = {
 
 const short = (a) => (a && a !== "0x0000000000000000000000000000000000000000" ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const N = (wei) => Number(SP.fmt(wei, 6));
+// Tournament tables play in plain CHIP units (1500 chips, blinds 10/20), not
+// wei — NV switches the whole table's value formatting per mode.
+let CHIPS = false;
+const NV = (v) => (CHIPS ? Number(v) : Number(SP.fmt(v, 6)));
 const A = SP.ACTION, ST = SP.STREET;
 
 // pot-collect: chips fly from the center to the winning seat
@@ -175,7 +179,7 @@ function LiveTable() {
       for (const s of snap.seats) { const d = s.stack - (prev.stacks[s.index] || 0n); if (d > best) { best = d; winner = s.index; } }
       if (fieldRef.current) fieldRef.current.flash();
       if (winner >= 0 && !reducedMo) {
-        setAnim((a) => ({ ...a, winnerSeat: winner, won: N(best) }));
+        setAnim((a) => ({ ...a, winnerSeat: winner, won: NV(best) }));
         clearTimeout(winTimerRef.current);
         winTimerRef.current = setTimeout(() => setAnim((a) => ({ ...a, winnerSeat: -1 })), 2600);
       }
@@ -217,7 +221,7 @@ function LiveTable() {
     }
     catch (e) { if (e && e.message !== "cancelled") flash(e.message || "connect failed", 5000); }
   }
-  const act = (action, amount = 0) => tx(["Fold", "Check", "Call", "Bet", "Raise", "All-in"][action], () => SP.sdk.act(tableId, action, amount));
+  const act = (action, amount = 0) => tx(["Fold", "Check", "Call", "Bet", "Raise", "All-in"][action], () => SP.sdk.act(tableId, action, amount, !!trn));
 
   if (!snap) return <div className="center-load">Loading table…</div>;
 
@@ -229,7 +233,8 @@ function LiveTable() {
   const myHole = myHoleObj ? myHoleObj.cardsStr : null;
   const bestHand = myHoleObj ? SP.handName(myHoleObj.cards.concat(snap.board)) : "";
   // rotate so my seat sits at the bottom
-  const positions = POS[maxSeats] || POS[6];
+  CHIPS = !!trn; // tournament table → format values as chips, not wei
+  const positions = POS[maxSeats] || (maxSeats < 6 ? POS[6] : POS[9]);
   const view = (i) => (mySeat >= 0 ? (i - mySeat + maxSeats) % maxSeats : i % maxSeats);
   const seatPos = (i) => positions[view(i)] || positions[0];
   const now = Math.floor(nowMs / 1000);
@@ -253,7 +258,7 @@ function LiveTable() {
           <div className="sep" />
           <div className="group">
             <span className="metapill"><span className="k">NLHE</span><b>{maxSeats}-MAX</b></span>
-            <span className="metapill"><span className="k">Blinds</span><b>{N(cfg.smallBlind)} / {N(cfg.bigBlind)}</b></span>
+            <span className="metapill"><span className="k">Blinds</span><b>{NV(cfg.smallBlind)} / {NV(cfg.bigBlind)}</b></span>
             <span className="metapill"><span className="k">Hand</span><b>#{hand.handId}</b></span>
           </div>
           <div className="spacer" />
@@ -289,7 +294,7 @@ function LiveTable() {
             session={{
               active: sessionOn, busy,
               label: SP.sdk.backend === "privy" ? "Email wallet · headless (no popups)" : null,
-              cap: mySeat >= 0 ? N(seats[mySeat].stack).toFixed(2) + " " + SP.NETWORK.currency.symbol : null,
+              cap: mySeat >= 0 ? NV(seats[mySeat].stack).toFixed(CHIPS ? 0 : 2) + " " + (CHIPS ? "chips" : SP.NETWORK.currency.symbol) : null,
               onActivate: SP.sdk.backend === "injected" ? () => tx("Activate session", () => SP.sdk.activateSession()).then(() => setSessionOn(true)) : null,
               onRevoke: SP.sdk.backend === "privy"
                 ? () => { SP.sdk.signOut().finally(() => location.reload()); }
@@ -325,7 +330,7 @@ function LiveTable() {
                 <span className={"zkbadge" + (anim.dealing ? " shuffling" : "")}><span className="chk">{ChromeIcons.shield}</span>{anim.dealing ? "shuffling · zkShuffle…" : "provably fair · commit-reveal ✓"}</span>
                 <Board cards={board} deckMode={deck} flipFrom={anim.flipFrom} />
                 {hand.inProgress
-                  ? <Pot pot={N(hand.pot)} />
+                  ? <Pot pot={NV(hand.pot)} chips={CHIPS} />
                   : <div className="pot"><div className="potmain"><span className="k">Waiting for players</span></div></div>}
               </div>
               {anim.winnerSeat >= 0 && (
@@ -363,7 +368,8 @@ function LiveTable() {
                 <Seat key={s.index}
                   player={{ hero: isMe, name: short(s.player), av: (s.player ? s.player.slice(2, 3).toUpperCase() : "P") }}
                   data={{
-                    stack: N(s.stack),
+                    stack: NV(s.stack),
+                    ...(CHIPS ? { chips: NV(s.stack), bb: Math.max(0, Math.round(NV(s.stack) / Math.max(1, NV(cfg.bigBlind)))) } : {}),
                     status: s.allIn ? "all-in" : s.folded ? "folded" : s.sittingOut ? "sitting out" : (hand.inProgress && s.inHand ? "" : "waiting"),
                     folded: s.folded, allin: s.allIn, winner: s.index === anim.winnerSeat,
                     timer: Number(cfg.actionTimeout),
@@ -376,7 +382,7 @@ function LiveTable() {
             {/* bet chips in front of seats */}
             {hand.inProgress && seats.map((s) => (
               !s.empty && s.committedStreet > 0n
-                ? <BetChips key={"c" + s.index} pos={seatPos(s.index)} amount={N(s.committedStreet)} slide={!reducedMo} fromSeat />
+                ? <BetChips key={"c" + s.index} pos={seatPos(s.index)} amount={NV(s.committedStreet)} chips={CHIPS} slide={!reducedMo} fromSeat />
                 : null
             ))}
 
@@ -395,7 +401,7 @@ function LiveTable() {
                   <div className="avatar">{addr ? addr.slice(2, 3).toUpperCase() : "Y"}<span className="ava-grid" /></div>
                   <div className="meta">
                     <span className="nm">YOU · {short(addr)}</span>
-                    <span className="stack tnum">{N(seats[mySeat].stack).toFixed(2)}<span className="u">{SP.NETWORK.currency.symbol}</span></span>
+                    <span className="stack tnum">{NV(seats[mySeat].stack).toFixed(CHIPS ? 0 : 2)}<span className="u">{CHIPS ? "chips" : SP.NETWORK.currency.symbol}</span></span>
                   </div>
                   <div className="hmark">{mySeat === hand.button && hand.inProgress && <Marker kind="dealer" />}</div>
                   <span className="hstatus">{seats[mySeat].allIn ? "all-in" : seats[mySeat].folded ? "folded" : seats[mySeat].sittingOut ? "sitting out" : ""}</span>
@@ -431,7 +437,7 @@ function LiveTable() {
     const toCallW = cur > committed ? cur - committed : 0n;
     const minRaiseToW = cur === 0n ? cfg.bigBlind : cur + hand.minRaise;
     const maxToW = committed + me.stack;
-    const minN = N(minRaiseToW), maxN = N(maxToW), call = N(toCallW), pot = N(hand.pot);
+    const minN = NV(minRaiseToW), maxN = NV(maxToW), call = NV(toCallW), pot = NV(hand.pot);
     const canCheck = toCallW === 0n;
     const isBet = cur === 0n;
     const canRaise = me.stack > toCallW && maxToW > cur && maxN > minN;
@@ -453,7 +459,7 @@ function LiveTable() {
     const actionData = {
       toCall: call, minRaise: minN, potForBet: pot, heroStack: maxN,
       best: bestHand || "—", outs: "—", potOdds: canCheck ? "—" : Math.round((call / (pot + call)) * 100) + "%",
-      raiseLabel: isBet ? "Bet" : "Raise to", canCheck, step: N(cfg.bigBlind) || 0.01, symbol: SP.NETWORK.currency.symbol,
+      raiseLabel: isBet ? "Bet" : "Raise to", canCheck, step: NV(cfg.bigBlind) || (CHIPS ? 1 : 0.01), symbol: CHIPS ? "chips" : SP.NETWORK.currency.symbol,
       timer: Math.max(0, hand.actingDeadline - now), timerTotal: Number(cfg.actionTimeout),
     };
     return <ActionBar action={actionData} onFold={onFold} onCheckCall={onCheckCall} onRaise={onRaise} betValue={bv} setBetValue={setBetValue} />;

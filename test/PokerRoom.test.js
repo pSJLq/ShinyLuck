@@ -174,6 +174,51 @@ describe("PokerRoom — engine", function () {
     await expect(tx).to.emit(poker, "HandSettled").withArgs(t, 1, 1, E(3), 0);
   });
 
+  it("a folded player cannot leave mid-hand (their chips are in the pot accounting)", async function () {
+    const { owner, operator, alice, bob, carol, poker } = await loadFixture(setup);
+    const t = await makeTable(poker, owner);
+    await buyIn(poker, alice, t, 0);
+    await buyIn(poker, bob, t, 1);
+    await buyIn(poker, carol, t, 2);
+    await poker.connect(operator).startHand(t);
+
+    // seat0 (button/UTG 3-handed) raises then... actually folds after a re-raise
+    await poker.connect(alice).act(t, RAISE, E(4));
+    await poker.connect(bob).act(t, RAISE, E(8));
+    await poker.connect(carol).act(t, FOLD, 0);
+    // carol folded but posted the big blind — leaving now would corrupt the pot
+    await expect(poker.connect(carol).leaveTable(t)).to.be.revertedWithCustomError(poker, "InHand");
+    // alice folds too → bob wins, hand ends → now carol can leave
+    await poker.connect(alice).act(t, FOLD, 0);
+    expect((await poker.getHand(t)).inProgress).to.equal(false);
+    await expect(poker.connect(carol).leaveTable(t)).to.not.be.reverted;
+  });
+
+  it("cancelHand refunds every contribution and frees the table", async function () {
+    const { owner, operator, alice, bob, poker } = await loadFixture(setup);
+    const t = await makeTable(poker, owner, tableCfg({ maxSeats: 2 }));
+    await buyIn(poker, alice, t, 0);
+    await buyIn(poker, bob, t, 1);
+    await poker.connect(operator).startHand(t);
+
+    // build a pot across streets: call + check → flop, then a bet
+    await poker.connect(alice).act(t, CALL, 0);
+    await poker.connect(bob).act(t, CHECK, 0);
+    await poker.connect(bob).act(t, BET, E(5));
+    // dealer can no longer serve the hand (e.g. entropy expired) → cancel
+    await expect(poker.connect(alice).cancelHand(t)).to.be.revertedWithCustomError(poker, "NotDealerOrOperator");
+    const tx = await poker.connect(operator).cancelHand(t);
+    await expect(tx).to.emit(poker, "HandCancelled").withArgs(t, 1);
+    // every chip returned: both stacks back to the full 100 buy-in
+    expect((await poker.getSeat(t, 0)).stack).to.equal(E(100));
+    expect((await poker.getSeat(t, 1)).stack).to.equal(E(100));
+    const h = await poker.getHand(t);
+    expect(h.inProgress).to.equal(false);
+    // table is reusable — next hand starts cleanly
+    await poker.connect(operator).startHand(t);
+    expect((await poker.getHand(t)).inProgress).to.equal(true);
+  });
+
   it("a session key acts on the player's behalf (no per-action signature); revoke disables it", async function () {
     const { owner, operator, alice, bob, poker } = await loadFixture(setup);
     const sessionKey = (await ethers.getSigners())[5];

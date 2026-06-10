@@ -55,6 +55,9 @@ function LobbyApp() {
           });
         }
         if (!stop) { setRows(out); setLoaded(true); }
+        if (SP.sdk.hasTournaments()) {
+          try { const ts = await SP.sdk.tournaments(); if (!stop) setTrnCount(ts.filter((t) => t.status <= 1).length); } catch {}
+        }
       } catch (e) { if (!stop) setLoaded(true); }
     }
     load();

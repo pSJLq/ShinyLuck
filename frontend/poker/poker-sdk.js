@@ -412,10 +412,14 @@ export class ShinyPoker {
   async leave(t) { this.requireWallet(); return (await this.roomWrite.leaveTable(t)).wait(); }
   async sitOut(t, on) { this.requireWallet(); return (await this.roomWrite.setSitOut(t, on)).wait(); }
 
-  /// `amountEth` is the raise-to total for BET/RAISE; ignored otherwise.
-  async act(t, action, amountEth = 0) {
+  /// `amount` is the raise-to total for BET/RAISE; ignored otherwise. Cash
+  /// tables take ether units; tournament tables play in plain CHIP integers —
+  /// pass chips=true there (parseEther would send 1e18× too much and revert).
+  async act(t, action, amount = 0, chips = false) {
     this.requireWallet();
-    const amt = action === ACTION.BET || action === ACTION.RAISE ? ethers.parseEther(String(amountEth)) : 0;
+    const amt = action === ACTION.BET || action === ACTION.RAISE
+      ? (chips ? BigInt(Math.round(Number(amount))) : ethers.parseEther(String(amount)))
+      : 0;
     // Route through the session key when active → no wallet popup per action.
     const room = this.sessionActive && this.roomSession ? this.roomSession : this.roomWrite;
     return (await room.act(t, action, amt)).wait();

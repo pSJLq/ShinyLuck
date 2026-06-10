@@ -3,9 +3,9 @@
 export const POKER_CONFIG = {
   network: "somniaTestnet",
   // --- deployed addresses (filled in on deploy) ---
-  pokerRoom: "0xA1B2405b2F4e60fd22a818C207e9dB8F29A5f18B",
-  commitRevealDealer: "0xBd74e57f0a4ad8f6F1c502a50ff9963701d93a05",
-  pokerTournament: "0xefE078Fac143796aC50431Beb4e594a0956d2635",
+  pokerRoom: "0x2F3E786F353978051d3923E19Ea3C12701523173",
+  commitRevealDealer: "0x551C3ee9352199Ad0b100D7deD0fD13637B30E79",
+  pokerTournament: "0xE77F0e6648f986c231F2cacCc82dE92fc1DDA823",
   // Off-chain dealer bot's hole-card API (serves each player only their cards).
   dealerApiUrl: "http://localhost:3002",
   // Reciprocal link back to the ShinyLuck casino (Casino⇄Poker switcher).
