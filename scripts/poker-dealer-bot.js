@@ -50,7 +50,7 @@ function loadAddresses() {
   const f = path.join(__dirname, "..", "deployments", `poker-${NET}.json`);
   if (fs.existsSync(f)) {
     const m = JSON.parse(fs.readFileSync(f, "utf8"));
-    return { room: m.addresses.pokerRoom, dealer: m.addresses.commitRevealDealer, tournament: m.addresses.pokerTournament };
+    return { room: m.addresses.pokerRoom, dealer: m.addresses.commitRevealDealer, tournament: m.addresses.pokerTournament, deployBlock: m.deploymentBlock || 0 };
   }
   throw new Error("set POKER_ROOM + POKER_DEALER or deploy first (deployments/poker-*.json)");
 }
@@ -62,10 +62,71 @@ function must(cond, msg) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Table chat: in-memory ring buffer per table. Player messages are signature-
+// gated (seat owner or their session key); the bot itself posts dealer lines.
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Hand-history indexer: one backfill from the deployment block, then small
+// incremental scans. The frontend reads it instantly via GET /history?t=N
+// (scanning ~0.2s-block Somnia history from the browser is hopeless).
+// ---------------------------------------------------------------------------
+const HIST = new Map(); // tableId -> [{handId, seat, amount, kind}]
+function histPush(t, item) {
+  const list = HIST.get(t) || [];
+  list.push(item);
+  while (list.length > 100) list.shift();
+  HIST.set(t, list);
+}
+
+async function startHistoryIndexer(provider, room, fromBlock) {
+  const iface = room.interface;
+  const addr = await room.getAddress();
+  const defs = [
+    ["HandSettled", (a) => ({ handId: Number(a.handId), seat: Number(a.winnerSeat), amount: a.amountWon.toString(), kind: "fold-win" })],
+    ["PotWinner", (a) => ({ handId: Number(a.handId), seat: Number(a.seat), amount: a.amount.toString(), kind: "showdown" })],
+  ];
+  let cursor = fromBlock;
+  let scanning = false;
+  async function scan() {
+    if (scanning) return;
+    scanning = true;
+    try {
+      const latest = await provider.getBlockNumber();
+      while (cursor <= latest) {
+        const batch = [];
+        for (let i = 0; i < 8 && cursor <= latest; i++) {
+          const to = Math.min(cursor + 899, latest);
+          for (const [ev, map] of defs) {
+            const topic = iface.getEvent(ev).topicHash;
+            batch.push(provider.send("eth_getLogs", [{ address: addr, topics: [topic], fromBlock: "0x" + cursor.toString(16), toBlock: "0x" + to.toString(16) }])
+              .then((logs) => logs.map((lg) => ({ t: Number(iface.parseLog({ topics: lg.topics, data: lg.data }).args.tableId), item: map(iface.parseLog({ topics: lg.topics, data: lg.data }).args) })))
+              .catch(() => []));
+          }
+          cursor = to + 1;
+        }
+        for (const found of await Promise.all(batch)) for (const { t, item } of found) histPush(t, item);
+      }
+    } catch (_) {} finally { scanning = false; }
+  }
+  await scan();
+  console.log(`[poker-bot] history indexer caught up to block ${cursor - 1}`);
+  setInterval(scan, 8000);
+}
+
+const CHATS = new Map(); // tableId -> [{ id, who, text, dealer, ts }]
+let chatSeq = 1;
+function pushChat(tableId, who, text, dealer = false) {
+  const list = CHATS.get(Number(tableId)) || [];
+  list.push({ id: chatSeq++, who, text: String(text).slice(0, 240), dealer, ts: Date.now() });
+  while (list.length > 60) list.shift();
+  CHATS.set(Number(tableId), list);
+}
+
 async function main() {
   must(KEY, "missing DEALER_KEY / PRIVATE_KEY");
   must(MASTER && /^0x[0-9a-fA-F]{64}$/.test(MASTER), "missing/invalid POKER_SEED_MASTER_KEY (need 32-byte hex)");
-  const { room: roomAddr, dealer: dealerAddr, tournament: trnAddr } = loadAddresses();
+  const { room: roomAddr, dealer: dealerAddr, tournament: trnAddr, deployBlock } = loadAddresses();
 
   const provider = new ethers.JsonRpcProvider(RPC_URL);
   const wallet = new ethers.Wallet(KEY, provider);
@@ -78,6 +139,9 @@ async function main() {
 
   // --- hole-card API: a player proves wallet ownership, gets only their cards.
   startCardServer(room, state);
+
+  // --- hand-history indexer (backfills in the background, then stays current)
+  startHistoryIndexer(provider, room, deployBlock || 0).catch((e) => console.error("[poker-bot] indexer:", e.message));
 
   // --- main poll loop: tournaments first (busts/level-ups land in the
   //     inter-hand window), then deal every table.
@@ -97,6 +161,12 @@ async function main() {
       try {
         const tag = await tickTable(room, dealer, MASTER, state, t);
         if (tag && tag !== "idle" && tag !== "wait") console.log(`[poker-bot] table ${t}: ${tag}`);
+        // dealer feed lines for the table chat
+        if (tag === "started") pushChat(t, "dealer", "New hand — deck commitment sealed on-chain.", true);
+        else if (tag === "showdown-reveal") pushChat(t, "dealer", "Showdown — deck revealed & verified on-chain.", true);
+        else if (tag === "settled") pushChat(t, "dealer", "Pot settled on-chain.", true);
+        else if (tag === "timeout") pushChat(t, "dealer", "Player timed out — auto-folded.", true);
+        else if (tag && tag.startsWith("cancelled")) pushChat(t, "dealer", "Hand cancelled — all contributions refunded.", true);
       } catch (e) {
         console.error(`[poker-bot] table ${t} error:`, e.shortMessage || e.message);
       }
@@ -130,6 +200,49 @@ function startCardServer(room, state) {
     if (req.method === "GET" && req.url.startsWith("/health")) {
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ ok: true }));
+    }
+    if (req.method === "GET" && req.url.startsWith("/history")) {
+      const u = new URL(req.url, "http://x");
+      const t = Number(u.searchParams.get("t") || 0);
+      const list = (HIST.get(t) || []).slice(-40).reverse();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ hands: list }));
+    }
+    if (req.method === "GET" && req.url.startsWith("/chat")) {
+      const u = new URL(req.url, "http://x");
+      const t = Number(u.searchParams.get("t") || 0);
+      const since = Number(u.searchParams.get("since") || 0);
+      const list = (CHATS.get(t) || []).filter((m) => m.id > since);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ messages: list }));
+    }
+    if (req.method === "POST" && req.url.startsWith("/chat")) {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", async () => {
+        try {
+          const { tableId, text, signature } = JSON.parse(body || "{}");
+          if (!text || !String(text).trim()) throw new Error("empty message");
+          const message = `ShinyPoker:chat:${tableId}:${text}`;
+          const signer = ethers.verifyMessage(message, signature);
+          let effective = signer;
+          try {
+            const owner = await room.sessionOwnerOf(signer);
+            if (owner && owner !== "0x0000000000000000000000000000000000000000") effective = owner;
+          } catch (_) {}
+          // only seated players may talk
+          const seatIdx = Number(await room.seatOf(tableId, effective));
+          if (seatIdx === 255) throw new Error("not seated at this table");
+          const who = effective.slice(0, 6) + "…" + effective.slice(-4);
+          pushChat(tableId, who, String(text).trim());
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (e) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
     }
     if (req.method !== "POST" || !req.url.startsWith("/holes")) {
       res.writeHead(404).end();

@@ -467,7 +467,7 @@ function LiveTable() {
               <FlyChips wrapRef={feltWrapRef} toX={seatPos(anim.winnerSeat).x} toY={seatPos(anim.winnerSeat).y} />
             )}
           </div>
-          {React.createElement(SideRail)}
+          <LiveSideRail tableId={tableId} snap={snap} connected={connected} mySeat={mySeat} />
         </div>
 
         {renderBar()}
@@ -535,6 +535,120 @@ function LiveTable() {
     };
     return <ActionBar action={actionData} onFold={onFold} onCheckCall={onCheckCall} onRaise={onRaise} betValue={bv} setBetValue={setBetValue} />;
   }
+}
+
+/* live side rail: real chat (via dealer bot), on-chain hand history, private notes */
+function LiveSideRail({ tableId, snap, connected, mySeat }) {
+  const [tab, setTab] = useState("chat");
+  const [msgs, setMsgs] = useState([]);
+  const [input, setInput] = useState("");
+  const [hands, setHands] = useState(null);
+  const [notes, setNotes] = useState(() => { try { return JSON.parse(localStorage.getItem("sp_notes") || "{}"); } catch { return {}; } });
+  const [commit, setCommit] = useState(null);
+  const sinceRef = useRef(0);
+  const bodyRef = useRef(null);
+
+  useEffect(() => {
+    let stop = false;
+    async function poll() {
+      try {
+        const list = await SP.sdk.getChat(tableId, sinceRef.current);
+        if (!stop && list.length) { sinceRef.current = list[list.length - 1].id; setMsgs((m) => [...m, ...list].slice(-60)); }
+      } catch {}
+    }
+    poll();
+    const iv = setInterval(poll, 2500);
+    return () => { stop = true; clearInterval(iv); };
+  }, []);
+  useEffect(() => { if (tab === "chat" && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight; }, [msgs, tab]);
+
+  useEffect(() => {
+    let stop = false;
+    const load = async () => { try { const h = await SP.sdk.recentHands(tableId); if (!stop) setHands(h); } catch { if (!stop) setHands([]); } };
+    load();
+    const iv = setInterval(load, 30000);
+    return () => { stop = true; clearInterval(iv); };
+  }, []);
+
+  useEffect(() => {
+    if (!snap || !snap.hand.inProgress) return;
+    let stop = false;
+    SP.sdk.dealCommit(snap.hand.dealId).then((c) => { if (!stop) setCommit(c); }).catch(() => {});
+    return () => { stop = true; };
+  }, [snap && String(snap.hand.dealId), snap && snap.hand.street]);
+
+  async function send() {
+    const text = input.trim();
+    if (!text || !connected || mySeat < 0) return;
+    setInput("");
+    try { await SP.sdk.sendChat(tableId, text); } catch (e) { console.warn("chat:", e.message); }
+  }
+
+  const saveNote = (a, patch) => setNotes((n) => { const next = { ...n, [a]: { ...(n[a] || {}), ...patch } }; try { localStorage.setItem("sp_notes", JSON.stringify(next)); } catch {} return next; });
+  const opponents = snap ? snap.seats.filter((s) => !s.empty && s.index !== mySeat) : [];
+  const shh = (h) => (h ? h.slice(0, 10) + "…" + h.slice(-8) : "");
+
+  return (
+    <aside className="siderail">
+      <div className="railtabs">
+        {["chat", "hands", "notes"].map((t2) => <button key={t2} className={tab === t2 ? "on" : ""} onClick={() => setTab(t2)}>{t2}</button>)}
+      </div>
+      <div style={{ padding: "9px 12px", borderBottom: "1px solid var(--line)" }}>
+        <span className="tag">{tab === "chat" ? "table chat · dealer feed" : tab === "hands" ? "hand history · on-chain" : "private player notes"}</span>
+      </div>
+      <div className="railbody" ref={bodyRef}>
+        {tab === "chat" && (msgs.length === 0
+          ? <div className="chatline dealer">Welcome — live on Somnia. Provably-fair commit-reveal dealing.</div>
+          : msgs.map((m) => <div key={m.id} className={"chatline" + (m.dealer ? " dealer" : "")}>{!m.dealer && <span className="who">{m.who}</span>}{m.text}</div>))}
+        {tab === "hands" && (hands == null
+          ? <div className="chatline dealer">Loading on-chain history…</div>
+          : hands.length === 0 ? <div className="chatline dealer">No settled hands yet at this table.</div>
+          : hands.map((h2, i) => {
+              const who = snap && snap.seats[h2.seat] && !snap.seats[h2.seat].empty ? short(snap.seats[h2.seat].player) : "seat " + h2.seat;
+              return <div key={i} className="hhrow"><span className="st">#{h2.handId}</span><span className="act">{who} won <b className="tnum">{CHIPS ? Number(h2.amount) : Number(SP.fmt(h2.amount, 6))}</b> · {h2.kind}</span></div>;
+            }))}
+        {tab === "notes" && (
+          <div>
+            {opponents.length === 0 && <div className="chatline dealer">No opponents seated yet.</div>}
+            {opponents.map((s) => {
+              const n = notes[s.player.toLowerCase()] || {};
+              return (
+                <div key={s.index} style={{ padding: "8px 4px", borderBottom: "1px solid var(--hair)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                    {["#ef5a6f", "#e8c15a", "#46d39a", "#6e6eed"].map((c) => (
+                      <span key={c} onClick={() => saveNote(s.player.toLowerCase(), { tag: n.tag === c ? null : c })}
+                        style={{ width: 12, height: 12, borderRadius: "50%", background: c, cursor: "pointer", opacity: n.tag === c ? 1 : 0.35, outline: n.tag === c ? "1.5px solid #fff" : "none" }} />
+                    ))}
+                    <span style={{ fontFamily: "var(--label)", fontSize: 11.5, color: n.tag || "var(--text-2)" }}>{short(s.player)}</span>
+                  </div>
+                  <input placeholder="Add a note…" defaultValue={n.text || ""}
+                    onBlur={(e) => saveNote(s.player.toLowerCase(), { text: e.target.value })}
+                    style={{ width: "100%", background: "rgba(255,255,255,.04)", border: "1px solid var(--line-2)", color: "var(--text)", borderRadius: 7, padding: "6px 8px", fontFamily: "var(--label)", fontSize: 12 }} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {tab === "chat" && (
+        <div style={{ display: "flex", gap: 6, padding: "8px 10px", borderTop: "1px solid var(--line)" }}>
+          <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()}
+            placeholder={connected && mySeat >= 0 ? "Say something…" : "Sit down to chat"} disabled={!connected || mySeat < 0}
+            style={{ flex: 1, background: "rgba(255,255,255,.04)", border: "1px solid var(--line-2)", color: "var(--text)", borderRadius: 7, padding: "7px 9px", fontFamily: "var(--label)", fontSize: 12 }} />
+          <button className="pill" onClick={send} disabled={!connected || mySeat < 0}>Send</button>
+        </div>
+      )}
+      <div className="pfwidget">
+        <div className="pfhead">
+          <span className="ttl">{ChromeIcons.shield} provably fair · commit-reveal</span>
+        </div>
+        <div className="commit">
+          <div><span className="lab">commit</span> {commit ? shh(commit.seedHash) : "— waiting for a hand —"}</div>
+          <div style={{ marginTop: 4 }}><span className="lab">deck</span> {commit && commit.revealed ? "revealed & verified on-chain ✓" : "sealed pre-deal · reveal post-hand"}</div>
+        </div>
+      </div>
+    </aside>
+  );
 }
 
 /* sit / cashier modal */

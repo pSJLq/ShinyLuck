@@ -50,7 +50,14 @@ const DEALER_ABI = [
   "function holeCards(uint256,uint8) view returns (uint8,uint8)",
   "function boardRevealedCount(uint256) view returns (uint8)",
   "function isShowdownReady(uint256) view returns (bool)",
+  "function dealInfo(uint256) view returns (uint64 handId,uint64 tableId,uint64 commitBlock,uint8 playerCount,bytes32 seedHash,bytes32 entropy,bytes32 serverSeed,bool revealed,uint8[] seats)",
 ];
+
+const ROOM_EVENTS = [
+  "event HandSettled(uint256 indexed tableId, uint64 indexed handId, uint8 winnerSeat, uint128 amountWon, uint128 rake)",
+  "event PotWinner(uint256 indexed tableId, uint64 indexed handId, uint8 potIndex, uint8 seat, uint128 amount)",
+];
+ROOM_ABI.push(...ROOM_EVENTS);
 
 const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
 const SUITS = ["♣", "♦", "♥", "♠"];
@@ -366,6 +373,84 @@ export class ShinyPoker {
 
   async unregisterTournament(id) { this.requireWallet(); return (await this.trnWrite.unregister(id)).wait(); }
   async startTournament(id) { this.requireWallet(); return (await this.trnWrite.start(id)).wait(); }
+
+  /// Recent settled hands at a table — served by the dealer bot's indexer
+  /// (it backfills the on-chain events once and stays current; scanning
+  /// Somnia's ~0.2s-block history from the browser is impractical).
+  async recentHands(t) {
+    try {
+      const res = await fetch(`${this.cfg.dealerApiUrl}/history?t=${t}`);
+      if (res.ok) {
+        const { hands } = await res.json();
+        return (hands || []).map((h) => ({ ...h, amount: BigInt(h.amount) }));
+      }
+    } catch {}
+    return this._recentHandsOnchain(t); // bot down → short on-chain fallback
+  }
+
+  // (fallback) raw eth_getLogs over a short recent window — Somnia logs lack
+  // the `removed` field which trips ethers v6's validator, hence raw calls.
+  async _recentHandsOnchain(t, lookback = 18000) {
+    if (!this.roomRead) return [];
+    const iface = this.roomRead.interface;
+    const addr = this.cfg.pokerRoom;
+    const tTopic = ethers.zeroPadValue(ethers.toBeHex(t), 32);
+    const latest = await this.read.getBlockNumber();
+    const from0 = Math.max(0, latest - lookback);
+    const out = [];
+    const grab = async (evName, fromB, toB) => {
+      const topic = iface.getEvent(evName).topicHash;
+      const logs = await this.read.send("eth_getLogs", [{
+        address: addr, topics: [topic, tTopic],
+        fromBlock: "0x" + fromB.toString(16), toBlock: "0x" + toB.toString(16),
+      }]);
+      for (const lg of logs) {
+        try {
+          const p = iface.parseLog({ topics: lg.topics, data: lg.data });
+          if (evName === "HandSettled") out.push({ handId: Number(p.args.handId), seat: Number(p.args.winnerSeat), amount: p.args.amountWon, kind: "fold-win" });
+          else out.push({ handId: Number(p.args.handId), seat: Number(p.args.seat), amount: p.args.amount, kind: "showdown" });
+        } catch {}
+      }
+    };
+    // Parallel batched chunks (RPC caps eth_getLogs at ~1000-block ranges).
+    const chunks = [];
+    for (let from = from0; from <= latest; from += 900) chunks.push([from, Math.min(from + 899, latest)]);
+    for (let i = 0; i < chunks.length; i += 6) {
+      await Promise.all(chunks.slice(i, i + 6).flatMap(([f, t2]) =>
+        [grab("HandSettled", f, t2).catch(() => {}), grab("PotWinner", f, t2).catch(() => {})]));
+    }
+    out.sort((a, b) => b.handId - a.handId);
+    return out.slice(0, 40);
+  }
+
+  /// Current deal's provably-fair metadata (seed commitment, reveal state).
+  async dealCommit(dealId) {
+    if (!this.dealerRead || !dealId || dealId === 0n) return null;
+    const d = await this.dealerRead.dealInfo(dealId);
+    return { seedHash: d.seedHash, revealed: d.revealed, serverSeed: d.serverSeed, commitBlock: Number(d.commitBlock) };
+  }
+
+  // ---- table chat (relayed by the dealer bot; signed, popup-free w/ session) ----
+  chatMessage(t, text) { return `ShinyPoker:chat:${t}:${text}`; }
+
+  async sendChat(t, text) {
+    this.requireWallet();
+    const msg = this.chatMessage(t, text);
+    const signature = this.sessionActive && this.sessionWallet
+      ? await this.sessionWallet.signMessage(msg)
+      : await this.signer.signMessage(msg);
+    const res = await fetch(`${this.cfg.dealerApiUrl}/chat`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tableId: t, text, signature }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "chat unavailable");
+  }
+
+  async getChat(t, since = 0) {
+    const res = await fetch(`${this.cfg.dealerApiUrl}/chat?t=${t}&since=${since}`);
+    if (!res.ok) return [];
+    return (await res.json()).messages || [];
+  }
 
   /// A seat's hole cards once the deck is revealed at showdown (public).
   async revealedHole(dealId, seat) {
