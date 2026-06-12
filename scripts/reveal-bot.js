@@ -296,6 +296,13 @@ async function main() {
     if (!AGENT_WATCHDOG || watchdogBusy) return;
     if (Date.now() - lastChainFireMs < AGENT_FIRE_INTERVAL_MS) return; // budgeted cadence
     watchdogBusy = true;
+    // Safety net: if ANY await below hangs forever (hung RPC read, or a tx
+    // stuck behind a nonce gap so tx.wait() never settles), force-release the
+    // busy flag after 5 min so the agent loop can fire on a later check.
+    // Without this, finally{} never runs and the flag wedges the agent chain
+    // until the next redeploy — exactly what silenced the agent feed for 23h
+    // on 2026-06-11/12 while the settle loops kept running fine.
+    const unstick = setTimeout(() => { watchdogBusy = false; }, 300_000);
     try {
       const hm = await ethers.getContractAt("HouseManager", manifest.addresses.houseManager, signer);
       const bal = await provider.getBalance(manifest.addresses.houseManager);
@@ -307,7 +314,8 @@ async function main() {
       // Competitor (cheap JSON fetch) first so the LLM RTP analysis reads the
       // freshest competitor benchmark from storage.
       const fire = async (label, fn) => {
-        try { const tx = await fn(); await tx.wait(); console.log(`[reveal-bot] watchdog fired ${label} (${tx.hash.slice(0,12)}...)`); }
+        // wait(confirms, timeoutMs): never block forever on a stuck tx.
+        try { const tx = await fn(); await tx.wait(1, 120_000); console.log(`[reveal-bot] watchdog fired ${label} (${tx.hash.slice(0,12)}...)`); }
         catch (e) { console.warn(`[reveal-bot] watchdog ${label}: ${e.shortMessage || e.message}`); }
       };
       // ONE call runs the full on-chain hourly tick: sample the bankroll ring,
@@ -320,6 +328,7 @@ async function main() {
     } catch (e) {
       console.warn(`[reveal-bot] agent-watchdog: ${e.shortMessage || e.message}`);
     } finally {
+      clearTimeout(unstick);
       watchdogBusy = false;
     }
   }
