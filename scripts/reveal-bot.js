@@ -224,6 +224,13 @@ async function main() {
   const SEED_TOPUP_CHECK_MS  = parseInt(process.env.SEED_TOPUP_CHECK_MS  || "30000", 10);
   // Chunk on-chain provision so a single tx doesn't blow the block gas limit.
   const SEED_TOPUP_CHUNK     = 200;
+  // When the pool empties, the round-opener must STOP hammering startRound: that
+  // retry storm churns the shared owner nonce and starves the seed-topup tx, so
+  // the pool can never refill (root cause of the 2026-06-12 NoSeedAvailable
+  // freeze). On an empty-pool revert we back off this long AND kick a topup.
+  const SEED_EMPTY_BACKOFF_S = parseInt(process.env.SEED_EMPTY_BACKOFF_S || "30", 10);
+  let seedEmptyBackoffUntil = 0;
+  let lastSeedEmptyLog = 0;
   let seedTopupBusy = false;
   async function maybeAutoTopupSeeds() {
     if (seedTopupBusy) return;
@@ -233,27 +240,40 @@ async function main() {
       const [total, consumed] = await casino.seedPoolStatus();
       const available = Number(total - consumed);
       if (available >= SEED_TOPUP_THRESHOLD) return;
-      const startIdx = Number(total); // next provisioned hash lands here
-      console.log(`[reveal-bot] seed auto-topup: available=${available} < threshold=${SEED_TOPUP_THRESHOLD}, deriving ${SEED_TOPUP_BATCH} hashes at indices ${startIdx}..${startIdx + SEED_TOPUP_BATCH - 1}`);
-      const hashes = new Array(SEED_TOPUP_BATCH);
-      for (let i = 0; i < SEED_TOPUP_BATCH; i++) {
-        hashes[i] = hashSeed(deriveSeed(masterKey, startIdx + i));
+      console.log(`[reveal-bot] seed auto-topup: available=${available} < threshold=${SEED_TOPUP_THRESHOLD}, provisioning ${SEED_TOPUP_BATCH} seeds`);
+      const napMs = (ms) => new Promise((r) => setTimeout(r, ms));
+      let added = 0;
+      while (added < SEED_TOPUP_BATCH) {
+        // Re-read the on-chain length each chunk so hashes are derived for the
+        // EXACT positions they'll occupy (immune to a concurrent append).
+        const curTotal = Number((await casino.seedPoolStatus())[0]);
+        const n = Math.min(SEED_TOPUP_CHUNK, SEED_TOPUP_BATCH - added);
+        const slice = new Array(n);
+        for (let j = 0; j < n; j++) slice[j] = hashSeed(deriveSeed(masterKey, curTotal + j));
+        // The settle / round-open loops share this signer, so a chunk can hit
+        // "nonce too low". Retry the SEND on transient nonce errors (this is the
+        // bug that left the pool stuck at 3/5 chunks → drained to 0 → froze).
+        let broadcast = false;
+        for (let attempt = 0; attempt < 6 && !broadcast; attempt++) {
+          try { await casino.provisionSeedHashes(slice); broadcast = true; }
+          catch (e) {
+            const msg = e.shortMessage || e.message || "";
+            if (/nonce|replacement|already known|underpriced|mempool/i.test(msg)) await napMs(1200 + Math.random() * 1200);
+            else throw e;
+          }
+        }
+        if (!broadcast) throw new Error("provision kept colliding");
+        // Confirm via on-chain length (truth), so a slow/dropped tx is never
+        // double-provisioned (which would misalign hashes vs derivation).
+        let landed = false;
+        for (let w = 0; w < 45 && !landed; w += 3) {
+          await napMs(3000);
+          if (Number((await casino.seedPoolStatus())[0]) >= curTotal + n) landed = true;
+        }
+        if (!landed) { console.warn(`[reveal-bot] topup chunk at ${curTotal} not landed — retrying`); continue; }
+        added += n;
       }
-      for (let i = 0; i < hashes.length; i += SEED_TOPUP_CHUNK) {
-        const slice = hashes.slice(i, i + SEED_TOPUP_CHUNK);
-        const tx = await casino.provisionSeedHashes(slice);
-        console.log(`[reveal-bot] seed auto-topup chunk ${i}..${i + slice.length} tx=${tx.hash}`);
-        // Bound the confirmation wait: a dropped/stuck tx must NOT wedge the
-        // topup loop forever (seedTopupBusy would stay true => pool never
-        // refills => rounds eventually revert NoSeedAvailable - the exact
-        // failure that froze the casino). On timeout we throw; the catch logs
-        // it and `finally` clears seedTopupBusy so the next tick retries clean.
-        await Promise.race([
-          tx.wait(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error("provision confirm timeout")), 90_000)),
-        ]);
-      }
-      console.log(`[reveal-bot] seed auto-topup done. pool now has ${SEED_TOPUP_BATCH + available} seeds`);
+      console.log(`[reveal-bot] seed auto-topup done (+${added} seeds, pool ~${available + added})`);
     } catch (e) {
       console.warn(`[reveal-bot] seed auto-topup failed: ${e.shortMessage || e.message}`);
     } finally {
@@ -765,6 +785,7 @@ async function main() {
         if (round && Number(round.betWindowEnd) > 0 && nowSec < Number(round.betWindowEnd) + ROUND_GAP_S) {
           return; // still inside the post-round gap - open on a later tick
         }
+        if (Date.now() < seedEmptyBackoffUntil) return; // empty-pool backoff: don't storm startRound
         try {
           const startFn = gameLabel === "crash" ? "startCrashRound" : "startRouletteRound";
           const tx = await casino[startFn]();
@@ -772,8 +793,18 @@ async function main() {
           console.log(`[reveal-bot] opened new ${gameLabel} round tx=${tx.hash}`);
         } catch (e) {
           const msg = e.shortMessage || e.message;
-          if (/RoundClosed|NoSeedAvailable|GameIsPaused/.test(msg)) {/* ok */}
-          else console.warn(`[reveal-bot] start ${gameLabel}: ${msg}`);
+          if (/RoundClosed|GameIsPaused/.test(msg)) {/* ok */}
+          else if (/NoSeedAvailable|execution reverted/.test(msg)) {
+            // Almost certainly an empty seed pool (NoSeedAvailable often arrives
+            // undecoded as "execution reverted"). Back off so we stop starving
+            // the topup of nonces, and proactively kick a refill.
+            seedEmptyBackoffUntil = Date.now() + SEED_EMPTY_BACKOFF_S * 1000;
+            maybeAutoTopupSeeds().catch(() => {});
+            if (Date.now() - lastSeedEmptyLog > 30000) {
+              console.warn(`[reveal-bot] ${gameLabel} start reverted (empty seed pool?) — backing off ${SEED_EMPTY_BACKOFF_S}s + kicking seed topup`);
+              lastSeedEmptyLog = Date.now();
+            }
+          } else console.warn(`[reveal-bot] start ${gameLabel}: ${msg}`);
         }
       };
       // Only act if we have at least one round in history; bootstrap below.
