@@ -1,6 +1,11 @@
 /* ShinyPoker — LIVE lobby. Design look (lobby.css) driven by on-chain tables
    via window.SP. Cash tab is live; other tabs are flagged coming-soon. */
 const { useState: uS, useEffect: uE, useRef: uR } = React;
+// Render modals to <body> so they escape the scaled/transformed .app (a CSS
+// transform makes position:fixed resolve against .app, not the viewport).
+const Portal = ({ children }) => (window.ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(children, document.body) : children);
+// Little circular "?" with a hover explanation (native title tooltip).
+const Hint = ({ text }) => <span title={text} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", border: "1px solid var(--muted)", color: "var(--muted)", fontSize: 9, cursor: "help", marginLeft: 5, verticalAlign: "middle" }}>?</span>;
 const Ln = (wei) => Number(SP.fmt(wei, 6));
 const lshort = (a) => (a && a !== "0x0000000000000000000000000000000000000000" ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const stakeOf = (bb) => (bb <= 0.05 ? "micro" : bb <= 1 ? "low" : bb <= 5 ? "mid" : "high");
@@ -15,14 +20,16 @@ function LobbyApp() {
   const [stake, setStake] = uS("all");
   const [size, setSize] = uS("all");
   const [trnCount, setTrnCount] = uS(0);
+  const [trnSeated, setTrnSeated] = uS(0);
   const [showCreate, setShowCreate] = uS(false);
+  const [showCashier, setShowCashier] = uS(false);
   const [theme] = uS(() => localStorage.getItem("sp_theme") || "b");
   const canvasRef = uR(null);
 
   // ambient grid
   uE(() => {
     if (!canvasRef.current || !window.GridField) return;
-    const f = new GridField(canvasRef.current, { cell: 20, gap: 6, speed: 0.4, density: 0.5, accent: "#6E6EED", accent2: "#9B9BF4", maxAlpha: 0.7, minBright: 0.01, shape: "square" });
+    const f = new GridField(canvasRef.current, { cell: 20, gap: 6, speed: 0.4, density: 0.5, accent: "#d9ab4a", accent2: "#f2d78a", maxAlpha: 0.7, minBright: 0.01, shape: "square" });
     f.start();
     const r = setTimeout(() => f._resize(), 300);
     return () => { clearTimeout(r); f.destroy(); };
@@ -39,24 +46,48 @@ function LobbyApp() {
 
   async function refreshBal() { if (SP.sdk.address) { try { setBal(Ln(await SP.sdk.balanceOf(SP.sdk.address))); } catch {} } }
 
+  // Deep-link: the table/tournament headers send the wallet chip here (lobby?cashier=1).
+  uE(() => { if (connected && new URLSearchParams(location.search).get("cashier") === "1") { setShowCashier(true); history.replaceState(null, "", "lobby"); } }, [connected]);
+
   // poll live tables
   uE(() => {
     let stop = false;
     async function load() {
       try {
-        const n = await SP.sdk.tableCount();
-        const out = [];
-        for (let t = 0; t < n; t++) {
-          const [cfg, hand, seats] = await Promise.all([SP.sdk.getTable(t), SP.sdk.getHand(t), SP.sdk.getSeats(t)]);
-          out.push({
-            id: t, sb: Ln(cfg.smallBlind), bb: Ln(cfg.bigBlind), size: cfg.maxSeats,
-            seated: seats.filter((s) => !s.empty).length, pot: Ln(hand.pot), inHand: hand.inProgress,
-            rake: (cfg.rakeBps / 100), cap: Ln(cfg.rakeCap), stake: stakeOf(Ln(cfg.bigBlind)),
-          });
+        let out;
+        // dealer cache first: ONE GET for the whole lobby instead of ~5 RPC
+        // calls per table per client — the difference between 20 and 200 users
+        const lob = await SP.sdk.lobbySnapshot();
+        if (lob && Array.isArray(lob.tables)) {
+          out = lob.tables
+            .filter((r) => r.controller === "0x0000000000000000000000000000000000000000")
+            .map((r) => ({
+              id: Number(r.id), sb: Ln(BigInt(r.smallBlind)), bb: Ln(BigInt(r.bigBlind)), size: Number(r.maxSeats),
+              seated: Number(r.seated), pot: Ln(BigInt(r.pot || 0)), inHand: !!r.inHand,
+              rake: Number(r.rakeBps) / 100, cap: Ln(BigInt(r.rakeCap || 0)), stake: stakeOf(Ln(BigInt(r.bigBlind))),
+            }));
+        } else {
+          const n = await SP.sdk.tableCount();
+          out = [];
+          for (let t = 0; t < n; t++) {
+            const [cfg, hand, seats, ctl] = await Promise.all([SP.sdk.getTable(t), SP.sdk.getHand(t), SP.sdk.getSeats(t), SP.sdk.tableController(t)]);
+            if (ctl && ctl !== "0x0000000000000000000000000000000000000000") continue; // hide tournament-controlled tables from the cash list
+            out.push({
+              id: t, sb: Ln(cfg.smallBlind), bb: Ln(cfg.bigBlind), size: cfg.maxSeats,
+              seated: seats.filter((s) => !s.empty).length, pot: Ln(hand.pot), inHand: hand.inProgress,
+              rake: (cfg.rakeBps / 100), cap: Ln(cfg.rakeCap), stake: stakeOf(Ln(cfg.bigBlind)),
+            });
+          }
         }
         if (!stop) { setRows(out); setLoaded(true); }
         if (SP.sdk.hasTournaments()) {
-          try { const ts = await SP.sdk.tournaments(); if (!stop) setTrnCount(ts.filter((t) => t.status <= 1).length); } catch {}
+          try {
+            const ts = await SP.sdk.tournaments();
+            if (!stop) {
+              setTrnCount(ts.filter((t) => t.status <= 1).length);
+              setTrnSeated(ts.filter((t) => t.status === 1).reduce((a, t) => a + t.remaining, 0)); // tournament players count as seated
+            }
+          } catch {}
         }
       } catch (e) { if (!stop) setLoaded(true); }
     }
@@ -77,28 +108,27 @@ function LobbyApp() {
   const running = rows.filter((r) => r.inHand).length;
   const biggest = rows.reduce((m, r) => Math.max(m, r.pot), 0);
   const sym = SP.NETWORK.currency.symbol;
-  const COLS = "1.1fr 0.7fr 0.9fr 1.2fr 0.8fr 1.1fr";
 
   return (
     <div className="scaler" id="scaler">
       <div className="app lobby" data-dir={theme} data-deck="4">
         <header className="topbar">
-          <div className="group"><span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><BraceLogo size={22} /><span className="wordmark" style={{ fontSize: 17 }}>shiny<span className="accent">poker</span></span></span></div>
+          <div className="group"><span style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }} title="Home" onClick={() => (location.href = "index")}><SparkLogo size={24} /><span className="wordmark" style={{ fontSize: 17 }}>shiny<span className="accent">poker</span></span></span></div>
           <div className="switcher">
             <button onClick={() => (location.href = SP.POKER_CONFIG.casinoUrl)}><span className="dot" />ShinyLuck</button>
             <button className="on"><span className="dot" />Poker</button>
           </div>
           <div className="sep" />
-          <div className="group"><span className="metapill"><span className="k">Room</span><b>LOBBY</b></span></div>
           <div className="spacer" />
           {connected ? (
-            <div className="wallet"><SomiIcon className="somi" /><span className="bal tnum">{bal.toFixed(1)}</span><span className="net">{lshort(addr)}</span></div>
+            <div className="wallet" style={{ cursor: "pointer" }} title="Cashier · nickname" onClick={() => setShowCashier(true)}><BraceLogo size={16} /><span className="bal tnum">{bal.toFixed(1)}</span><span className="net">{lshort(addr)}</span></div>
           ) : (
             <button className="metapill" style={{ cursor: "pointer", color: "var(--accent-soft)", borderColor: "var(--accent-32)", background: "var(--accent-12)" }} onClick={connect}>Connect Wallet</button>
           )}
         </header>
 
         <canvas className="lobbyfield" ref={canvasRef} />
+        {showCashier && connected && <CashierModal close={() => setShowCashier(false)} addr={addr} bal={bal} refresh={refreshBal} />}
 
         <div className="lobbyhead">
           <div className="lobbytabs">
@@ -107,9 +137,9 @@ function LobbyApp() {
             ))}
           </div>
           <div className="statstrip">
-            <div className="stat"><span className="k"><span className="live" />Players seated</span><span className="v count tnum">{totalSeated}</span></div>
+            <div className="stat"><span className="k"><span className="live" />Players seated</span><span className="v count tnum">{totalSeated + trnSeated}</span></div>
             <div className="stat"><span className="k">Tables</span><span className="v tnum">{rows.length}</span></div>
-            <div className="stat"><span className="k">Hands running</span><span className="v tnum">{running}</span></div>
+            <div className="stat" title="Tables with a hand being dealt right now"><span className="k">Hands in play</span><span className="v tnum">{running}</span></div>
             <div className="stat"><span className="k">Biggest pot now</span><span className="v tnum">{biggest.toFixed(2)}<span className="u">{sym}</span></span></div>
           </div>
         </div>
@@ -122,7 +152,6 @@ function LobbyApp() {
               <span className="filterlabel">Size</span>
               <div className="chipset">{[["all", "All"], ["6", "6-max"], ["9", "9-max"], ["2", "Heads-up"]].map(([k, l]) => <button key={k} className={size === k ? "on" : ""} onClick={() => setSize(k)}>{l}</button>)}</div>
               <div className="spacerflex" />
-              <span className="filterlabel">Provably fair · commit-reveal</span>
             </React.Fragment>
           ) : tab === "tournaments" && SP.sdk.hasTournaments() ? (
             <React.Fragment>
@@ -149,27 +178,49 @@ function LobbyApp() {
             ) : !loaded ? <div style={{ padding: 50, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>Loading tables…</div>
               : cash.length === 0 ? <div style={{ padding: 50, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>No tables match your filters.</div>
               : (
-                <div className="dtable">
-                  <div className="dthead" style={{ gridTemplateColumns: COLS }}>
-                    <span className="h">Stakes · Rake</span><span className="h">Game</span><span className="h">Size</span><span className="h">Seats</span><span className="h r">Pot now</span><span className="h r">Action</span>
-                  </div>
+                /* cash tables as mini-felt cards: a plan-view oval with the
+                   actual seat occupancy around it and the live pot in the
+                   middle — the row list read like a spreadsheet */
+                <div className="tgrid">
                   {cash.map((r) => {
                     const full = r.seated >= r.size;
                     const sizeLabel = r.size === 2 ? "Heads-up" : r.size + "-max";
+                    const suit = ["♠", "♥", "♦", "♣"][r.id % 4];
+                    const red = r.id % 4 === 1 || r.id % 4 === 2;
+                    const tilt = ((r.id * 47) % 22) - 11; // deterministic per table — no two cards sit identical
+                    const seats = Array.from({ length: r.size }, (_, i) => {
+                      const a = Math.PI / 2 + (i / r.size) * Math.PI * 2; // clockwise from the bottom seat
+                      return { x: 50 + 43 * Math.cos(a), y: 50 + 38 * Math.sin(a), on: i < r.seated };
+                    });
                     return (
-                      <div key={r.id} className="drow" style={{ gridTemplateColumns: COLS }}>
-                        <div className="cell-stakes"><span className="bl tnum">{r.sb} / {r.bb}<span className="u">{sym}</span></span><span className="rk">rake <b>{r.rake}%</b> · cap {r.cap} · no flop no drop</span></div>
-                        <div><span className="gametag">NLHE</span></div>
-                        <div className="sizetag">{sizeLabel}</div>
-                        <div className="seatdots">{Array.from({ length: r.size }).map((_, i) => <span key={i} className={"sd" + (i < r.seated ? " on" : "")} />)}<span className={"lbl" + (full ? " full" : "")}>{r.seated}/{r.size}</span></div>
-                        <div className="numcell tnum">{r.pot > 0 ? r.pot.toFixed(2) : "—"}<span className="u">{r.pot > 0 ? sym : ""}</span></div>
-                        <div className="rowactions">
-                          <a className="btn-sm" href={"table.html?t=" + r.id}>Observe</a>
-                          {full
-                            ? <span className="btn-sm full" style={{ cursor: "default", opacity: 0.6 }}>Full</span>
-                            : <a className="btn-sm join" href={"table.html?t=" + r.id}>Join</a>}
+                      <a key={r.id} className={"tcard" + (r.inHand ? " live" : "")} href={"table?t=" + r.id}>
+                        <div className="tc-top">
+                          <span className="tc-stakes tnum">{r.sb} / {r.bb}<span className="u">{sym}</span></span>
+                          <span className="tc-tags"><span className="gametag">NLHE</span><span className="tc-size">{sizeLabel}</span></span>
                         </div>
-                      </div>
+                        <div className="tc-felt">
+                          <span className="tc-suit" style={{ transform: `translate(-50%, -52%) rotate(${tilt}deg)`, color: red ? "rgba(190,80,80,.075)" : "rgba(217,171,74,.07)" }}>{suit}</span>
+                          {seats.map((s, i) => <span key={i} className={"tc-seat" + (s.on ? " on" : "")} style={{ left: s.x + "%", top: s.y + "%" }} />)}
+                          <div className="tc-center">
+                            {r.inHand ? (
+                              <React.Fragment>
+                                {r.pot > 0 && <span className="tc-pot tnum">{r.pot.toFixed(2)}<span className="u">{sym}</span></span>}
+                                <span className="tc-live"><span className="dot" />hand in play</span>
+                              </React.Fragment>
+                            ) : (
+                              <span className="tc-wait">{r.seated > 0 ? "waiting for players" : "open table — be first"}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="tc-bottom">
+                          <span className="tc-rake">rake <b>{r.rake}%</b> · cap {r.cap} · no flop no drop</span>
+                          <span className="tc-actions">
+                            {full
+                              ? <span className="btn-sm full">Full · watch</span>
+                              : <span className="btn-sm join">{r.seated === 0 ? "Sit first" : `Join · ${r.seated}/${r.size}`}</span>}
+                          </span>
+                        </div>
+                      </a>
                     );
                   })}
                 </div>
@@ -216,6 +267,8 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
   }
 
   const fmtSplit = (bps) => bps.map((b) => (b / 100) + "%").join(" / ");
+  // Private (approval) tournaments are invite-by-link — list them only for their host.
+  const visible = (list || []).filter((t) => !t.approvalRequired || (addr && t.creator.toLowerCase() === addr.toLowerCase()));
 
   return (
     <React.Fragment>
@@ -223,7 +276,7 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
       {showCreate && <CreateTournamentModal close={closeCreate} onDone={() => { closeCreate(); load(); }} act={act} busy={busy} />}
       {list == null ? (
         <div style={{ padding: 50, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>Loading tournaments…</div>
-      ) : list.length === 0 ? (
+      ) : visible.length === 0 ? (
         <div style={{ textAlign: "center", padding: "70px 20px", color: "var(--muted)", fontFamily: "var(--label)" }}>
           <div style={{ fontSize: 30, marginBottom: 10 }}>♠</div>
           <div style={{ fontFamily: "var(--mono)", fontSize: 18, color: "var(--text)" }}>No tournaments yet</div>
@@ -235,7 +288,7 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
             <span className="h">Tournament</span><span className="h">Buy-in · split</span><span className="h">Prize pool</span>
             <span className="h c">Entrants</span><span className="h">Status</span><span className="h r">Action</span>
           </div>
-          {list.map((t) => {
+          {visible.map((t) => {
             const cost = t.buyIn + t.fee;
             const statusCls = ["registering", "running", "finished", "finished"][t.status];
             const reg = mine[t.id];
@@ -244,7 +297,7 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
               <div key={t.id} className="drow" style={{ gridTemplateColumns: TRN_COLS }}>
                 <div className="cell-tname">
                   <span className="nm">SNG #{t.id} · {t.maxPlayers}-max</span>
-                  <span className="meta"><span>{Number(t.startStack)} chips</span><span>by {t.creator.slice(0, 6)}…</span>{t.pool > t.buyIn * BigInt(t.registered) && <span className="bnt">◆ sponsored</span>}</span>
+                  <span className="meta"><span>{Number(t.startStack)} chips</span><span>by {t.creator.slice(0, 6)}…</span>{t.pool > t.buyIn * BigInt(t.registered) && <span className="bnt">◆ sponsored</span>}{t.hostBps > 0 && <span className="bnt" style={{ color: "var(--gold, #e8c15a)" }}>★ host {t.hostBps / 100}%</span>}{t.approvalRequired && <span className="bnt">● private</span>}{isCreator && t.pendingCount > 0 && <span className="bnt">{t.pendingCount} applied</span>}</span>
                 </div>
                 <div className="buyincell">
                   <span className="bi tnum">{Number(SP.fmt(cost, 4))}<span className="u">{sym}</span></span>
@@ -257,12 +310,13 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
                 <div className="regcell tnum">{t.registered}/{t.maxPlayers}{t.status === 1 && <span className="u">{t.remaining} left</span>}</div>
                 <div><span className={"statuschip " + statusCls}>{SP.TRN_STATUS[t.status]}</span></div>
                 <div className="rowactions">
-                  {t.status === 0 && !connected && <button className="btn-sm join" onClick={connect}>Connect</button>}
-                  {t.status === 0 && connected && !reg && <button className="btn-sm join" disabled={busy} onClick={() => act("Register", () => SP.sdk.registerTournament(t.id, cost))}>Register {Number(SP.fmt(cost, 4))}</button>}
-                  {t.status === 0 && connected && reg && <button className="btn-sm" disabled={busy} onClick={() => act("Unregister", () => SP.sdk.unregisterTournament(t.id))}>Unregister</button>}
-                  {t.status === 0 && connected && isCreator && t.registered >= 2 && <button className="btn-sm join" disabled={busy} onClick={() => act("Start", () => SP.sdk.startTournament(t.id))}>Start now</button>}
-                  {t.status === 1 && <a className="btn-sm join" href={"table.html?t=" + t.tableId}>{reg ? "Play →" : "Observe"}</a>}
-                  {t.status >= 2 && <span style={{ color: "var(--muted)", fontFamily: "var(--label)", fontSize: 12 }}>—</span>}
+                  <a className="btn-sm" href={"tournament?id=" + t.id}>View</a>
+                  {t.status === 0 && t.approvalRequired && !isCreator && <a className="btn-sm join" href={"tournament?id=" + t.id}>Apply</a>}
+                  {t.status === 0 && !t.approvalRequired && !connected && <button className="btn-sm join" onClick={connect}>Connect</button>}
+                  {t.status === 0 && !t.approvalRequired && connected && !reg && <button className="btn-sm join" disabled={busy} onClick={() => act("Register", () => SP.sdk.registerTournament(t.id, cost))}>Register</button>}
+                  {t.status === 0 && !t.approvalRequired && connected && reg && <button className="btn-sm" disabled={busy} onClick={() => act("Unregister", () => SP.sdk.unregisterTournament(t.id))}>Unregister</button>}
+                  {t.status === 0 && connected && isCreator && t.registered >= 2 && <button className="btn-sm join" disabled={busy} onClick={() => act("Start", () => SP.sdk.startTournament(t.id))}>Start</button>}
+                  {t.status === 1 && <a className="btn-sm join" href={"table?t=" + t.tableId}>{reg ? "Play →" : "Observe"}</a>}
                 </div>
               </div>
             );
@@ -388,43 +442,150 @@ function SngTab({ connected, connect, addr }) {
   );
 }
 
-function CreateTournamentModal({ close, onDone, act, busy }) {
-  const sym = SP.NETWORK.currency.symbol;
-  const [f, setF] = uS({ buyIn: "0.5", fee: "0.05", maxPlayers: "6", startStack: "1500", sb: "10", bb: "20", levelMin: "5", split: "65/35", sponsor: "0" });
-  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
-  const splitBps = f.split.split("/").map((s) => Math.round(parseFloat(s.trim()) * 100)).filter((n) => !isNaN(n));
-  const splitOk = splitBps.length > 0 && splitBps.reduce((a, b) => a + b, 0) === 10000;
+// LePoker-style blind schedules. Each preset = start stack + per-level rows
+// [smallBlind, bigBlind, ante] at a common per-level duration.
+const MK = (mins, rows) => rows.map(([sb, bb, ante]) => ({ sb, bb, ante, durationSecs: mins * 60 }));
+// Deep enough that no allowed field (up to 45 players) can outlast the final
+// level: the last blinds dwarf the total chips in play. Contract caps custom
+// structures at 40 levels.
+const STRUCTURES = {
+  slow: { label: "Slow", stack: 2000, mins: 5, levels: MK(5, [[10, 20, 2], [20, 40, 4], [30, 60, 7], [40, 80, 9], [50, 100, 12], [60, 120, 14], [80, 160, 19], [100, 200, 24], [125, 250, 30], [150, 300, 36], [175, 350, 42], [200, 400, 48], [250, 500, 60], [300, 600, 72], [400, 800, 96], [500, 1000, 120], [600, 1200, 144], [800, 1600, 192], [1000, 2000, 240], [1250, 2500, 300], [1500, 3000, 360], [2000, 4000, 480], [2500, 5000, 600], [3000, 6000, 720]]) },
+  standard: { label: "Standard", stack: 5000, mins: 3, levels: MK(3, [[25, 50, 6], [30, 60, 7], [40, 80, 9], [50, 100, 12], [60, 120, 14], [80, 160, 19], [90, 180, 21], [100, 200, 24], [125, 250, 30], [150, 300, 36], [200, 400, 48], [250, 500, 60], [300, 600, 72], [400, 800, 96], [500, 1000, 120], [600, 1200, 144], [800, 1600, 192], [1000, 2000, 240], [1250, 2500, 300], [1500, 3000, 360], [2000, 4000, 480], [2500, 5000, 600], [3000, 6000, 720], [4000, 8000, 960]]) },
+  turbo: { label: "Turbo", stack: 10000, mins: 2, levels: MK(2, [[50, 100, 12], [60, 120, 14], [80, 160, 19], [100, 200, 24], [125, 250, 30], [150, 300, 36], [200, 400, 48], [250, 500, 60], [300, 600, 72], [400, 800, 96], [500, 1000, 120], [600, 1200, 144], [800, 1600, 192], [1000, 2000, 240], [1250, 2500, 300], [1500, 3000, 360], [2000, 4000, 480], [2500, 5000, 600], [3000, 6000, 720], [4000, 8000, 960], [5000, 10000, 1200], [6000, 12000, 1440]]) },
+};
+
+// Blind-structure viewer + editor (LePoker-style level table).
+function StructureEditor({ levels, onSave, close }) {
+  const [rows, setRows] = uS(levels.map((l) => ({ sb: l.sb, bb: l.bb, ante: l.ante, min: Math.max(1, Math.round(l.durationSecs / 60)) })));
+  const upd = (i, k, v) => setRows((r) => r.map((row, j) => (j === i ? { ...row, [k]: v } : row)));
+  const del = (i) => setRows((r) => (r.length > 1 ? r.filter((_, j) => j !== i) : r));
+  const add = () => setRows((r) => { const last = r[r.length - 1] || { sb: 10, bb: 20, ante: 0, min: 5 }; return [...r, { sb: Number(last.bb), bb: Number(last.bb) * 2, ante: Math.round(Number(last.bb) / 8), min: last.min }]; });
+  const save = () => { onSave(rows.map((r) => ({ sb: parseInt(r.sb, 10) || 0, bb: parseInt(r.bb, 10) || 0, ante: parseInt(r.ante, 10) || 0, durationSecs: Math.max(15, (parseInt(r.min, 10) || 1) * 60) }))); close(); };
   const stop = (e) => e.stopPropagation();
+  const inp = { width: "100%", background: "var(--panel,#141420)", border: "1px solid var(--line)", color: "var(--text)", borderRadius: 6, padding: "4px 6px", fontFamily: "var(--mono)", fontSize: 13 };
   return (
-    <div className="lt-modalbg" onClick={close}>
-      <div className="lt-modal" onClick={stop} style={{ width: "min(430px,92vw)" }}>
-        <h3>Create tournament</h3>
-        <p className="note">Players' buy-ins build the prize pool — or sponsor the pool yourself (or both). Winners split it exactly how you set below.</p>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <div><label>Buy-in ({sym})</label><input value={f.buyIn} onChange={set("buyIn")} /></div>
-          <div><label>Fee ({sym})</label><input value={f.fee} onChange={set("fee")} /></div>
-          <div><label>Players (2–9)</label><input value={f.maxPlayers} onChange={set("maxPlayers")} /></div>
-          <div><label>Start stack (chips)</label><input value={f.startStack} onChange={set("startStack")} /></div>
-          <div><label>Blinds (sb)</label><input value={f.sb} onChange={set("sb")} /></div>
-          <div><label>Blinds (bb)</label><input value={f.bb} onChange={set("bb")} /></div>
-          <div><label>Level (minutes)</label><input value={f.levelMin} onChange={set("levelMin")} /></div>
-          <div><label>Sponsor pool ({sym})</label><input value={f.sponsor} onChange={set("sponsor")} /></div>
+    <Portal><div className="lt-modalbg" onClick={close}>
+      <div className="lt-modal" onClick={stop} style={{ width: "min(520px,95vw)", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+        <h3>Blind structure</h3>
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "26px 1.6fr 0.8fr 0.7fr 30px", gap: 6, fontFamily: "var(--label)", fontSize: 10, textTransform: "uppercase", color: "var(--muted)", padding: "4px 0" }}>
+            <span>Lv</span><span>Blinds</span><span>Ante</span><span>Min</span><span></span>
+          </div>
+          {rows.map((r, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "26px 1.6fr 0.8fr 0.7fr 30px", gap: 6, alignItems: "center", padding: "3px 0" }}>
+              <span style={{ fontFamily: "var(--mono)", color: "var(--muted)", fontSize: 12 }}>{i + 1}</span>
+              <span style={{ display: "flex", gap: 4, alignItems: "center" }}><input style={inp} value={r.sb} onChange={(e) => upd(i, "sb", e.target.value)} /><span style={{ color: "var(--muted)" }}>/</span><input style={inp} value={r.bb} onChange={(e) => upd(i, "bb", e.target.value)} /></span>
+              <input style={inp} value={r.ante} onChange={(e) => upd(i, "ante", e.target.value)} />
+              <input style={inp} value={r.min} onChange={(e) => upd(i, "min", e.target.value)} />
+              <button type="button" className="btn-sm" style={{ padding: "2px 6px" }} onClick={() => del(i)}>✕</button>
+            </div>
+          ))}
+          <button type="button" className="btn-sm" style={{ marginTop: 8 }} onClick={add}>+ Add level</button>
         </div>
-        <label>Payout split, % (e.g. 65/35 or 50/30/20)</label>
-        <input value={f.split} onChange={set("split")} style={{ borderColor: splitOk ? undefined : "var(--danger, #ef5a6f)" }} />
-        {!splitOk && <p className="note" style={{ color: "var(--danger, #ef5a6f)" }}>Percentages must add up to exactly 100.</p>}
-        <div className="row">
+        <div className="row" style={{ marginTop: 12 }}>
           <button className="pill" onClick={close}>Cancel</button>
-          <button className="pill primary" disabled={busy || !splitOk} onClick={() => act("Create tournament", async () => {
-            await SP.sdk.createTournament({
-              buyInEth: f.buyIn || 0, feeEth: f.fee || 0, maxPlayers: parseInt(f.maxPlayers, 10),
-              startStack: parseInt(f.startStack, 10), sbStart: parseInt(f.sb, 10), bbStart: parseInt(f.bb, 10),
-              levelDur: Math.max(30, Math.round(parseFloat(f.levelMin) * 60)), payoutBps: splitBps, sponsorEth: f.sponsor || 0,
-            });
-          }).then(onDone)}>Create</button>
+          <button className="pill primary" onClick={save}>Save structure</button>
         </div>
       </div>
-    </div>
+    </div></Portal>
+  );
+}
+
+function CreateTournamentModal({ close, onDone, act, busy }) {
+  const sym = SP.NETWORK.currency.symbol;
+  const [f, setF] = uS({
+    mode: "buyin", buyIn: "0.5", fee: "0.05", sponsor: "1",
+    maxPlayers: "6", seatsPerTable: "9", startStack: String(STRUCTURES.standard.stack),
+    struct: "standard", levels: STRUCTURES.standard.levels, actionSecs: "15",
+    schedule: "open", startAt: "", priv: false, split: "65/35", hostReward: false,
+  });
+  const [showStruct, setShowStruct] = uS(false);
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const pick = (k, v) => () => setF((s) => ({ ...s, [k]: v }));
+  const sponsored = f.mode === "sponsored";
+  const splitBps = f.split.split("/").map((s) => Math.round(parseFloat(s.trim()) * 100)).filter((n) => !isNaN(n));
+  const splitOk = splitBps.length > 0 && splitBps.reduce((a, b) => a + b, 0) === 10000;
+  const startTime = f.schedule === "scheduled" && f.startAt ? Math.floor(new Date(f.startAt).getTime() / 1000) : 0;
+  const scheduleOk = f.schedule === "open" || startTime > Math.floor(Date.now() / 1000) + 60;
+  const sponsorOk = !sponsored || parseFloat(f.sponsor) > 0;
+  const ok = splitOk && scheduleOk && sponsorOk;
+  const stop = (e) => e.stopPropagation();
+  const Seg = ({ k, opts }) => (
+    <div className="chipset" style={{ marginTop: 6 }}>{opts.map(([v, l]) => <button key={v} type="button" className={f[k] === v ? "on" : ""} onClick={pick(k, v)}>{l}</button>)}</div>
+  );
+  return (
+    <Portal><div className="lt-modalbg" onClick={close}>
+      <div className="lt-modal" onClick={stop} style={{ width: "min(480px,94vw)", maxHeight: "92vh", overflowY: "auto" }}>
+        <h3>Create tournament</h3>
+        {showStruct && <StructureEditor levels={f.levels} onSave={(lv) => setF((s) => ({ ...s, levels: lv, struct: "custom" }))} close={() => setShowStruct(false)} />}
+
+        <label>Prize pool</label>
+        <Seg k="mode" opts={[["buyin", "Buy-in pool"], ["sponsored", "I sponsor it · free entry"]]} />
+        {sponsored ? (
+          <div style={{ marginTop: 8 }}><label>Sponsor amount ({sym}) <Hint text="You fund the whole prize pool — entry is free for everyone else." /></label><input value={f.sponsor} onChange={set("sponsor")} /></div>
+        ) : (
+          <div style={{ marginTop: 8 }}>
+            <label>Buy-in ({sym}) <Hint text="Entry cost per player. 90% builds the prize pool; a flat 10% platform fee goes to the house." /></label>
+            <input value={f.buyIn} onChange={set("buyIn")} />
+            <p className="note" style={{ marginTop: 4 }}>Pool gets 90% · 10% platform fee</p>
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+          <div><label>Players (2–45)</label><input value={f.maxPlayers} onChange={set("maxPlayers")} /></div>
+          <div><label>Start stack (chips)</label><input value={f.startStack} onChange={set("startStack")} /></div>
+          <div><label>Action time (sec) <Hint text="Seconds each player has to act before they're auto-folded." /></label><input value={f.actionSecs} onChange={set("actionSecs")} /></div>
+          <div><label>Payout split % <Hint text="How the prize pool is divided by finishing place. '65/35' → winner gets 65%, runner-up 35%. '50/30/20' → top-3 paid: 1st 50%, 2nd 30%, 3rd 20%. Any number of places (up to player count); must add up to 100." /></label><input value={f.split} onChange={set("split")} style={{ borderColor: splitOk ? undefined : "var(--danger,#ef5a6f)" }} /></div>
+        </div>
+        {!splitOk && <p className="note" style={{ color: "var(--danger,#ef5a6f)" }}>Percentages must add up to exactly 100 (e.g. 65/35 or 50/30/20).</p>}
+
+        <label style={{ marginTop: 10 }}>Table size <Hint text="Seats per table. With more players than this it becomes multi-table (MTT) — the number of tables is calculated automatically." /></label>
+        <Seg k="seatsPerTable" opts={[["2", "Heads-up"], ["6", "6-max"], ["9", "9-max"]]} />
+        <p className="note" style={{ marginTop: 4 }}>{(() => { const ts = parseInt(f.seatsPerTable || "9", 10), mp = parseInt(f.maxPlayers || "0", 10); const nt = ts > 0 && mp > 0 ? Math.ceil(mp / ts) : 1; return nt > 1 ? `⌗ Multi-table: ${nt} tables of up to ${ts}` : `⌗ Single table (${ts}-max)`; })()}</p>
+
+        <label style={{ marginTop: 10 }}>Blind structure <Hint text="How fast blinds rise. Pick a preset (Slow/Standard/Turbo) or edit the levels yourself." /></label>
+        <div className="chipset" style={{ marginTop: 6 }}>
+          {["slow", "standard", "turbo"].map((k) => <button key={k} type="button" className={f.struct === k ? "on" : ""} onClick={() => setF((s) => ({ ...s, struct: k, levels: STRUCTURES[k].levels, startStack: String(STRUCTURES[k].stack) }))}>{STRUCTURES[k].label}</button>)}
+          <button type="button" className={f.struct === "custom" ? "on" : ""} onClick={() => setF((s) => ({ ...s, struct: "custom" }))}>Custom</button>
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 6 }}>
+          <span className="note" style={{ flex: 1 }}>{f.levels.length} levels · start {f.levels[0] ? f.levels[0].sb + "/" + f.levels[0].bb : "—"} · {Math.round((f.levels[0]?.durationSecs || 0) / 60)} min/level</span>
+          <button type="button" className="btn-sm" onClick={() => setShowStruct(true)}>View / edit</button>
+        </div>
+
+        <label>Start <Hint text="Open = starts when full or when you press Start. Scheduled = starts at a set time with a live countdown for everyone." /></label>
+        <Seg k="schedule" opts={[["open", "When full / I start"], ["scheduled", "Scheduled time"]]} />
+        {f.schedule === "scheduled" && <input type="datetime-local" value={f.startAt} onChange={set("startAt")} style={{ marginTop: 6, borderColor: scheduleOk ? undefined : "var(--danger,#ef5a6f)" }} />}
+        {f.schedule === "scheduled" && <p className="note" style={{ marginTop: 4 }}>Your local time ({Intl.DateTimeFormat().resolvedOptions().timeZone}) — everyone sees a live countdown.</p>}
+        {f.schedule === "scheduled" && !scheduleOk && <p className="note" style={{ color: "var(--danger,#ef5a6f)" }}>Pick a time at least a minute in the future.</p>}
+
+        {!sponsored && (
+          <label style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontFamily: "var(--label)" }}>
+            <input type="checkbox" checked={f.hostReward} onChange={(e) => setF((s) => ({ ...s, hostReward: e.target.checked }))} style={{ width: "auto" }} />
+            <span>Host reward — <b style={{ color: "var(--gold, #e8c15a)" }}>5% of the prize pool</b> goes to me for organizing <Hint text="Paid to you automatically when the tournament finishes. Prizes are split from the remaining 95%. Shown to players on the tournament card." /></span>
+          </label>
+        )}
+        <label style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontFamily: "var(--label)" }}>
+          <input type="checkbox" checked={f.priv} onChange={(e) => setF((s) => ({ ...s, priv: e.target.checked }))} style={{ width: "auto" }} />
+          Private — players apply and I approve each (invite by link)
+        </label>
+
+        <div className="row" style={{ marginTop: 14 }}>
+          <button className="pill" onClick={close}>Cancel</button>
+          <button className="pill primary" disabled={busy || !ok} onClick={() => act("Create tournament", async () => {
+            await SP.sdk.createTournament({
+              buyInEth: sponsored ? 0 : ((parseFloat(f.buyIn) || 0) * 0.9).toFixed(6), feeEth: sponsored ? 0 : ((parseFloat(f.buyIn) || 0) * 0.1).toFixed(6),
+              maxPlayers: parseInt(f.maxPlayers, 10), seatsPerTable: parseInt(f.seatsPerTable || "0", 10), startStack: parseInt(f.startStack, 10),
+              actionSecs: parseInt(f.actionSecs || "15", 10), structure: f.levels,
+              startTime, approvalRequired: f.priv, payoutBps: splitBps, sponsorEth: sponsored ? (f.sponsor || 0) : 0,
+              hostBps: !sponsored && f.hostReward ? 500 : 0,
+            });
+            const newId = (await SP.sdk.tournamentCount()) - 1;
+            location.href = "tournament?id=" + newId; // land on the page (invite link + applicants)
+          })}>Create</button>
+        </div>
+      </div>
+    </div></Portal>
   );
 }
 
@@ -432,7 +593,12 @@ function mountScaleLobby() {
   const scaler = document.getElementById("scaler"); if (!scaler) return;
   const app = scaler.querySelector(".app"); if (!app) return;
   const fit = () => {
-    const s = Math.min((window.innerWidth - 24) / 1600, (window.innerHeight - 84) / 1000, 1);
+    if (window.innerWidth <= 760) { // fluid mobile layout (mobile.css) - no stage scaling
+      app.style.transform = ""; app.style.position = ""; app.style.top = ""; app.style.left = "";
+      scaler.style.width = ""; scaler.style.height = "";
+      return;
+    }
+    const s = Math.min((window.innerWidth - 24) / 1600, (window.innerHeight - 84) / 1000);
     app.style.transform = `scale(${s})`; app.style.transformOrigin = "top left"; app.style.position = "absolute"; app.style.top = "0"; app.style.left = "0";
     scaler.style.width = 1600 * s + "px"; scaler.style.height = 1000 * s + "px";
   };

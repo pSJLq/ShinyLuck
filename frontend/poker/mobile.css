@@ -1,0 +1,114 @@
+/* =========================================================================
+   ShinyPoker — mobile layout (≤760px).
+   Desktop is a fixed 1600×1000 stage scaled to fit; on phones the mountScale
+   functions skip scaling entirely and this sheet reflows the app into a
+   fluid column: compact top bar, full-width felt, the side rail as a
+   bottom sheet, and a thumb-sized action bar.
+   ========================================================================= */
+@media (max-width: 760px) {
+  body { overflow-x: hidden; }
+  /* #stage is a place-items:center grid → #root sizes to its CONTENT's
+     min-width and can exceed the viewport (the .scaler's width:100% then
+     inherits the overflow). Pin the whole chain to the viewport. */
+  #root { width: 100%; min-width: 0; }
+  .scaler { width: 100% !important; height: auto !important; }
+  .app { width: 100% !important; height: 100dvh !important; border: 0 !important; border-radius: 0 !important;
+    box-shadow: none !important; grid-template-rows: auto 1fr; }
+
+  /* ---- top bar: one compact row ---- */
+  .topbar { gap: 6px; padding: 6px 8px; flex-wrap: nowrap; overflow: hidden; }
+  .topbar .switcher, .topbar .sep, .topbar .session, .topbar .wordmark { display: none !important; }
+  .topbar .group { gap: 6px; }
+  /* of the NLHE / Blinds / Hand pills only the blinds survive */
+  .topbar .group .metapill:first-child, .topbar .group .metapill:nth-child(3) { display: none; }
+  .metapill { height: 28px; padding: 0 8px; font-size: 10px; white-space: nowrap; }
+  .metapill b, .metapill .k { white-space: nowrap; }
+  .wallet { height: 30px; padding: 0 8px 0 7px; gap: 6px; }
+  .wallet .net { display: none; }
+  .iconbtn { width: 32px; height: 32px; flex-shrink: 0; }
+
+  /* ---- tournament HUD: swipeable strip ---- */
+  .trn-hud { top: 45px; flex-wrap: nowrap; overflow-x: auto; gap: 14px; padding: 6px 10px;
+    font-size: 11px; white-space: nowrap; scrollbar-width: none; }
+  .trn-hud::-webkit-scrollbar { display: none; }
+
+  /* ---- table: full width; the side rail becomes a bottom sheet ---- */
+  .mainrow { grid-template-columns: 1fr !important; }
+  .felt { inset: 42px 8px 224px; border-radius: 150px; }
+  .siderail { position: fixed; left: 0; right: 0; bottom: 0; top: auto; height: 64dvh; z-index: 320;
+    transform: translateY(112%); transition: transform .28s ease; border-left: 0;
+    border-top: 1px solid var(--line-2); border-radius: 16px 16px 0 0;
+    box-shadow: 0 -18px 60px rgba(0, 0, 0, .6); }
+  .siderail.open { transform: translateY(0); }
+  .railclose { display: grid !important; }
+  .railfab { display: grid !important; }
+
+  /* ---- seats & cards sized for a ~380px felt ---- */
+  .seatcard { min-width: 92px; padding: 5px 8px 7px; gap: 6px; }
+  [data-dir="b"] .seatcard { width: 102px; padding: 5px 8px 7px; gap: 3px; }
+  .avatar, [data-dir="b"] .seatcard .avatar { width: 30px; height: 30px; font-size: 11px; }
+  .seatinfo .nm { font-size: 9.5px; max-width: 88px; }
+  .seatinfo .stack { font-size: 12px; }
+  .seatinfo .status { font-size: 8.5px; }
+  .btnmark { width: 18px; height: 18px; font-size: 8.5px; }
+  .board { gap: 4px; }
+  .board .card, .board .slot { width: 42px; height: 60px; }
+  .board .card .rank { font-size: 13px; }
+  .board .card .center-suit svg { width: 18px; height: 18px; }
+  .pot .v { font-size: 15px; }
+  .zkbadge { font-size: 8.5px; padding: 3px 8px; }
+  .hole .card { width: 52px; height: 74px; }
+  .hole .card .rank { font-size: 15px; }
+  .hole .card .center-suit svg { width: 22px; height: 22px; }
+  .herozone { bottom: 168px; gap: 5px; }
+  .heroinfo { padding: 5px 8px 5px 6px; gap: 8px; }
+  .heroinfo .avatar { width: 30px; height: 30px; }
+  .winbanner { top: 58%; }
+  .winbanner .hand { font-size: 19px; }
+  .actchip { font-size: 9px; padding: 2px 8px; }
+
+  /* ---- action bar: column, thumb-sized ---- */
+  .actionbar { right: 0 !important; flex-direction: column; align-items: stretch; gap: 8px;
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .helpers { flex-direction: row; }
+  .helpers .helperchip { height: 26px; font-size: 9.5px; padding: 0 8px; }
+  .betcontrols { max-width: none; }
+  .betinput { width: 104px; height: 34px; }
+  .timebank { position: absolute; right: 10px; top: -58px; }
+  .actions { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 8px; }
+  .abtn { min-width: 0; height: 56px; padding: 0 8px; }
+  .abtn .lbl { font-size: 11.5px; }
+  .abtn .amt { font-size: 14px; }
+  .abtn .key { display: none; }
+  .lt-toast { bottom: 200px; max-width: 94vw; font-size: 12px; }
+
+  /* ---- lobby: rows become wrapped cards ---- */
+  /* the .lobby grid's implicit column sizes to the widest item's MIN-CONTENT
+     (the tab strip ≈ 530px) and every section stretches to it — clamp the
+     track to the viewport instead; the tab strip already scrolls */
+  .lobby { grid-template-columns: minmax(0, 1fr); }
+  .lobby > * { min-width: 0; }
+  .lobbyhead { flex-direction: column; gap: 10px; padding: 12px 10px 0; }
+  .lobbytabs { overflow-x: auto; scrollbar-width: none; max-width: 100%; }
+  .lobbytabs button { white-space: nowrap; flex-shrink: 0; }
+  .lobbybody, .listscroll { overflow-x: hidden; }
+  .dtable { min-width: 0 !important; width: 100%; }
+  .drow, .sngrow { width: 100%; box-sizing: border-box; }
+  .statstrip { flex-wrap: wrap; gap: 8px 14px; }
+  .subbar { flex-wrap: wrap; gap: 8px; padding: 8px 10px; height: auto; }
+  .dthead { display: none !important; }
+  .drow, .sngrow { display: flex !important; flex-wrap: wrap; align-items: center;
+    gap: 6px 14px; padding: 12px 10px; }
+  .drow .rowactions, .sngrow .rowactions { width: 100%; justify-content: flex-end; }
+  .sngsplit { grid-template-columns: 1fr; }
+  .lt-modal { width: min(440px, 96vw); max-height: 88dvh; overflow-y: auto; }
+}
+
+/* desktop: the mobile-only controls stay hidden */
+.railfab { display: none; position: absolute; right: 10px; bottom: 236px; z-index: 40; width: 46px; height: 46px;
+  border-radius: 50%; place-items: center; border: 1px solid var(--accent-32, rgba(217,171,74,.32));
+  background: rgba(16, 14, 8, .94); color: var(--accent-soft, #f2d78a); cursor: pointer;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .5); }
+.railfab svg { width: 21px; height: 21px; }
+.railclose { display: none; width: 30px; height: 30px; place-items: center; background: transparent;
+  border: 0; color: var(--muted, #9a9aa8); font-size: 16px; cursor: pointer; }
