@@ -133,14 +133,28 @@ function LiveTable() {
   const feltWrapRef = useRef(null);
   const reducedMo = prefs.reduced || !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
-  const tableId = SP.tableId;
+  const [tableId, setTableId] = useState(SP.tableId); // switchable WITHOUT a page reload (LePoker-style)
+  const [ctl, setCtl] = useState(undefined); // table controller: undefined = not resolved yet, zero = cash, else = tournament
+  const ZERO_CTL = "0x0000000000000000000000000000000000000000";
   const canvasRef = useRef(null);
   const fieldRef = useRef(null);
 
   useEffect(() => { localStorage.setItem("sp_theme", theme); }, [theme]);
 
   // live snapshot poll
-  useEffect(() => SP.sdk.watch(tableId, setSnap, 1500), []);
+  useEffect(() => SP.sdk.watch(tableId, setSnap, 1500), [tableId]);
+
+  // The controller decides the whole render mode (chip formatting, seats
+  // managed by a tournament vs open sit-down). Resolve it BEFORE first paint —
+  // tournament tables used to flash cash-table UI ("+ Sit" seats, wei-formatted
+  // blinds) for a second until the slower tournament poll landed.
+  useEffect(() => {
+    let stop = false;
+    SP.sdk.tableController(tableId)
+      .then((a) => { if (!stop) setCtl((a || ZERO_CTL).toLowerCase()); })
+      .catch(() => { if (!stop) setCtl(ZERO_CTL); });
+    return () => { stop = true; };
+  }, [tableId]);
 
   // auto-restore an existing email (Privy) session — now and whenever Privy boots
   useEffect(() => {
@@ -289,7 +303,7 @@ function LiveTable() {
     poll();
     const iv = setInterval(poll, 5000);
     return () => { stop = true; clearInterval(iv); };
-  }, [connected]);
+  }, [connected, tableId]);
 
   // resolve on-chain nicknames for everyone seated (SDK caches per address)
   useEffect(() => {
@@ -324,7 +338,8 @@ function LiveTable() {
     if (trn.status === 1 && trn.reg && trn.myTable >= 0 && trn.myTable !== tableId) {
       moveRef.current = true;
       setMovedTo(trn.myTable);
-      setTimeout(() => { location.href = "table?t=" + trn.myTable; }, 2600);
+      const dest = trn.myTable;
+      setTimeout(() => switchTable(dest), 2600); // in-place switch — no reload
     }
   }, [trn]);
 
@@ -480,7 +495,25 @@ function LiveTable() {
     return ok;
   };
 
-  if (!snap) return <div className="center-load">Loading table…</div>;
+  /// LePoker-style: move to another table of the event IN PLACE — no page
+  /// reload. Resets every per-table piece of state; the pollers re-key off
+  /// tableId; the URL stays shareable via replaceState.
+  function switchTable(tid) {
+    if (tid === tableId) return;
+    setSnap(null); setCtl(undefined);
+    setHoles({}); setReveals({}); setSdWin(null); setPendingAct(null);
+    setLastActs({}); setPotFly(null); setPreAct(null); setBetValue(0);
+    setAnim({ dealing: false, flipFrom: 99, winnerSeat: -1, won: 0 });
+    setMovedTo(null); setModal(null);
+    moveRef.current = false; wasSeatedHereRef.current = false;
+    gotHolesRef.current = {};
+    prevRef.current = { handId: 0, boardLen: 0, inProgress: false, stacks: {} };
+    [dealTimerRef, winTimerRef, sdTimerRef, potFlyRef, holeRetryRef].forEach((r) => clearTimeout(r.current));
+    try { history.replaceState(null, "", "table?t=" + tid); } catch {}
+    setTableId(tid);
+  }
+
+  if (!snap || ctl === undefined) return <div className="center-load">Loading table…</div>;
 
   const { cfg, hand, seats, mySeat } = snap;
   const maxSeats = cfg.maxSeats;
@@ -514,7 +547,7 @@ function LiveTable() {
     return null;
   };
   // rotate so my seat sits at the bottom
-  CHIPS = !!trn; // tournament table → format values as chips, not wei
+  CHIPS = !!trn || ctl !== ZERO_CTL; // controller ≠ zero → chip units, even before the trn poll lands
   const positions = POS[maxSeats] || (maxSeats < 6 ? POS[6] : POS[9]);
   const view = (i) => (mySeat >= 0 ? (i - mySeat + maxSeats) % maxSeats : i % maxSeats);
   const seatPos = (i) => positions[view(i)] || positions[0];
@@ -573,7 +606,7 @@ function LiveTable() {
           <div className="sep" />
           <div className="group">
             <span className="metapill"><span className="k">NLHE</span><b>{maxSeats}-MAX</b></span>
-            <span className="metapill"><span className="k">{SPT("Blinds")}</span><b>{NV(cfg.smallBlind)} / {NV(cfg.bigBlind)}</b></span>
+            <span className="metapill"><span className="k">{SPT("Blinds")}</span><b>{CHIPS ? `${fmtChips(NV(cfg.smallBlind))} / ${fmtChips(NV(cfg.bigBlind))}` : `${NV(cfg.smallBlind)} / ${NV(cfg.bigBlind)}`}</b></span>
             <span className="metapill"><span className="k">{SPT("Hand")}</span><b>#{hand.handId}</b></span>
           </div>
           <div className="spacer" />
@@ -612,7 +645,7 @@ function LiveTable() {
             session={{
               active: sessionOn, busy,
               label: SP.sdk.backend === "privy" ? "Email wallet · headless (no popups)" : null,
-              cap: mySeat >= 0 ? NV(seats[mySeat].stack).toFixed(CHIPS ? 0 : 2) + " " + (CHIPS ? "chips" : SP.NETWORK.currency.symbol) : null,
+              cap: mySeat >= 0 ? (CHIPS ? fmtChips(NV(seats[mySeat].stack)) : NV(seats[mySeat].stack).toFixed(2)) + " " + (CHIPS ? "chips" : SP.NETWORK.currency.symbol) : null,
               onActivate: SP.sdk.backend === "injected" ? () => tx("Activate session", () => SP.sdk.activateSession()).then(() => setSessionOn(true)) : null,
               onRevoke: SP.sdk.backend === "privy"
                 ? () => { SP.sdk.signOut().finally(() => location.reload()); }
@@ -629,7 +662,7 @@ function LiveTable() {
             <div className="trn-hud">
               <span className="tag">{SPT("TOURNAMENT")} · {multi ? "MTT" : "SNG"} #{trn.id}</span>
               <span>{SPT("Level")} <b className="tnum">{trn.level + 1}</b></span>
-              <span>{SPT("Blinds")} <b className="tnum">{lsb} / {lbb}{lante ? ` (${SPT("ante")} ${lante})` : ""}</b></span>
+              <span>{SPT("Blinds")} <b className="tnum">{fmtChips(lsb)} / {fmtChips(lbb)}{lante ? ` (${SPT("ante")} ${fmtChips(lante)})` : ""}</b></span>
               {trn.status === 1 && nextIn != null && <span>{SPT("Next level")} <b className="tnum">{mm}:{ss}</b></span>}
               {trn.status === 1 && nextIn == null && <span className="tag">{SPT("Final level")}</span>}
               <span>{SPT("Players")} <b className="tnum">{trn.remaining}/{trn.registered}</b></span>
@@ -638,7 +671,7 @@ function LiveTable() {
               {multi && (
                 <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
                   {trn.tables.map((tid, i) => (
-                    <button key={tid} onClick={() => tid !== tableId && (location.href = "table?t=" + tid)}
+                    <button key={tid} onClick={() => switchTable(tid)}
                       title={tid === tableId ? null : SPT("Switch to this table")}
                       style={{ cursor: tid === tableId ? "default" : "pointer", fontFamily: "var(--mono)", fontSize: 11, padding: "3px 9px", borderRadius: 999,
                         border: "1px solid " + (tid === tableId ? "var(--accent, #d9ab4a)" : "var(--line-2, #3a3a48)"),
@@ -702,7 +735,7 @@ function LiveTable() {
               if (s.index === mySeat) return null; // hero is shown in the herozone
               const pos = seatPos(s.index);
               if (s.empty) {
-                if (trn) return null; // tournament seats are managed by the tournament
+                if (trn || ctl !== ZERO_CTL) return null; // tournament seats are managed by the tournament
                 return (
                   <div key={s.index} className="seat" style={{ left: pos.x + "%", top: pos.y + "%" }}>
                     <button className="emptyseat" onClick={() => connected ? setModal({ type: "sit", seat: s.index }) : connect()}>
@@ -766,7 +799,7 @@ function LiveTable() {
                     <span className="nm">YOU · {nameOf(addr)}</span>
                     <span className="stack tnum">{prefs.bbstacks && bbOf(seats[mySeat].stack) != null
                       ? <React.Fragment>{bbOf(seats[mySeat].stack)}<span className="u">BB</span></React.Fragment>
-                      : <React.Fragment>{NV(seats[mySeat].stack).toFixed(CHIPS ? 0 : 2)}<span className="u">{CHIPS ? "chips" : SP.NETWORK.currency.symbol}</span></React.Fragment>}</span>
+                      : <React.Fragment>{CHIPS ? fmtChips(NV(seats[mySeat].stack)) : NV(seats[mySeat].stack).toFixed(2)}<span className="u">{CHIPS ? "chips" : SP.NETWORK.currency.symbol}</span></React.Fragment>}</span>
                   </div>
                   <div className="hmark">{markerFor(mySeat) && <Marker kind={markerFor(mySeat)} />}</div>
                   <span className="hstatus">{seats[mySeat].allIn ? SPT("all-in") : seats[mySeat].folded ? SPT("folded") : seats[mySeat].sittingOut ? SPT("sitting out") : ""}</span>
@@ -791,7 +824,7 @@ function LiveTable() {
           <button className="railfab" title={SPT("chat")} onClick={() => setRailOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 12a8 8 0 0 1-8 8H4l2.2-2.6A8 8 0 1 1 21 12z"/></svg>
           </button>
-          <LiveSideRail tableId={tableId} snap={snap} connected={connected} mySeat={mySeat} mobileOpen={railOpen} onClose={() => setRailOpen(false)} />
+          <LiveSideRail key={tableId} tableId={tableId} snap={snap} connected={connected} mySeat={mySeat} mobileOpen={railOpen} onClose={() => setRailOpen(false)} />
         </div>
 
         {renderBar()}
@@ -805,7 +838,7 @@ function LiveTable() {
               <p className="note">{RUv
                 ? `Балансировка столов: ваше место теперь за столом #${movedTo}. Сейчас перенесём…`
                 : `Table balancing: your seat is now at table #${movedTo}. Taking you there…`}</p>
-              <button className="pill primary" style={{ width: "100%", marginTop: 10 }} onClick={() => (location.href = "table?t=" + movedTo)}>{RUv ? "Перейти сейчас →" : "Go now →"}</button>
+              <button className="pill primary" style={{ width: "100%", marginTop: 10 }} onClick={() => switchTable(movedTo)}>{RUv ? "Перейти сейчас →" : "Go now →"}</button>
             </div>
           </div>
         )}
@@ -892,11 +925,11 @@ function LiveTable() {
             <div style={{ fontFamily: "var(--label)", fontSize: 13, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--accent-soft)" }}>
               {RUv ? `Здесь вы наблюдаете — ваше место за столом #${trn.myTable}` : `You're observing — your seat is at table #${trn.myTable}`}
             </div>
-            <button className="pill" onClick={() => (location.href = "table?t=" + trn.myTable)}>{RUv ? "К своему столу →" : "Back to my table →"}</button>
+            <button className="pill" onClick={() => switchTable(trn.myTable)}>{RUv ? "К своему столу →" : "Back to my table →"}</button>
           </div>
         );
       }
-      return trn
+      return (trn || ctl !== ZERO_CTL)
         ? <StatusStrip text={SPT("Tournament table — you're observing")} sub={SPT("Seats are assigned by the tournament; register on its page to play")} accent="var(--muted)" />
         : <StatusStrip text={SPT("Take an empty seat to join")} sub={SPT("Click a “+ Sit” spot around the table")} accent="var(--muted)" />;
     }
