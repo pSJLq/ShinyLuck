@@ -19,6 +19,9 @@ const ROOM_ABI = [
   "function handCounter(uint256) view returns (uint64)",
   "function deposit() payable",
   "function withdraw(uint256)",
+  "function rakeCollected() view returns (uint256)",
+  "function withdrawRake(address,uint256)",
+  "function owner() view returns (address)",
   "function sitDown(uint256,uint8,uint128)",
   "function topUp(uint256,uint128)",
   "function leaveTable(uint256)",
@@ -34,13 +37,38 @@ const ROOM_ABI = [
 
 const TRN_ABI = [
   "function count() view returns (uint256)",
-  "function info(uint256) view returns (address creator,uint128 buyIn,uint128 fee,uint128 startStack,uint128 pool,uint8 maxPlayers,uint8 registered,uint8 status,uint8 remaining,uint256 tableId,uint16[] payoutBps)",
-  "function clock(uint256) view returns (uint64 startedAt,uint8 level,uint64 levelDur,uint128 sbStart,uint128 bbStart)",
+  "function info(uint256) view returns (address creator,uint128 buyIn,uint128 fee,uint128 startStack,uint128 pool,uint8 maxPlayers,uint8 registered,uint8 status,uint8 remaining,uint256 tableId,uint16[] payoutBps,bool approvalRequired,uint8 pendingCount)",
+  "function clock(uint256) view returns (uint64 startedAt,uint8 level,uint64 levelDur,uint128 curSb,uint128 curBb,uint128 curAnte,uint64 startTime)",
   "function isRegistered(uint256,address) view returns (bool)",
-  "function createTournament(uint128 buyIn,uint128 fee,uint8 maxPlayers,uint128 startStack,uint128 sbStart,uint128 bbStart,uint64 levelDur,uint16[] payoutBps) payable returns (uint256)",
+  "function hostBpsOf(uint256) view returns (uint16)",
+  "function isPending(uint256,address) view returns (bool)",
+  "function pendingEntries(uint256) view returns (address[])",
+  "function playersOf(uint256) view returns (address[])",
+  "function tablesOf(uint256) view returns (uint256[])",
+  "function structureOf(uint256) view returns ((uint128 sb,uint128 bb,uint128 ante,uint32 durationSecs)[])",
+  "function dueForLevelUp(uint256) view returns (bool)",
+  "function createTournament((uint128 buyIn,uint128 fee,uint8 maxPlayers,uint8 seatsPerTable,uint128 startStack,uint128 sbStart,uint128 bbStart,uint128 anteStart,uint64 levelDur,uint16 growthBps,uint64 startTime,bool approvalRequired,uint32 actionSecs,uint16[] payoutBps,(uint128 sb,uint128 bb,uint128 ante,uint32 durationSecs)[] structure,uint16 hostBps) p) payable returns (uint256)",
   "function register(uint256) payable",
   "function unregister(uint256)",
+  "function approveEntry(uint256,address)",
+  "function rejectEntry(uint256,address)",
+  "function withdrawApplication(uint256)",
   "function start(uint256)",
+  "function cancel(uint256)",
+  "function owner() view returns (address)",
+  "function feeCollected() view returns (uint256)",
+  "function withdrawFees(address,uint256)",
+];
+
+// On-chain player profiles (nicknames) — see contracts/poker/PlayerProfile.sol.
+const PP_ABI = [
+  "function setProfile(string handle,uint16 avatar)",
+  "function clearHandle()",
+  "function handleOf(address) view returns (string)",
+  "function hasHandle(address) view returns (bool)",
+  "function addressOfHandle(string) view returns (address)",
+  "function handleAvailable(string) view returns (bool)",
+  "function profileOf(address) view returns (string handle,uint16 avatar,uint64 since)",
 ];
 
 export const TRN_STATUS = ["Registering", "Running", "Finished", "Cancelled"];
@@ -74,7 +102,9 @@ export class ShinyPoker {
     this.roomRead = cfg.pokerRoom ? new ethers.Contract(cfg.pokerRoom, ROOM_ABI, this.read) : null;
     this.dealerRead = cfg.commitRevealDealer ? new ethers.Contract(cfg.commitRevealDealer, DEALER_ABI, this.read) : null;
     this.trnRead = cfg.pokerTournament ? new ethers.Contract(cfg.pokerTournament, TRN_ABI, this.read) : null;
+    this.ppRead = cfg.playerProfile ? new ethers.Contract(cfg.playerProfile, PP_ABI, this.read) : null;
     this.trnWrite = null;
+    this.ppWrite = null;
     this.signer = null;
     this.address = null;
     this.roomWrite = null;
@@ -117,6 +147,7 @@ export class ShinyPoker {
   _bindWrites() {
     this.roomWrite = new ethers.Contract(this.cfg.pokerRoom, ROOM_ABI, this.signer);
     this.trnWrite = this.cfg.pokerTournament ? new ethers.Contract(this.cfg.pokerTournament, TRN_ABI, this.signer) : null;
+    this.ppWrite = this.cfg.playerProfile ? new ethers.Contract(this.cfg.playerProfile, PP_ABI, this.signer) : null;
   }
 
   async _attachPrivy(address) {
@@ -128,13 +159,20 @@ export class ShinyPoker {
     if (typeof this.signer.prewarm === "function") this.signer.prewarm();
   }
 
-  _privyWait(pred, ms = 8000) {
+  _privyWait(pred, ms = 45000) {
+    // The Privy bundle is ~4.6MB + an iframe handshake with auth.privy.io — a
+    // cold load can take well over the old 8s, which surfaced as a bogus
+    // "Privy timeout" when users clicked Connect right after page load.
     return new Promise((resolve, reject) => {
-      const t = setTimeout(() => { document.removeEventListener("shinyluck:auth-state", on); reject(new Error("Privy timeout")); }, ms);
-      const on = (ev) => { if (pred(ev.detail || {})) { clearTimeout(t); document.removeEventListener("shinyluck:auth-state", on); resolve(); } };
+      const finish = (ok) => { clearTimeout(t); clearInterval(iv); document.removeEventListener("shinyluck:auth-state", on); ok ? resolve() : reject(new Error("Email login is still loading — give it a few seconds and try again (or use MetaMask)."));
+      };
+      const t = setTimeout(() => finish(false), ms);
+      const check = () => { const a = window.ShinyLuckAuth; return !!(a && pred({ ready: a.ready, authenticated: a.authenticated, address: a.address })); };
+      const on = (ev) => { if (pred(ev.detail || {}) || check()) finish(true); };
       document.addEventListener("shinyluck:auth-state", on);
-      const a = window.ShinyLuckAuth;
-      if (a && pred({ ready: a.ready, authenticated: a.authenticated, address: a.address })) { clearTimeout(t); document.removeEventListener("shinyluck:auth-state", on); resolve(); }
+      // Poll as a safety net — the ready flip can land before our listener attaches.
+      const iv = setInterval(() => { if (check()) finish(true); }, 400);
+      if (check()) finish(true);
     });
   }
 
@@ -161,7 +199,7 @@ export class ShinyPoker {
 
   // wallet chooser modal (email primary, injected wallets flagged BETA)
   _chooseWallet() {
-    const ACC = "#6e6eed", ACC2 = "#9b9bf4";
+    const ACC = "#d9ab4a", ACC2 = "#f2d78a";
     return new Promise((resolve, reject) => {
       const mask = document.createElement("div");
       mask.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);z-index:9000;display:grid;place-items:center;padding:24px;font-family:'Source Code Pro',monospace";
@@ -315,6 +353,18 @@ export class ShinyPoker {
 
   async balanceOf(addr) { return this.roomRead.balance(addr); }
 
+  /// First table (≠ excludeTable) where this address currently holds a seat;
+  /// -1 if none. One-table-at-a-time guard for the sit-down flow — covers cash
+  /// AND running-tournament seats (the tournament seats you on its table).
+  async seatedTableAt(excludeTable = -1) {
+    if (!this.address) return -1;
+    const n = await this.tableCount();
+    const checks = await Promise.all(Array.from({ length: n }, (_, t) =>
+      t === excludeTable ? Promise.resolve(255) : this.roomRead.seatOf(t, this.address).then(Number).catch(() => 255)));
+    const t = checks.findIndex((s) => s !== 255);
+    return t;
+  }
+
   /// Native STT/SOMI balance of the connected wallet (for funding guidance).
   async walletBalance() { return this.address ? this.read.getBalance(this.address) : 0n; }
 
@@ -324,46 +374,111 @@ export class ShinyPoker {
   async tournamentCount() { return this.trnRead ? Number(await this.trnRead.count()) : 0; }
 
   async tournamentInfo(id) {
-    const i = await this.trnRead.info(id);
+    const [i, hostBps] = await Promise.all([
+      this.trnRead.info(id),
+      this.trnRead.hostBpsOf(id).then(Number).catch(() => 0), // pre-v3 contracts have no host reward
+    ]);
     return {
       id, creator: i.creator, buyIn: i.buyIn, fee: i.fee, startStack: i.startStack, pool: i.pool,
       maxPlayers: Number(i.maxPlayers), registered: Number(i.registered), status: Number(i.status),
       remaining: Number(i.remaining), tableId: Number(i.tableId), payoutBps: i.payoutBps.map(Number),
+      approvalRequired: i.approvalRequired, pendingCount: Number(i.pendingCount), hostBps,
     };
   }
 
   async tournaments() {
+    // dealer cache first — one GET instead of N info() calls per lobby client
+    const lob = await this.lobbySnapshot();
+    if (lob && Array.isArray(lob.tournaments)) {
+      return lob.tournaments.map((t) => ({
+        id: Number(t.id), creator: t.creator, buyIn: BigInt(t.buyIn || 0), fee: BigInt(t.fee || 0),
+        startStack: BigInt(t.startStack || 0), pool: BigInt(t.pool || 0),
+        maxPlayers: Number(t.maxPlayers), registered: Number(t.registered), status: Number(t.status),
+        remaining: Number(t.remaining), tableId: Number(t.tableId), payoutBps: (t.payoutBps || []).map(Number),
+        approvalRequired: !!t.approvalRequired, pendingCount: Number(t.pendingCount || 0), hostBps: Number(t.hostBps || 0),
+      }));
+    }
     const n = await this.tournamentCount();
     const ids = Array.from({ length: n }, (_, i) => i);
     return Promise.all(ids.map((i) => this.tournamentInfo(i)));
   }
 
-  async tournamentClock(id) {
-    const c = await this.trnRead.clock(id);
-    return { startedAt: Number(c.startedAt), level: Number(c.level), levelDur: Number(c.levelDur), sbStart: c.sbStart, bbStart: c.bbStart };
+  async tournamentClock(id, at) {
+    const c = await (at ? this._trnAt(at) : this.trnRead).clock(id);
+    return { startedAt: Number(c.startedAt), level: Number(c.level), levelDur: Number(c.levelDur), curSb: c.curSb, curBb: c.curBb, curAnte: c.curAnte, startTime: Number(c.startTime) };
   }
 
-  async isRegisteredIn(id) { return this.address ? this.trnRead.isRegistered(id, this.address) : false; }
+  /// `at` targets the table's controller contract (survives a stale poker-config
+  /// after a tournament redeploy — same rationale as _trnAt).
+  async isRegisteredIn(id, at) { return this.address ? (at ? this._trnAt(at) : this.trnRead).isRegistered(id, this.address) : false; }
+
+  /// Read-only tournament contract at an arbitrary address (cached). The table's
+  /// on-chain CONTROLLER is the source of truth — a stale cached poker-config
+  /// after a tournament redeploy must never demote a tournament table to cash mode.
+  _trnAt(addr) {
+    if (!this._trnAtCache) this._trnAtCache = new Map();
+    const k = addr.toLowerCase();
+    if (!this._trnAtCache.has(k)) this._trnAtCache.set(k, new ethers.Contract(addr, TRN_ABI, this.read));
+    return this._trnAtCache.get(k);
+  }
 
   /// Find the tournament that controls `tableId` (or null for a cash table).
+  /// MTT-aware: matches any of the tournament's tables, not just tables[0].
   async tournamentOfTable(tableId) {
-    if (!this.trnRead || !this.roomRead) return null;
+    if (!this.roomRead) return null;
     const ctl = await this.roomRead.tableController(tableId);
-    if (ctl === ethers.ZeroAddress || ctl.toLowerCase() !== this.cfg.pokerTournament.toLowerCase()) return null;
-    const all = await this.tournaments();
-    return all.find((t) => t.status === 1 && t.tableId === tableId) || all.find((t) => t.tableId === tableId) || null;
+    if (ctl === ethers.ZeroAddress) return null;
+    const trn = this._trnAt(ctl);
+    let fallback = null;
+    try {
+      const n = Number(await trn.count());
+      for (let i = n - 1; i >= 0; i--) {
+        const x = await trn.info(i);
+        const t = {
+          id: i, at: ctl, creator: x.creator, buyIn: x.buyIn, fee: x.fee, startStack: x.startStack, pool: x.pool,
+          maxPlayers: Number(x.maxPlayers), registered: Number(x.registered), status: Number(x.status),
+          remaining: Number(x.remaining), tableId: Number(x.tableId), payoutBps: x.payoutBps.map(Number),
+          approvalRequired: x.approvalRequired, pendingCount: Number(x.pendingCount),
+        };
+        let tbls = null;
+        try { tbls = (await trn.tablesOf(i)).map(Number); } catch {}
+        const mine = t.tableId === tableId || (tbls || []).includes(tableId);
+        if (!mine) continue;
+        t.tables = tbls && tbls.length ? tbls : [t.tableId];
+        if (t.status === 1) return t;
+        if (!fallback) fallback = t;
+      }
+    } catch { return fallback; }
+    return fallback;
   }
 
-  /// Create a tournament. buyIn/fee/sponsor in ether units; chips/blinds are
-  /// plain tournament-chip integers; payoutBps must sum to 10000.
-  async createTournament({ buyInEth = 0, feeEth = 0, maxPlayers, startStack, sbStart, bbStart, levelDur, payoutBps, sponsorEth = 0 }) {
+  /// Create a tournament. buyIn/fee/sponsor in ether units; chips/blinds/ante are
+  /// plain tournament-chip integers; growthBps = blind/ante growth per level
+  /// (20000 = ×2); startTime = unix seconds (0 = manual/when-full);
+  /// approvalRequired = private game (entries wait for the creator); payoutBps
+  /// must sum to 10000.
+  async createTournament({ buyInEth = 0, feeEth = 0, maxPlayers, seatsPerTable = 0, startStack, sbStart = 10, bbStart = 20, anteStart = 0, levelDur = 300, growthBps = 20000, startTime = 0, approvalRequired = false, actionSecs = 0, payoutBps, structure = [], sponsorEth = 0, hostBps = 0 }) {
     this.requireWallet();
     if (!this.trnWrite) throw new Error("tournaments not deployed");
-    return (await this.trnWrite.createTournament(
-      ethers.parseEther(String(buyInEth)), ethers.parseEther(String(feeEth)), maxPlayers,
-      BigInt(startStack), BigInt(sbStart), BigInt(bbStart), BigInt(levelDur), payoutBps,
-      { value: ethers.parseEther(String(sponsorEth)) },
-    )).wait();
+    const p = {
+      buyIn: ethers.parseEther(String(buyInEth)),
+      fee: ethers.parseEther(String(feeEth)),
+      maxPlayers,
+      seatsPerTable,
+      startStack: BigInt(startStack),
+      sbStart: BigInt(sbStart),
+      bbStart: BigInt(bbStart),
+      anteStart: BigInt(anteStart),
+      levelDur: BigInt(levelDur),
+      growthBps,
+      startTime: BigInt(startTime),
+      approvalRequired,
+      actionSecs: Number(actionSecs) || 0,
+      payoutBps,
+      structure: (structure || []).map((l) => ({ sb: BigInt(l.sb), bb: BigInt(l.bb), ante: BigInt(l.ante || 0), durationSecs: Number(l.durationSecs) })),
+      hostBps: Number(hostBps) || 0,
+    };
+    return (await this.trnWrite.createTournament(p, { value: ethers.parseEther(String(sponsorEth)) })).wait();
   }
 
   async registerTournament(id, costWei) {
@@ -373,6 +488,116 @@ export class ShinyPoker {
 
   async unregisterTournament(id) { this.requireWallet(); return (await this.trnWrite.unregister(id)).wait(); }
   async startTournament(id) { this.requireWallet(); return (await this.trnWrite.start(id)).wait(); }
+  async cancelTournament(id) { this.requireWallet(); return (await this.trnWrite.cancel(id)).wait(); }
+
+  /// The controller of a table (a tournament address, or zero for a cash table).
+  async tableController(t) { try { return await this.roomRead.tableController(t); } catch { return ethers.ZeroAddress; } }
+
+  /// Tables a tournament runs on (1 for SNG, several for MTT).
+  async tournamentTables(id, at) { try { return (await (at ? this._trnAt(at) : this.trnRead).tablesOf(id)).map(Number); } catch { return []; } }
+
+  /// Custom blind schedule (immutable after create → cached). [] = geometric growth.
+  async tournamentStructure(id, at) {
+    if (!this._structCache) this._structCache = new Map();
+    const key = (at ? at.toLowerCase() + ":" : "") + id;
+    if (this._structCache.has(key)) return this._structCache.get(key);
+    let out = [];
+    try { out = (await (at ? this._trnAt(at) : this.trnRead).structureOf(id)).map((l) => ({ sb: Number(l.sb), bb: Number(l.bb), ante: Number(l.ante), durationSecs: Number(l.durationSecs) })); } catch {}
+    if (out.length) this._structCache.set(key, out); // don't cache empty pre-deploy reads
+    return out;
+  }
+
+  /// Unix time the NEXT blind level is due (null when on the last level /
+  /// not running). Structure-aware — custom schedules have per-level durations.
+  async nextLevelAt(id, clock, at) {
+    const c = clock || (await this.tournamentClock(id, at));
+    if (!c.startedAt) return null;
+    const s = await this.tournamentStructure(id, at);
+    if (s.length) {
+      // Past the schedule the blinds keep escalating (overtime levels run as
+      // long as the final scheduled level) — mirrors _timeForNextLevel on-chain.
+      let due = c.startedAt;
+      for (let i = 0; i <= c.level && i < s.length; i++) due += s[i].durationSecs;
+      if (c.level + 1 > s.length) due += (c.level + 1 - s.length) * s[s.length - 1].durationSecs;
+      return due;
+    }
+    return c.startedAt + (c.level + 1) * c.levelDur;
+  }
+
+  // ---- owner: tournament fees (10% platform cut of buy-ins) ----
+  async trnOwner() { try { return await this.trnRead.owner(); } catch { return ethers.ZeroAddress; } }
+  async trnFeesCollected() { try { return await this.trnRead.feeCollected(); } catch { return 0n; } }
+  async withdrawAllTrnFees(to) { this.requireWallet(); const amt = await this.trnRead.feeCollected(); return (await this.trnWrite.withdrawFees(to, amt)).wait(); }
+  /// The table where the connected player currently sits in a (possibly multi-table) tournament.
+  async myTournamentTable(id) {
+    const strict = await this.myTournamentSeatTable(id);
+    if (strict >= 0) return strict;
+    const tables = await this.tournamentTables(id);
+    return tables.length ? tables[0] : null;
+  }
+
+  /// STRICT variant: the table where I actually hold a seat, or -1 (busted /
+  /// not playing). The table page tells "moved to another table" from "busted"
+  /// with this — the fallback above would mask both.
+  async myTournamentSeatTable(id, at) {
+    if (!this.address) return -1;
+    const tables = await this.tournamentTables(id, at);
+    for (const tid of tables) {
+      try { if (Number(await this.roomRead.seatOf(tid, this.address)) !== 255) return tid; } catch {}
+    }
+    return -1;
+  }
+
+  /// Finishing places / prizes / rebalance moves from the dealer bot's event
+  /// indexer (Busted/Finished/PlayerMoved exist only as events — no on-chain
+  /// view). null → indexer unavailable; callers degrade gracefully.
+  async tournamentResults(id) {
+    if (!this.cfg.dealerApiUrl) return null;
+    try {
+      const r = await fetch(`${this.cfg.dealerApiUrl}/trnhist?id=${id}`, { signal: AbortSignal.timeout(2500) });
+      if (!r.ok) return null;
+      const raw = await r.json();
+      return {
+        busts: (raw.busts || []).map((b) => ({ player: b.player, place: Number(b.place), prize: BigInt(b.prize || 0) })),
+        winner: raw.winner ? { player: raw.winner.player, prize: BigInt(raw.winner.prize || 0) } : null,
+        moves: raw.moves || [],
+      };
+    } catch { return null; }
+  }
+
+  // ---- approval flow (private games: creator admits applicants) ----
+  async approveEntry(id, player) { this.requireWallet(); return (await this.trnWrite.approveEntry(id, player)).wait(); }
+  async rejectEntry(id, player) { this.requireWallet(); return (await this.trnWrite.rejectEntry(id, player)).wait(); }
+  async withdrawApplication(id) { this.requireWallet(); return (await this.trnWrite.withdrawApplication(id)).wait(); }
+  async pendingEntries(id) { return this.trnRead ? this.trnRead.pendingEntries(id) : []; }
+  async isPendingIn(id) { return this.address ? this.trnRead.isPending(id, this.address) : false; }
+  async tournamentPlayers(id) { return this.trnRead ? this.trnRead.playersOf(id) : []; }
+
+  // ---- on-chain player profiles (nicknames) ----
+  hasProfiles() { return !!this.ppRead; }
+  async setProfile(handle, avatar = 0) { this.requireWallet(); if (!this.ppWrite) throw new Error("profiles not deployed"); return (await this.ppWrite.setProfile(handle, avatar)).wait(); }
+  async handleOf(addr) { try { return this.ppRead ? await this.ppRead.handleOf(addr) : ""; } catch { return ""; } }
+  async myHandle() { return this.address ? this.handleOf(this.address) : ""; }
+  async profileOf(addr) {
+    if (!this.ppRead) return { handle: "", avatar: 0, since: 0 };
+    try { const p = await this.ppRead.profileOf(addr); return { handle: p.handle, avatar: Number(p.avatar), since: Number(p.since) }; }
+    catch { return { handle: "", avatar: 0, since: 0 }; }
+  }
+  async handleAvailable(handle) { try { return this.ppRead ? await this.ppRead.handleAvailable(handle) : false; } catch { return false; } }
+  /// Resolve nicknames for a set of addresses (per-address cache — safe to call
+  /// every poll; only unknown addresses hit the chain). → { lowercased addr: handle }
+  async handlesFor(addrs) {
+    if (!this._handleCache) this._handleCache = new Map();
+    const out = {};
+    await Promise.all([...new Set((addrs || []).filter(Boolean).map((a) => a.toLowerCase()))].map(async (a) => {
+      if (!this._handleCache.has(a)) {
+        let h = ""; try { h = this.ppRead ? await this.ppRead.handleOf(a) : ""; } catch {}
+        this._handleCache.set(a, h);
+      }
+      out[a] = this._handleCache.get(a);
+    }));
+    return out;
+  }
 
   /// Recent settled hands at a table — served by the dealer bot's indexer
   /// (it backfills the on-chain events once and stays current; scanning
@@ -466,6 +691,62 @@ export class ShinyPoker {
     return { tableId: t, cfg, hand, seats, board, mySeat };
   }
 
+  /// Snapshot with the dealer's HTTP cache as the primary source: one GET
+  /// instead of ~14 RPC calls per tick, so hundreds of watchers don't melt the
+  /// public RPC. Any failure/staleness falls back to direct chain reads and the
+  /// dealer path is retried after a cool-down — the table NEVER goes blind.
+  async snapshotSmart(t) {
+    if (this.cfg.dealerApiUrl && Date.now() >= (this._snapSrcDownUntil || 0)) {
+      try {
+        const r = await fetch(`${this.cfg.dealerApiUrl}/snapshot?t=${t}`, { signal: AbortSignal.timeout(2500) });
+        if (r.ok) {
+          const raw = await r.json();
+          if (Date.now() - raw.ts < 8000) return this._hydrateSnapshot(raw);
+        }
+      } catch {}
+      this._snapSrcDownUntil = Date.now() + 30_000;
+    }
+    return this.snapshot(t);
+  }
+
+  /// Rebuild the exact snapshot() shape from the dealer's JSON (BigInts arrive
+  /// as strings).
+  _hydrateSnapshot(raw) {
+    const B = (x) => BigInt(x || 0);
+    const cfg = {
+      maxSeats: Number(raw.cfg.maxSeats), smallBlind: B(raw.cfg.smallBlind), bigBlind: B(raw.cfg.bigBlind),
+      ante: B(raw.cfg.ante), minBuyIn: B(raw.cfg.minBuyIn), maxBuyIn: B(raw.cfg.maxBuyIn),
+      rakeBps: Number(raw.cfg.rakeBps), rakeCap: B(raw.cfg.rakeCap),
+      actionTimeout: Number(raw.cfg.actionTimeout), active: !!raw.cfg.active,
+    };
+    const hand = {
+      handId: Number(raw.hand.handId), street: Number(raw.hand.street), button: Number(raw.hand.button),
+      actingSeat: Number(raw.hand.actingSeat), numInHand: Number(raw.hand.numInHand),
+      currentBet: B(raw.hand.currentBet), minRaise: B(raw.hand.minRaise), pot: B(raw.hand.pot),
+      actingDeadline: Number(raw.hand.actingDeadline), dealId: B(raw.hand.dealId), inProgress: !!raw.hand.inProgress,
+    };
+    const seats = raw.seats.map((s) => ({
+      index: Number(s.index), player: s.player, occupied: !!s.occupied, sittingOut: !!s.sittingOut,
+      stack: B(s.stack), empty: s.player === ethers.ZeroAddress,
+      inHand: !!s.inHand, folded: !!s.folded, allIn: !!s.allIn, committedStreet: B(s.committedStreet),
+    }));
+    const mySeat = this.address ? seats.findIndex((s) => s.player.toLowerCase() === this.address.toLowerCase()) : -1;
+    return { tableId: Number(raw.tableId), cfg, hand, seats, board: (raw.board || []).map(Number), mySeat };
+  }
+
+  /// The lobby feed from the dealer cache (tables + tournaments in one GET).
+  /// null → caller falls back to per-table chain reads.
+  async lobbySnapshot() {
+    if (!this.cfg.dealerApiUrl) return null;
+    try {
+      const r = await fetch(`${this.cfg.dealerApiUrl}/lobby`, { signal: AbortSignal.timeout(2500) });
+      if (!r.ok) return null;
+      const raw = await r.json();
+      if (Date.now() - raw.ts > 20_000) return null;
+      return raw;
+    } catch { return null; }
+  }
+
   holeMessage(t, dealId) { return `ShinyPoker:holes:${t}:${Number(dealId)}`; }
 
   /// Sign the hole-card request. When a session is active the in-browser session
@@ -492,6 +773,12 @@ export class ShinyPoker {
   // ---- writes ----
   async deposit(amountEth) { this.requireWallet(); return (await this.roomWrite.deposit({ value: ethers.parseEther(String(amountEth)) })).wait(); }
   async withdraw(amountEth) { this.requireWallet(); return (await this.roomWrite.withdraw(ethers.parseEther(String(amountEth)))).wait(); }
+  async roomOwner() { try { return await this.roomRead.owner(); } catch { return ethers.ZeroAddress; } }
+  async rakeCollected() { try { return await this.roomRead.rakeCollected(); } catch { return 0n; } }
+  async withdrawRake(to, amountEth) { this.requireWallet(); return (await this.roomWrite.withdrawRake(to, ethers.parseEther(String(amountEth)))).wait(); }
+  async withdrawAllRake(to) { this.requireWallet(); const amt = await this.roomRead.rakeCollected(); return (await this.roomWrite.withdrawRake(to, amt)).wait(); }
+  /// Cash out: send native STT from the connected wallet to any external address.
+  async sendNative(to, amountEth) { this.requireWallet(); return (await this.signer.sendTransaction({ to, value: ethers.parseEther(String(amountEth)) })).wait(); }
   async sitDown(t, seat, buyInEth) { this.requireWallet(); return (await this.roomWrite.sitDown(t, seat, ethers.parseEther(String(buyInEth)))).wait(); }
   async topUp(t, amountEth) { this.requireWallet(); return (await this.roomWrite.topUp(t, ethers.parseEther(String(amountEth)))).wait(); }
   async leave(t) { this.requireWallet(); return (await this.roomWrite.leaveTable(t)).wait(); }
@@ -515,7 +802,7 @@ export class ShinyPoker {
     let stopped = false;
     const tick = async () => {
       if (stopped) return;
-      try { cb(await this.snapshot(t)); } catch (e) { console.warn("[poker] snapshot failed", e); }
+      try { cb(await this.snapshotSmart(t)); } catch (e) { console.warn("[poker] snapshot failed", e); }
       if (!stopped) setTimeout(tick, intervalMs);
     };
     tick();

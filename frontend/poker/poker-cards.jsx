@@ -21,7 +21,7 @@ function Card({ c, back, folded, dealing, className, style, delay }) {
   if (back || !c) {
     return (
       <div className={"card back " + (className || "")} style={style}>
-        <div className="bk"><BraceMark className="mk" /></div>
+        <div className="bk"><SparkMark className="mk" /></div>
       </div>
     );
   }
@@ -39,6 +39,59 @@ function Card({ c, back, folded, dealing, className, style, delay }) {
       <span className="center-suit"><Suit s={suit} size={28} /></span>
       <span className="pip"><Suit s={suit} size={11} /></span>
     </div>
+  );
+}
+
+/* Deterministic avatar look: a warm two-tone gradient + tilt derived from the
+   player's name/address — kills the "letter in a gray box" placeholder feel. */
+function avatarColors(seed) {
+  let h = 0; const s = String(seed || "?").toLowerCase();
+  for (let i = 0; i < s.length; i++) h = ((h * 31 + s.charCodeAt(i)) & 0xffffffff) >>> 0;
+  const PAL = [
+    ["#d9ab4a", "#7c5117"], ["#e2793f", "#6e2a12"], ["#c8963a", "#3f2a0e"], ["#b8574f", "#521c1c"],
+    ["#7a9a4e", "#2a4319"], ["#4f8f8b", "#1b3d3b"], ["#9a6ad0", "#37215a"], ["#c0576f", "#4e1c2c"],
+    ["#5e82c8", "#1f3153"], ["#b0b46a", "#44461e"], ["#cf8f5c", "#5a3416"], ["#6aa9a0", "#24443f"],
+  ];
+  const p = PAL[h % PAL.length];
+  return { a: p[0], b: p[1], rot: (h >>> 4) % 360 };
+}
+
+/* Minimal sparkle mark (card backs, small accents) — single-path currentColor. */
+function SparkMark({ className, style }) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <path d="M 32 3 Q 36.5 23 47 32 Q 36.5 41 32 61 Q 27.5 41 17 32 Q 27.5 23 32 3 Z" fill="currentColor" transform="rotate(26 32 32)" />
+    </svg>
+  );
+}
+
+/* ShinyPoker brand mark — the "shiny card" sparkle from ShinyPokerDesign/Logo:
+   a card bent into a four-point star, white core, gold rim, sparkle dust. */
+function SparkLogo({ size = 22 }) {
+  const star = (x, y, r) => `M ${x} ${y - r} L ${x + r * 0.28} ${y - r * 0.28} L ${x + r} ${y} L ${x + r * 0.28} ${y + r * 0.28} L ${x} ${y + r} L ${x - r * 0.28} ${y + r * 0.28} L ${x - r} ${y} L ${x - r * 0.28} ${y - r * 0.28} Z`;
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" style={{ display: "block" }}>
+      <defs>
+        <radialGradient id="spkCore" cx="50%" cy="44%" r="62%">
+          <stop offset="0%" stopColor="#fffef8" />
+          <stop offset="55%" stopColor="#fff6dd" />
+          <stop offset="100%" stopColor="#f0d998" />
+        </radialGradient>
+        <filter id="spkGlow" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="2.6" />
+        </filter>
+      </defs>
+      <g transform="rotate(26 32 32)">
+        <path d="M 32 3 Q 36.5 23 47 32 Q 36.5 41 32 61 Q 27.5 41 17 32 Q 27.5 23 32 3 Z"
+          fill="#e8c15a" opacity="0.6" filter="url(#spkGlow)" />
+        <path d="M 32 3 Q 36.5 23 47 32 Q 36.5 41 32 61 Q 27.5 41 17 32 Q 27.5 23 32 3 Z"
+          fill="url(#spkCore)" stroke="#d9ab4a" strokeWidth="1.4" strokeLinejoin="round" />
+      </g>
+      <path d={star(13, 18, 3)} fill="#f2d78a" opacity="0.95" />
+      <path d={star(52, 13, 2.2)} fill="#f2d78a" opacity="0.8" />
+      <path d={star(50, 51, 2.6)} fill="#f2d78a" opacity="0.9" />
+      <path d={star(12, 47, 1.8)} fill="#f2d78a" opacity="0.7" />
+    </svg>
   );
 }
 
@@ -81,4 +134,76 @@ function SomiIcon({ className, style }) {
   );
 }
 
-Object.assign(window, { Card, Suit, BraceMark, BraceLogo, SomiIcon });
+Object.assign(window, { Card, Suit, BraceMark, BraceLogo, SomiIcon, SparkLogo, SparkMark, avatarColors });
+
+/* ------------------------------------------------------------------------
+   i18n (EN/RU) for the live-table experience. First-loaded script → every
+   later classic script can call window.SPT / window.SPTHand. The language
+   toggle lives in the table settings panel; persisted in localStorage.
+   ------------------------------------------------------------------------ */
+const SP_I18N_RU = {
+  "YOU": "ВЫ", "Total pot": "Банк", "chips": "фишек", "Waiting for players": "Ожидание игроков",
+  "all-in": "олл-ин", "folded": "фолд", "sitting out": "сит-аут", "waiting": "ожидание",
+  "Fold": "Фолд", "Check": "Чек", "Call": "Колл", "Raise to": "Рейз до", "Bet": "Бет",
+  "Min": "Мин", "Pot": "Банк", "All-in": "Олл-ин", "Best": "Комбо", "Pot odds": "Шансы банка",
+  "You win": "Вы выиграли", "You lose": "Вы проиграли", "wins": "выигрывает",
+  "paid out on-chain": "— выплата он-чейн", "pot settled on-chain": "банк рассчитан он-чейн",
+  "Winning hand": "Победная рука", "Settling pot on-chain…": "Банк рассчитывается он-чейн…",
+  "Action sent": "Действие отправлено", "Confirming on-chain…": "Подтверждаем он-чейн…",
+  "Dealer button": "Баттон (дилер) — раздача идёт от него", "Small blind": "Малый блайнд", "Big blind": "Большой блайнд",
+  "Sign in to play": "Войдите, чтобы играть",
+  "Email login → instant Somnia wallet, no popups": "Вход по email → мгновенный кошелёк Somnia, без попапов",
+  "Take an empty seat to join": "Сядьте на свободное место",
+  "Click a “+ Sit” spot around the table": "Нажмите «+ Sit» на свободном месте за столом",
+  "Tournament table — you're observing": "Турнирный стол — вы наблюдаете",
+  "Seats are assigned by the tournament; register on its page to play": "Места раздаёт турнир — зарегистрируйтесь на его странице, чтобы играть",
+  "Showdown — settling on-chain": "Шоудаун — расчёт он-чейн",
+  "Waiting for your turn": "Ожидание вашего хода",
+  "Waiting for the next hand": "Ожидание следующей руки",
+  "Your chips & action are safe on-chain": "Ваши фишки и действия защищены он-чейн",
+  "Pre-action armed — fires instantly on your turn": "Пре-действие взведено — сработает в ваш ход",
+  "TOURNAMENT": "ТУРНИР", "Level": "Уровень", "Blinds": "Блайнды", "ante": "анте",
+  "Next level": "След. уровень", "Final level": "Финальный уровень", "Players": "Игроки",
+  "Prize": "Приз", "Split": "Сплит", "FINISHED": "ЗАВЕРШЁН",
+  "Table": "Стол", "Switch to this table": "Перейти к этому столу",
+  "Hand": "Рука", "Cashier": "Касса", "Connect Wallet": "Подключить кошелёк",
+  "Say something…": "Напишите что-нибудь…", "Sit down to chat": "Сядьте за стол, чтобы писать", "Send": "Отпр.",
+  "table chat · dealer feed": "чат стола · лента дилера", "hand history · on-chain": "история рук · он-чейн", "private player notes": "приватные заметки",
+  "chat": "чат", "hands": "руки", "notes": "заметки",
+  "provably fair · commit-reveal": "честная раздача · commit-reveal",
+  "shuffling — commitment sealed on-chain": "тасуем — коммит колоды запечатан он-чейн",
+  "table settings": "настройки стола", "Table theme": "Тема стола", "Sound effects": "Звуки",
+  "4-color deck": "4-цветная колода", "Turbo animations": "Турбо-анимации", "Reduced motion": "Меньше анимаций",
+  "Stacks in big blinds": "Стеки в блайндах (BB)",
+  "Language": "Язык", "Close": "Закрыть",
+  "Sit at seat": "Сесть на место", "Buy-in": "Бай-ин", "Cancel": "Отмена", "Take seat": "Сесть",
+  "Leave table": "Покинуть стол", "Back to tournament": "К турниру", "Settings": "Настройки",
+  "Sit out": "Сит-аут", "Sit in": "Вернуться в игру", "Sit": "Сесть", "Connect": "Войти",
+};
+window.__SPLANG = (function () { try { return localStorage.getItem("sp_lang") || "en"; } catch (e) { return "en"; } })();
+window.SPT = (s) => (window.__SPLANG === "en" ? s : (SP_I18N_RU[s] != null ? SP_I18N_RU[s] : s));
+window.SPLangSet = (l) => { window.__SPLANG = l; try { localStorage.setItem("sp_lang", l); } catch (e) {} };
+
+/* Hand-name translator: maps the evaluator's English combos ("Pair of Nines",
+   "Flush, King high"…) to Russian poker terms. EN → passthrough. */
+const SP_EN_RANKS = ["Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Jack", "Queen", "King", "Ace"];
+const SP_EN_PLURAL = ["Twos", "Threes", "Fours", "Fives", "Sixes", "Sevens", "Eights", "Nines", "Tens", "Jacks", "Queens", "Kings", "Aces"];
+const SP_RU_HIGH = ["двойки", "тройки", "четвёрки", "пятёрки", "шестёрки", "семёрки", "восьмёрки", "девятки", "десятки", "вальта", "дамы", "короля", "туза"];
+const SP_RU_PL = ["двоек", "троек", "четвёрок", "пятёрок", "шестёрок", "семёрок", "восьмёрок", "девяток", "десяток", "вальтов", "дам", "королей", "тузов"];
+const spRuHigh = (w) => SP_RU_HIGH[SP_EN_RANKS.indexOf(w)] || w;
+const spRuPl = (w) => SP_RU_PL[SP_EN_PLURAL.indexOf(w)] || w;
+window.SPTHand = (name) => {
+  if (!name || window.__SPLANG === "en") return name;
+  let m;
+  if (name === "Royal Flush") return "Флеш-рояль";
+  if ((m = name.match(/^Straight Flush, (\w+) high$/))) return "Стрит-флеш до " + spRuHigh(m[1]);
+  if ((m = name.match(/^Four of a Kind, (\w+)$/))) return "Каре из " + spRuPl(m[1]);
+  if ((m = name.match(/^Full House, (\w+) full of (\w+)$/))) return "Фулл-хаус: " + spRuPl(m[1]) + " и " + spRuPl(m[2]);
+  if ((m = name.match(/^Flush, (\w+) high$/))) return "Флеш до " + spRuHigh(m[1]);
+  if ((m = name.match(/^Straight, (\w+) high$/))) return "Стрит до " + spRuHigh(m[1]);
+  if ((m = name.match(/^Three of a Kind, (\w+)$/))) return "Сет из " + spRuPl(m[1]);
+  if ((m = name.match(/^Two Pair, (\w+) & (\w+)$/))) return "Две пары: " + spRuPl(m[1]) + " и " + spRuPl(m[2]);
+  if ((m = name.match(/^Pair of (\w+)$/))) return "Пара " + spRuPl(m[1]);
+  if ((m = name.match(/^(\w+) high$/))) return "Старшая карта — " + spRuHigh(m[1]);
+  return name;
+};
