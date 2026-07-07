@@ -142,8 +142,9 @@ function LiveTable() {
 
   useEffect(() => { localStorage.setItem("sp_theme", theme); }, [theme]);
 
-  // live snapshot poll
-  useEffect(() => SP.sdk.watch(tableId, setSnap, 1500), [tableId]);
+  // live snapshot poll — the table you're AT polls fast (served from the
+  // dealer's HTTP cache, cheap) so actions and reveals feel near-instant.
+  useEffect(() => SP.sdk.watch(tableId, setSnap, 900), [tableId]);
 
   // The controller decides the whole render mode (chip formatting, seats
   // managed by a tournament vs open sit-down). Resolve it BEFORE first paint —

@@ -240,16 +240,20 @@ function startSnapshotCache(provider, room, dealerC, trn) {
     try {
       const count = Number(await room.tableCount());
       STATUS.tables = count;
+      // Build every DUE table CONCURRENTLY — reads have no nonce ordering, so a
+      // parallel refresh keeps the served snapshot fresh (~one buildTable of
+      // latency) even with many hot tables, instead of N×buildTable serially.
+      // This is the display-latency fix: under multi-table load the cache no
+      // longer lags seconds behind the chain.
+      const due = [];
       for (let t = 0; t < count; t++) {
         const prev = SNAPS.get(t);
         const active = prev && (prev.hand.inProgress || prev.seats.some((s) => s.occupied));
         const watched = Date.now() - (WATCHED.get(t) || 0) < 30_000; // someone's page is open
-        // hot (playing OR watched) tables refresh every pass; dead ones every ~8s
-        // — otherwise a player sitting at an empty table doesn't see themselves
-        // seated for seconds
         if (prev && !active && !watched && Date.now() - prev.ts < 8000) continue;
-        try { SNAPS.set(t, await buildTable(t)); } catch (_) { STATUS.snapErrors++; }
+        due.push(t);
       }
+      await Promise.all(due.map((t) => buildTable(t).then((s) => SNAPS.set(t, s)).catch(() => { STATUS.snapErrors++; })));
       await refreshLobby();
     } catch (_) { STATUS.snapErrors++; }
     finally { busy = false; }
@@ -290,7 +294,7 @@ function startSnapshotCache(provider, room, dealerC, trn) {
   }
 
   refresh();
-  setInterval(refresh, 1200);
+  setInterval(refresh, 900); // fresher served state; parallel build keeps a pass cheap
 }
 
 // ---------------------------------------------------------------------------

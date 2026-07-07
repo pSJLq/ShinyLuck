@@ -366,14 +366,26 @@ export class ShinyPoker {
 
   /// First table (≠ excludeTable) where this address currently holds a seat;
   /// -1 if none. One-table-at-a-time guard for the sit-down flow — covers cash
-  /// AND running-tournament seats (the tournament seats you on its table).
+  /// AND running-tournament seats. IMPORTANT: a tournament WINNER's seat stays
+  /// occupied on the controlled table forever (the contract never stands the
+  /// last player up) — a FINISHED event's ghost seat must not block cash play.
   async seatedTableAt(excludeTable = -1) {
     if (!this.address) return -1;
     const n = await this.tableCount();
     const checks = await Promise.all(Array.from({ length: n }, (_, t) =>
       t === excludeTable ? Promise.resolve(255) : this.roomRead.seatOf(t, this.address).then(Number).catch(() => 255)));
-    const t = checks.findIndex((s) => s !== 255);
-    return t;
+    for (let t = 0; t < n; t++) {
+      if (checks[t] === 255) continue;
+      try {
+        const ctl = await this.roomRead.tableController(t);
+        if (ctl !== ethers.ZeroAddress) {
+          const trn = await this.tournamentOfTable(t);
+          if (!trn || trn.status >= 2) continue; // finished/orphaned event — ghost seat, not a live game
+        }
+      } catch {}
+      return t;
+    }
+    return -1;
   }
 
   /// Native STT/SOMI balance of the connected wallet (for funding guidance).

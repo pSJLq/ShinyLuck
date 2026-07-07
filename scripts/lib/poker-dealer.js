@@ -22,14 +22,16 @@ function newState() {
 
 /// Keep the dealer stocked with server-seed commitments, derived deterministically
 /// from the master key so the bot is stateless across restarts.
-async function ensureSeeds(dealer, masterKey, minRemaining = 25, batch = 60) {
+async function ensureSeeds(dealer, masterKey, minRemaining = 12, batch = 24, send = (fn) => fn().then((r) => r.wait())) {
+  // Small batches on purpose: pushing 60 hashes costs ~18.7M gas (~0.22 STT) —
+  // one oversized provision drained the operator to the point of a full stall.
   const remaining = Number(await dealer.seedsRemaining());
   if (remaining >= minRemaining) return 0;
   const nextIdx = Number(await dealer.nextHashIndex());
   const provisioned = remaining + nextIdx; // total ever pushed
   const hashes = [];
   for (let i = 0; i < batch; i++) hashes.push(hashSeed(deriveSeed(masterKey, provisioned + i)));
-  await (await dealer.provisionSeedHashes(hashes)).wait();
+  await send(() => dealer.provisionSeedHashes(hashes));
   return batch;
 }
 
@@ -73,6 +75,11 @@ async function recoverState(dealer, masterKey, dealId) {
 /// Advance one table by at most one action. `room`/`dealer` must be connected to
 /// the dealer-bot wallet (the registered operator). Returns a short status tag.
 async function tickTable(room, dealer, masterKey, state, tableId, opts = {}) {
+  // How a state-changing tx is executed. Default: send + await mining (the
+  // original sequential behaviour, used by the unit tests). The live bot passes
+  // a mutex-guarded runner so many tables can be read concurrently while their
+  // writes stay strictly one-at-a-time (no shared-nonce gaps → never wedges).
+  const send = opts.tx || ((fn) => fn().then((r) => r.wait()));
   const cfg = await room.getTable(tableId);
   const maxSeats = Number(cfg.maxSeats);
   const h = await room.getHand(tableId);
@@ -82,12 +89,17 @@ async function tickTable(room, dealer, masterKey, state, tableId, opts = {}) {
     // Brief pause between hands so the winner glow / win banner is visible.
     const prev = state.get(tableId);
     if (prev && prev.dealId && !prev.endedAt) { prev.endedAt = Date.now(); return "hand-ended"; }
-    if (prev && prev.endedAt && Date.now() - prev.endedAt < (opts.interHandMs ?? 2500)) return "inter-hand";
+    // Inter-hand pause: just enough for the winner banner to register. Kept
+    // short — every idle second between hands is dead table time. (was 2500)
+    if (prev && prev.endedAt && Date.now() - prev.endedAt < (opts.interHandMs ?? 1200)) return "inter-hand";
+    // tournament level-up pending → don't START a new hand (let the table drain
+    // to idle so the contract's all-tables-idle levelUp can finally fire).
+    if (opts.noNewHands) return "hold";
     if ((await countEligible(room, tableId, maxSeats)) < 2) return "idle";
-    await ensureSeeds(dealer, masterKey);
+    await ensureSeeds(dealer, masterKey, 12, 24, send);
     const seedIdx = Number(await dealer.nextHashIndex());
     try {
-      await (await room.startHand(tableId)).wait();
+      await send(() => room.startHand(tableId));
     } catch (e) {
       return "start-skip"; // e.g. NotEnoughPlayers race
     }
@@ -113,7 +125,7 @@ async function tickTable(room, dealer, masterKey, state, tableId, opts = {}) {
   // Unservable hand (seed unknown after a restart) → abort + refund everyone
   // via cancelHand instead of leaving the table stuck in this hand forever.
   if (!st.seed) {
-    await (await room.cancelHand(tableId)).wait();
+    await send(() => room.cancelHand(tableId));
     state.delete(tableId);
     return "cancelled:no-seed";
   }
@@ -121,7 +133,7 @@ async function tickTable(room, dealer, masterKey, state, tableId, opts = {}) {
   // 1. Lock the future-blockhash entropy, then compute the deck + hole cards.
   if (!st.entropyLocked) {
     try {
-      await (await dealer.lockEntropy(dealId)).wait();
+      await send(() => dealer.lockEntropy(dealId));
     } catch (e) {
       // If the 256-block blockhash window has passed, the deck can never be
       // derived — abort + refund rather than retrying forever.
@@ -129,7 +141,7 @@ async function tickTable(room, dealer, masterKey, state, tableId, opts = {}) {
         const info = await dealer.dealInfo(dealId);
         const bn = await dealer.runner.provider.getBlockNumber();
         if (bn > Number(info.commitBlock) + 257) {
-          await (await room.cancelHand(tableId)).wait();
+          await send(() => room.cancelHand(tableId));
           state.delete(tableId);
           return "cancelled:entropy-expired";
         }
@@ -148,7 +160,7 @@ async function tickTable(room, dealer, masterKey, state, tableId, opts = {}) {
   if (want > st.boardRevealed && st.holes) {
     const b = st.holes.board;
     const padded = [0, 1, 2, 3, 4].map((i) => (b[i] === undefined ? 0 : b[i]));
-    await (await dealer.revealBoard(dealId, want, padded)).wait();
+    await send(() => dealer.revealBoard(dealId, want, padded));
     st.boardRevealed = want;
     return "board:" + want;
   }
@@ -158,7 +170,7 @@ async function tickTable(room, dealer, masterKey, state, tableId, opts = {}) {
     const now = Math.floor(Date.now() / 1000);
     if (now > Number(h.actingDeadline) + (opts.timeoutGrace ?? 2)) {
       try {
-        await (await room.timeoutAct(tableId)).wait();
+        await send(() => room.timeoutAct(tableId));
         return "timeout";
       } catch (_) {
         /* not actually expired on-chain yet */
@@ -170,13 +182,29 @@ async function tickTable(room, dealer, masterKey, state, tableId, opts = {}) {
   //    revealed cards for a few seconds, then settle.
   if (Number(h.street) === STREET.SHOWDOWN) {
     if (!st.seedRevealed) {
-      await (await dealer.revealSeed(dealId, st.seed)).wait();
+      try {
+        await send(() => dealer.revealSeed(dealId, st.seed));
+      } catch (e) {
+        // A showdown whose seed can't be revealed on-chain (e.g. a board posted
+        // by an earlier bot instance no longer matching the recovered deck after
+        // a restart) would wedge the table forever. If the DEALER actually
+        // reverted, void the hand + refund; a transient RPC error is retried.
+        const reverted = /execution reverted|CALL_EXCEPTION|BoardMismatch|BadSeed|require/i.test((e && (e.shortMessage || e.info?.error?.message || e.message)) || "");
+        if (!reverted) throw e;
+        await send(() => room.cancelHand(tableId));
+        state.delete(tableId);
+        return "cancelled:reveal-failed";
+      }
       st.seedRevealed = true;
       st.showdownAt = Date.now();
       return "showdown-reveal";
     }
-    if (Date.now() - (st.showdownAt || 0) < (opts.showdownMs ?? 4000)) return "showdown-wait";
-    await (await room.resolveShowdown(tableId)).wait();
+    // Hold the revealed cards briefly so players see the showdown, then settle.
+    // Kept tight — the frontend already announces the winner from the reveals
+    // the instant they land (sdWin), so this is just the on-felt card display.
+    // (was 4000)
+    if (Date.now() - (st.showdownAt || 0) < (opts.showdownMs ?? 1800)) return "showdown-wait";
+    await send(() => room.resolveShowdown(tableId));
     return "settled";
   }
 
