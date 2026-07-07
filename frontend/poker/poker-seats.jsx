@@ -68,13 +68,7 @@ function Seat({ player, data, pos, active, marker, deckMode, revealCards, reveal
       {data.lastAct && <span className={"actchip " + data.lastAct.kind}>{data.lastAct.text}</span>}
       <div className="seatcard">
         {data.bounty && <span className="bountytag">◆{data.bounty}</span>}
-        {(() => { const c = avatarColors(name); return (
-          <div className="avatar deco" style={{ background: `linear-gradient(${c.rot}deg, ${c.a}, ${c.b})` }}>
-            <SparkMark style={{ position: "absolute", inset: "10%", color: "rgba(255,246,221,.30)", transform: `rotate(${(c.rot % 50) - 25}deg)` }} />
-            <span style={{ position: "relative" }}>{player.av}</span>
-            <span className="ava-grid" />
-          </div>
-        ); })()}
+        <AvatarIcon av={player.avId} img={player.avImg} name={name} />
         <div className="seatinfo">
           <div className="nm">{player.hero ? SPT("YOU") : name}</div>
           {data.bbstacks && data.bbval != null

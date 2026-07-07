@@ -94,11 +94,16 @@ function TournamentPage() {
           if (res && (res.winner || res.busts.length)) {
             const rows = (res.winner ? [{ addr: res.winner.player, place: 1, prize: res.winner.prize }] : [])
               .concat([...res.busts].sort((a, b) => a.place - b.place).map((b) => ({ addr: b.player, place: b.place, prize: b.prize })));
-            setResults(await Promise.all(rows.map(async (r) => ({ ...r, handle: await SP.sdk.handleOf(r.addr) }))));
+            const m = await SP.sdk.profilesFor(rows.map((r) => r.addr));
+            setResults(rows.map((r) => ({ ...r, ...m[r.addr.toLowerCase()] })));
           }
         } catch {}
       }
-      const withNames = (list) => Promise.all(list.filter((a) => a !== ZERO).map(async (a) => ({ addr: a, handle: await SP.sdk.handleOf(a) })));
+      const withNames = async (list) => {
+        const real = list.filter((a) => a !== ZERO);
+        const m = await SP.sdk.profilesFor(real);
+        return real.map((a) => ({ addr: a, ...m[a.toLowerCase()] }));
+      };
       setPending(await withNames(pend)); setPlayers(await withNames(plrs));
       if (SP.sdk.address) {
         const [r1, r2, h] = await Promise.all([SP.sdk.isRegisteredIn(id), SP.sdk.isPendingIn(id), SP.sdk.myHandle()]);
@@ -308,6 +313,7 @@ function TournamentPage() {
                       <div key={r.place} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderRadius: 8, marginTop: 2,
                         background: me ? "var(--accent-12, rgba(217,171,74,.12))" : r.place <= 3 ? "var(--accent-08, rgba(217,171,74,.06))" : "transparent" }}>
                         <span style={{ width: 40, fontFamily: "var(--mono)", fontSize: 14, color: r.place <= 3 ? "var(--accent-soft)" : "var(--muted)" }}>{medal || "#" + r.place}</span>
+                        <AvatarIcon av={r.avatar} img={r.img} name={r.handle || r.addr} size={24} style={{ borderRadius: 6 }} />
                         <span style={{ flex: 1, fontFamily: "var(--mono)", fontSize: 14, color: "var(--text)" }}>
                           {r.handle || tshort(r.addr)}{me && <b style={{ color: "var(--accent-soft)" }}> · you</b>}
                           <span style={{ color: "var(--muted)", fontSize: 11, marginLeft: 8 }}>{r.handle ? tshort(r.addr) : ""}</span>
@@ -339,7 +345,12 @@ function TournamentPage() {
             <div style={{ fontFamily: "var(--mono)", fontSize: 15, marginBottom: 10, color: "var(--text)" }}>Registered ({players.length}/{info.maxPlayers})</div>
             {players.length === 0 ? <span style={{ color: "var(--muted)", fontFamily: "var(--label)", fontSize: 13 }}>No players registered yet.</span>
               : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {players.map((p) => <span key={p.addr} style={{ fontFamily: "var(--mono)", fontSize: 13, padding: "5px 10px", borderRadius: 8, background: "var(--accent-08, rgba(217,171,74,.08))", color: "var(--text)" }}>{p.handle || tshort(p.addr)}</span>)}
+                  {players.map((p) => (
+                    <span key={p.addr} style={{ display: "inline-flex", alignItems: "center", gap: 7, fontFamily: "var(--mono)", fontSize: 13, padding: "4px 10px 4px 5px", borderRadius: 8, background: "var(--accent-08, rgba(217,171,74,.08))", color: "var(--text)" }}>
+                      <AvatarIcon av={p.avatar} img={p.img} name={p.handle || p.addr} size={22} style={{ borderRadius: 6 }} />
+                      {p.handle || tshort(p.addr)}
+                    </span>
+                  ))}
                 </div>}
           </div>
         </div>

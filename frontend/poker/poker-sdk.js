@@ -60,6 +60,14 @@ const TRN_ABI = [
   "function withdrawFees(address,uint256)",
 ];
 
+// Fully on-chain uploaded avatars — see contracts/poker/AvatarStore.sol.
+const AV_ABI = [
+  "function setAvatar(bytes data)",
+  "function clearAvatar()",
+  "function avatarOf(address) view returns (bytes)",
+  "function hasAvatar(address) view returns (bool)",
+];
+
 // On-chain player profiles (nicknames) — see contracts/poker/PlayerProfile.sol.
 const PP_ABI = [
   "function setProfile(string handle,uint16 avatar)",
@@ -103,6 +111,8 @@ export class ShinyPoker {
     this.dealerRead = cfg.commitRevealDealer ? new ethers.Contract(cfg.commitRevealDealer, DEALER_ABI, this.read) : null;
     this.trnRead = cfg.pokerTournament ? new ethers.Contract(cfg.pokerTournament, TRN_ABI, this.read) : null;
     this.ppRead = cfg.playerProfile ? new ethers.Contract(cfg.playerProfile, PP_ABI, this.read) : null;
+    this.avRead = cfg.avatarStore ? new ethers.Contract(cfg.avatarStore, AV_ABI, this.read) : null;
+    this.avWrite = null;
     this.trnWrite = null;
     this.ppWrite = null;
     this.signer = null;
@@ -148,6 +158,7 @@ export class ShinyPoker {
     this.roomWrite = new ethers.Contract(this.cfg.pokerRoom, ROOM_ABI, this.signer);
     this.trnWrite = this.cfg.pokerTournament ? new ethers.Contract(this.cfg.pokerTournament, TRN_ABI, this.signer) : null;
     this.ppWrite = this.cfg.playerProfile ? new ethers.Contract(this.cfg.playerProfile, PP_ABI, this.signer) : null;
+    this.avWrite = this.cfg.avatarStore ? new ethers.Contract(this.cfg.avatarStore, AV_ABI, this.signer) : null;
   }
 
   async _attachPrivy(address) {
@@ -575,7 +586,14 @@ export class ShinyPoker {
 
   // ---- on-chain player profiles (nicknames) ----
   hasProfiles() { return !!this.ppRead; }
-  async setProfile(handle, avatar = 0) { this.requireWallet(); if (!this.ppWrite) throw new Error("profiles not deployed"); return (await this.ppWrite.setProfile(handle, avatar)).wait(); }
+  async setProfile(handle, avatar = 0) {
+    this.requireWallet();
+    if (!this.ppWrite) throw new Error("profiles not deployed");
+    const r = await (await this.ppWrite.setProfile(handle, avatar)).wait();
+    // my own cached profile is stale now — next poll re-reads it
+    if (this.address && this._profCache) this._profCache.delete(this.address.toLowerCase());
+    return r;
+  }
   async handleOf(addr) { try { return this.ppRead ? await this.ppRead.handleOf(addr) : ""; } catch { return ""; } }
   async myHandle() { return this.address ? this.handleOf(this.address) : ""; }
   async profileOf(addr) {
@@ -587,16 +605,60 @@ export class ShinyPoker {
   /// Resolve nicknames for a set of addresses (per-address cache — safe to call
   /// every poll; only unknown addresses hit the chain). → { lowercased addr: handle }
   async handlesFor(addrs) {
-    if (!this._handleCache) this._handleCache = new Map();
+    const m = await this.profilesFor(addrs);
+    const out = {};
+    for (const a of Object.keys(m)) out[a] = m[a].handle;
+    return out;
+  }
+
+  /// Full profiles (nickname + preset avatar id + uploaded on-chain image as a
+  /// data URI) for a set of addresses, cached per address. The image is raw
+  /// bytes in AvatarStore — sniff the magic for the MIME.
+  /// → { lowercased addr: {handle, avatar, img|null} }
+  async profilesFor(addrs) {
+    if (!this._profCache) this._profCache = new Map();
     const out = {};
     await Promise.all([...new Set((addrs || []).filter(Boolean).map((a) => a.toLowerCase()))].map(async (a) => {
-      if (!this._handleCache.has(a)) {
-        let h = ""; try { h = this.ppRead ? await this.ppRead.handleOf(a) : ""; } catch {}
-        this._handleCache.set(a, h);
+      if (!this._profCache.has(a)) {
+        let p = { handle: "", avatar: 0, img: null };
+        try { if (this.ppRead) { const r = await this.ppRead.profileOf(a); p.handle = r.handle; p.avatar = Number(r.avatar); } } catch {}
+        try {
+          if (this.avRead) {
+            const raw = ethers.getBytes(await this.avRead.avatarOf(a));
+            if (raw.length > 0) p.img = this._bytesToDataUri(raw);
+          }
+        } catch {}
+        this._profCache.set(a, p);
       }
-      out[a] = this._handleCache.get(a);
+      out[a] = this._profCache.get(a);
     }));
     return out;
+  }
+
+  _bytesToDataUri(raw) {
+    const mime = raw[0] === 0xff && raw[1] === 0xd8 ? "image/jpeg"
+      : raw[0] === 0x89 && raw[1] === 0x50 ? "image/png"
+      : "image/webp"; // RIFF….WEBP and anything else the canvas produced
+    let bin = "";
+    for (let i = 0; i < raw.length; i++) bin += String.fromCharCode(raw[i]);
+    return `data:${mime};base64,${btoa(bin)}`;
+  }
+
+  /// Upload my avatar image (raw bytes, ≤8KB — the UI compresses first).
+  async setAvatarImage(bytes) {
+    this.requireWallet();
+    if (!this.avWrite) throw new Error("avatar store not deployed");
+    const r = await (await this.avWrite.setAvatar(bytes)).wait();
+    if (this.address && this._profCache) this._profCache.delete(this.address.toLowerCase());
+    return r;
+  }
+
+  async clearAvatarImage() {
+    this.requireWallet();
+    if (!this.avWrite) throw new Error("avatar store not deployed");
+    const r = await (await this.avWrite.clearAvatar()).wait();
+    if (this.address && this._profCache) this._profCache.delete(this.address.toLowerCase());
+    return r;
   }
 
   /// Recent settled hands at a table — served by the dealer bot's indexer

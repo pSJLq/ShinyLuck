@@ -47,6 +47,7 @@
   .seatcard { min-width: 92px; padding: 5px 8px 7px; gap: 6px; }
   [data-dir="b"] .seatcard { width: 102px; padding: 5px 8px 7px; gap: 3px; }
   .avatar, [data-dir="b"] .seatcard .avatar { width: 30px; height: 30px; font-size: 11px; }
+  .avatar .em, [data-dir="b"] .seatcard .avatar .em { font-size: 16px; }
   .seatinfo .nm { font-size: 9.5px; max-width: 88px; }
   .seatinfo .stack { font-size: 12px; }
   .seatinfo .status { font-size: 8.5px; }

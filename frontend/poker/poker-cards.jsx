@@ -134,7 +134,73 @@ function SomiIcon({ className, style }) {
   );
 }
 
-Object.assign(window, { Card, Suit, BraceMark, BraceLogo, SomiIcon, SparkLogo, SparkMark, avatarColors });
+/* ------------------------------------------------------------------------
+   On-chain avatars. PlayerProfile.avatar is a uint16 stored with the nickname;
+   0 = "auto" (gradient + initial derived from the name hash), 1..N = curated
+   looks below. IDs live on-chain — only APPEND to this list, never reorder.
+   ------------------------------------------------------------------------ */
+const SP_AVATARS = [
+  null, // 0 = auto
+  "🦊", "🐯", "🦁", "🐺", "🦅", "🐉", "🐍", "🦈", "🐼", "🦉", "🐳", "🐸",
+  "👑", "🎩", "🃏", "💎", "⚡", "🔥", "🌙", "⭐", "🎲", "🏆", "🚀", "🤖",
+];
+
+/* One avatar look everywhere: seats, hero, cashier, standings.
+   Precedence: `img` (player-uploaded, stored on-chain in AvatarStore, passed
+   as a data URI) → `av` preset id → auto gradient/initial from the name.
+   Pass `size` for inline (small) usages; without it the .avatar CSS sizes it. */
+function AvatarIcon({ av, img, name, size, style }) {
+  const box = size ? { width: size, height: size, fontSize: Math.round(size * 0.38) } : undefined;
+  if (img) {
+    return (
+      <div className="avatar deco" style={{ background: `url("${img}") center/cover no-repeat, #15151c`, ...box, ...style }}>
+        <span className="ava-grid" />
+      </div>
+    );
+  }
+  const id = Number(av) || 0;
+  const glyph = id > 0 ? SP_AVATARS[id] : null;
+  // preset avatars keep a stable gradient per id; auto derives from the name
+  const c = avatarColors(glyph ? "av" + id : (name || "?"));
+  return (
+    <div className="avatar deco" style={{ background: `linear-gradient(${c.rot}deg, ${c.a}, ${c.b})`, ...box, ...style }}>
+      <SparkMark style={{ position: "absolute", inset: "10%", color: "rgba(255,246,221,.30)", transform: `rotate(${(c.rot % 50) - 25}deg)` }} />
+      {glyph
+        ? <span className="em" style={{ position: "relative", ...(size ? { fontSize: Math.round(size * 0.54) } : {}) }}>{glyph}</span>
+        : <span style={{ position: "relative" }}>{(name || "?").replace(/^0x/i, "")[0].toUpperCase()}</span>}
+      <span className="ava-grid" />
+    </div>
+  );
+}
+
+/* Client-side crop+compress for avatar upload: center-crop to a square,
+   resize to 96×96, walk WebP quality down until it fits the on-chain cap.
+   Returns { bytes: Uint8Array, dataUri } or throws. */
+function SPCompressAvatar(file, maxBytes = 7800) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => {
+      URL.revokeObjectURL(url);
+      const side = Math.min(im.width, im.height);
+      const cv = document.createElement("canvas");
+      cv.width = cv.height = 96;
+      const ctx = cv.getContext("2d");
+      ctx.drawImage(im, (im.width - side) / 2, (im.height - side) / 2, side, side, 0, 0, 96, 96);
+      for (let q = 0.85; q >= 0.3; q -= 0.1) {
+        const uri = cv.toDataURL("image/webp", q);
+        const b64 = uri.split(",")[1];
+        const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+        if (bytes.length <= maxBytes) return resolve({ bytes, dataUri: uri });
+      }
+      reject(new Error("image won't compress under the on-chain cap — try a simpler picture"));
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); reject(new Error("could not read that image")); };
+    im.src = url;
+  });
+}
+
+Object.assign(window, { Card, Suit, BraceMark, BraceLogo, SomiIcon, SparkLogo, SparkMark, avatarColors, SP_AVATARS, AvatarIcon, SPCompressAvatar });
 
 /* ------------------------------------------------------------------------
    i18n (EN/RU) for the live-table experience. First-loaded script → every

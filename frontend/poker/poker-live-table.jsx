@@ -116,6 +116,7 @@ function LiveTable() {
   const [finalHidden, setFinalHidden] = useState(false); // standings screen dismissed
   const moveRef = useRef(false); // redirect fired once
   const [names, setNames] = useState({}); // lowercased addr -> on-chain nickname
+  const [avs, setAvs] = useState({}); // lowercased addr -> { id, img } (on-chain preset + uploaded image)
   const [heroDealing, setHeroDealing] = useState(false);
   const heroDealRef = useRef(null);
   const fetchingRef = useRef(false);
@@ -305,24 +306,31 @@ function LiveTable() {
     return () => { stop = true; clearInterval(iv); };
   }, [connected, tableId]);
 
-  // resolve on-chain nicknames for everyone seated (SDK caches per address)
+  // resolve on-chain profiles (nickname + avatar) for everyone seated
+  const takeProfiles = (m) => {
+    const h = {}, a2 = {};
+    for (const k of Object.keys(m)) { h[k] = m[k].handle; a2[k] = { id: m[k].avatar, img: m[k].img }; }
+    setNames((p) => ({ ...p, ...h }));
+    setAvs((p) => ({ ...p, ...a2 }));
+  };
   useEffect(() => {
     if (!snap) return;
     const addrs = snap.seats.filter((s) => !s.empty).map((s) => s.player);
     if (addr) addrs.push(addr);
     let stop = false;
-    SP.sdk.handlesFor(addrs).then((m) => { if (!stop) setNames((p) => ({ ...p, ...m })); }).catch(() => {});
+    SP.sdk.profilesFor(addrs).then((m) => { if (!stop) takeProfiles(m); }).catch(() => {});
     return () => { stop = true; };
   }, [snap && snap.seats.filter((s) => !s.empty).map((s) => s.player).join(","), addr]);
   const nameOf = (a) => (a && names[a.toLowerCase()]) || short(a);
+  const avOf = (a) => (a && avs[a.toLowerCase()]) || { id: 0, img: null };
 
-  // nicknames for the final standings (bust/finish events carry addresses only)
+  // profiles for the final standings (bust/finish events carry addresses only)
   useEffect(() => {
     if (!trn || !trn.res) return;
     const list = trn.res.busts.map((b) => b.player).concat(trn.res.winner ? [trn.res.winner.player] : []);
     if (!list.length) return;
     let stop = false;
-    SP.sdk.handlesFor(list).then((m) => { if (!stop) setNames((p) => ({ ...p, ...m })); }).catch(() => {});
+    SP.sdk.profilesFor(list).then((m) => { if (!stop) takeProfiles(m); }).catch(() => {});
     return () => { stop = true; };
   }, [trn && trn.res && trn.res.busts.length + ":" + !!(trn.res && trn.res.winner)]);
 
@@ -749,7 +757,7 @@ function LiveTable() {
               const rev = showdown && reveals[dealKey] && reveals[dealKey][s.index] ? reveals[dealKey][s.index].map(SP.intToCardStr) : null;
               return (
                 <Seat key={s.index}
-                  player={{ hero: isMe, name: nameOf(s.player), av: (names[s.player?.toLowerCase()] ? names[s.player.toLowerCase()][0].toUpperCase() : (s.player ? s.player.slice(2, 3).toUpperCase() : "P")) }}
+                  player={{ hero: isMe, name: nameOf(s.player), avId: avOf(s.player).id, avImg: avOf(s.player).img }}
                   data={{
                     stack: NV(s.stack),
                     bbstacks: prefs.bbstacks, bbval: bbOf(s.stack),
@@ -788,13 +796,7 @@ function LiveTable() {
                 {myHole && bestHand && !seats[mySeat].folded && <div className="herocombo" style={heroEval ? comboStyle(heroEval.cat) : undefined}>{SPTHand(bestHand)}</div>}
                 <div className={"heroinfo" + (hand.inProgress && hand.actingSeat === mySeat ? " active" : "") + (seats[mySeat].allIn ? " allin" : "") + (seats[mySeat].folded ? " folded" : "") + (mySeat === anim.winnerSeat || (sdWin && sdWin.seat === mySeat) ? " winner" : "")}>
                   {actFor(mySeat) && <span className={"actchip " + lastActs[mySeat].kind}>{actLabel(lastActs[mySeat])}</span>}
-                  {(() => { const c = avatarColors(nameOf(addr)); return (
-                    <div className="avatar deco" style={{ background: `linear-gradient(${c.rot}deg, ${c.a}, ${c.b})` }}>
-                      <SparkMark style={{ position: "absolute", inset: "10%", color: "rgba(255,246,221,.30)", transform: `rotate(${(c.rot % 50) - 25}deg)` }} />
-                      <span style={{ position: "relative" }}>{names[addr?.toLowerCase()] ? names[addr.toLowerCase()][0].toUpperCase() : (addr ? addr.slice(2, 3).toUpperCase() : "Y")}</span>
-                      <span className="ava-grid" />
-                    </div>
-                  ); })()}
+                  <AvatarIcon av={avOf(addr).id} img={avOf(addr).img} name={nameOf(addr)} />
                   <div className="meta">
                     <span className="nm">YOU · {nameOf(addr)}</span>
                     <span className="stack tnum">{prefs.bbstacks && bbOf(seats[mySeat].stack) != null
@@ -891,6 +893,7 @@ function LiveTable() {
                       borderTop: i === 0 ? "none" : "1px solid var(--hair, rgba(255,255,255,.06))",
                       background: me ? "var(--accent-12, rgba(217,171,74,.12))" : r.place <= 3 ? "rgba(217,171,74,.05)" : "transparent" }}>
                       <span style={{ width: 36, fontFamily: "var(--mono)", fontSize: 13, color: r.place <= 3 ? "var(--accent-soft, #f2d78a)" : "var(--muted, #9a9aa8)" }}>{medal(r.place) || "#" + r.place}</span>
+                      <AvatarIcon av={avOf(r.player).id} img={avOf(r.player).img} name={nameOf(r.player)} size={22} style={{ borderRadius: 6 }} />
                       <span style={{ flex: 1, fontFamily: "var(--mono)", fontSize: 13, color: "var(--text, #e6e6ee)" }}>{nameOf(r.player)}{me ? (RUv ? " · вы" : " · you") : ""}</span>
                       <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: r.prize > 0n ? "var(--win, #57d9a3)" : "var(--muted, #9a9aa8)" }}>{r.prize > 0n ? `+${N(r.prize)} ${SP.NETWORK.currency.symbol}` : "—"}</span>
                     </div>
