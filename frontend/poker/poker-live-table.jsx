@@ -671,7 +671,8 @@ function LiveTable() {
               <span className="tag">{SPT("TOURNAMENT")} · {multi ? "MTT" : "SNG"} #{trn.id}</span>
               <span>{SPT("Level")} <b className="tnum">{trn.level + 1}</b></span>
               <span>{SPT("Blinds")} <b className="tnum">{fmtChips(lsb)} / {fmtChips(lbb)}{lante ? ` (${SPT("ante")} ${fmtChips(lante)})` : ""}</b></span>
-              {trn.status === 1 && nextIn != null && <span>{SPT("Next level")} <b className="tnum">{mm}:{ss}</b></span>}
+              {trn.status === 1 && nextIn != null && nextIn > 0 && <span>{SPT("Next level")} <b className="tnum">{mm}:{ss}</b></span>}
+              {trn.status === 1 && nextIn != null && nextIn === 0 && <span className="tag">{SPT("Level up between hands")}</span>}
               {trn.status === 1 && nextIn == null && <span className="tag">{SPT("Final level")}</span>}
               <span>{SPT("Players")} <b className="tnum">{trn.remaining}/{trn.registered}</b></span>
               <span>{SPT("Prize")} <b className="tnum">{Number(SP.fmt(trn.pool, 4))} {SP.NETWORK.currency.symbol}</b></span>
@@ -705,7 +706,11 @@ function LiveTable() {
                 <Board cards={board} deckMode={deck} flipFrom={anim.flipFrom} />
                 {hand.inProgress
                   ? <Pot pot={NV(hand.pot)} chips={CHIPS} />
-                  : <div className="pot"><div className="potmain"><span className="k">{SPT("Waiting for players")}</span></div></div>}
+                  : <div className="pot"><div className="potmain"><span className="k">
+                      {seats.filter((s) => !s.empty && !s.sittingOut).length >= 2
+                        ? SPT("Next hand starting…") /* players ARE here — we're waiting on the dealer, say so */
+                        : SPT("Waiting for players")}
+                    </span></div></div>}
               </div>
               {(anim.winnerSeat >= 0 || sdWin) && (() => {
                 const settled = anim.winnerSeat >= 0;
@@ -725,16 +730,19 @@ function LiveTable() {
             </div>
             <div className="feltvignette" />
 
-            {/* opponents' face-down cards while in hand (flipped up at showdown);
-                on fold the backs get one last render with the muck animation —
-                they visibly slide toward the pot and fade, LePoker-style */}
-            {hand.inProgress && !showdown && seats.map((s) => {
+            {/* opponents' face-down cards while in hand; on fold the backs get
+                one last render with the muck animation (slide to the pot).
+                At SHOWDOWN each seat's backs stay put until ITS revealed cards
+                arrive from the chain — the reveal tx can take seconds under
+                load, and backs vanishing into nothing read as a glitch */}
+            {hand.inProgress && seats.map((s) => {
               if (s.empty || s.index === mySeat) return null;
+              if (showdown && reveals[dealKey] && reveals[dealKey][s.index]) return null; // flipped up in the Seat
               const fa = lastActs[s.index];
               const mucking = !s.inHand && fa && fa.kind === "fold" && nowMs - fa.ts < 1400;
               if (!s.inHand && !mucking) return null;
               const pos = seatPos(s.index);
-              return <HoleBacks key={"b" + s.index} pos={pos} deal={anim.dealing && s.inHand} delay={300 + s.index * 120}
+              return <HoleBacks key={"b" + s.index} pos={pos} deal={anim.dealing && s.inHand && !showdown} delay={300 + s.index * 120}
                 muck={mucking} mx={(50 - pos.x) * 4} my={(43 - pos.y) * 5} />;
             })}
 

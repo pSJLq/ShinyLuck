@@ -232,6 +232,8 @@ const SP_I18N_RU = {
   "Next level": "След. уровень", "Final level": "Финальный уровень", "Players": "Игроки",
   "Prize": "Приз", "Split": "Сплит", "FINISHED": "ЗАВЕРШЁН",
   "Table": "Стол", "Switch to this table": "Перейти к этому столу",
+  "Next hand starting…": "Следующая рука вот-вот начнётся…",
+  "Level up between hands": "Уровень поднимется между руками",
   "Hand": "Рука", "Cashier": "Касса", "Connect Wallet": "Подключить кошелёк",
   "Say something…": "Напишите что-нибудь…", "Sit down to chat": "Сядьте за стол, чтобы писать", "Send": "Отпр.",
   "table chat · dealer feed": "чат стола · лента дилера", "hand history · on-chain": "история рук · он-чейн", "private player notes": "приватные заметки",
