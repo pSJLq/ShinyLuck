@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ShinyPoker — zkShuffle v2 Lab (experimental)</title>
+<link rel="icon" type="image/svg+xml" href="logo.svg">
+<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="marketing.css" />
+<style>
+  .lab { border: 1px solid var(--line, #2c2c36); border-radius: 14px; padding: 18px; margin: 16px 0;
+    background: rgba(255,255,255,0.02); }
+  .lab .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .players { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 12px 0; }
+  .pl { border: 1px solid var(--line, #2c2c36); border-radius: 10px; padding: 12px; }
+  .pl h4 { margin: 0 0 8px; font-family: "IBM Plex Mono", monospace; font-size: 13px; color: #f2d78a; }
+  .pl .know { font-size: 11px; color: var(--muted, #9a9aa8); line-height: 1.6; }
+  .pcards { display: flex; gap: 6px; margin: 8px 0; min-height: 34px; }
+  .pc { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 34px;
+    padding: 0 5px; border-radius: 6px; background: #16161c; border: 1px solid #3a3a48;
+    font-family: "IBM Plex Mono", monospace; font-size: 14px; font-weight: 700; color: #e6e6ee; }
+  .pc.red { color: #ff8d9d; }
+  .pc.hidden { color: #5a5a66; border-style: dashed; font-size: 11px; }
+  .boardrow2 { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+  .lablog { background: #000; border: 1px solid var(--line, #2c2c36); border-radius: 10px; padding: 12px;
+    font-family: "IBM Plex Mono", monospace; font-size: 11.5px; line-height: 1.75; color: #c9c9d4;
+    max-height: 340px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+  .lablog .ok { color: #57d9a3; } .lablog .bad { color: #ef5a6f; } .lablog .head { color: #f2d78a; }
+  .expbanner { border: 1px solid rgba(232,193,90,.4); background: rgba(232,193,90,.08); border-radius: 10px;
+    padding: 12px 14px; font-size: 13px; line-height: 1.6; color: #e6e6ee; margin: 14px 0; }
+</style>
+</head>
+<body class="marketing">
+  <canvas id="mkt-bg"></canvas>
+  <div class="mkt-wrap">
+    <div id="site-header"></div>
+    <div class="legal">
+      <div class="lhead">
+        <span class="eyebrow">Research lab · v2</span>
+        <h1>zkShuffle v2 — mental poker, live in your browser</h1>
+        <div class="lupd">The next trust model: nobody — not our dealer, not the host, not other players — can see your cards during a hand. This page runs the REAL cryptography (not a mock) right here, and lets you try to cheat it.</div>
+      </div>
+
+      <div class="expbanner">⚗️ <b>Experimental.</b> This is the v2 protocol core running client-side: ElGamal on secp256k1 (audited @noble/curves), Schnorr proofs for key aggregation, Chaum–Pedersen proofs for every decryption share, optimistic shuffle audit with exact cheater attribution. It is NOT yet wired to live tables and has NOT been externally audited — the current tables run the honest commit-reveal v1 described on the <a href="provably-fair" style="color:#f2d78a">provably-fair page</a>. Roadmap: <code>docs/ZKSHUFFLE-V2-SPEC.md</code> in the repo.</div>
+
+      <h2>How it works, in one hand</h2>
+      <p>Three players (simulated below, each with its own secret key your browser never shares between them): they aggregate a table key, each one <b>shuffles and re-encrypts the deck themselves</b>, then each hole card is decrypted <b>only by its owner</b> using the other players' proven decryption shares. After the hand, everyone opens their shuffle — any tampering is caught and attributed. Watch the log: at no point does any party other than the owner hold a readable card.</p>
+
+      <div class="lab">
+        <div class="btns">
+          <button id="btn-honest" class="btn primary">▶ Play an honest hand</button>
+          <button id="btn-cheat" class="btn ghost">😈 Let player 2 try to cheat</button>
+        </div>
+        <div class="players" id="players"></div>
+        <div class="boardrow2"><span style="font-size:11px;letter-spacing:.1em;color:#9a9aa8">BOARD</span><span class="pcards" id="board"></span></div>
+        <div class="lablog" id="log">Press “Play an honest hand”.</div>
+      </div>
+
+      <h2>What this stage does and doesn't prove</h2>
+      <ul>
+        <li><b>Does:</b> in-hand secrecy (your cards are ElGamal-encrypted under everyone's keys; only you can complete the decryption), share integrity (Chaum–Pedersen — a forged share is rejected instantly), deterministic post-hand cheat detection with the exact cheater named.</li>
+        <li><b>Doesn't yet:</b> zero-knowledge shuffle arguments (verifying each shuffle DURING the hand, with nothing opened after) — that's stage R2 of the spec, replacing the post-hand audit; and the on-chain contract (<code>IZkDealerV2</code>) with escrow slashing for caught cheaters.</li>
+      </ul>
+
+      <div style="margin-top:36px"><a class="btn primary" href="lobby">Play (v1 tables)</a> <a class="btn ghost" href="provably-fair" style="margin-left:8px">Provably fair — v1 model</a></div>
+    </div>
+    <div id="site-footer"></div>
+  </div>
+  <script src="poker-grid.js"></script>
+  <script src="marketing.js"></script>
+  <script type="module" src="zk-lab.js"></script>
+</body>
+</html>
