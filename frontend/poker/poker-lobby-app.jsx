@@ -11,7 +11,11 @@ const lshort = (a) => (a && a !== "0x0000000000000000000000000000000000000000" ?
 const stakeOf = (bb) => (bb <= 0.05 ? "micro" : bb <= 1 ? "low" : bb <= 5 ? "mid" : "high");
 
 function LobbyApp() {
-  const [tab, setTab] = uS("cash");
+  // footer/nav deep-links: lobby?tab=tournaments|sng|clubs|cash
+  const [tab, setTab] = uS(() => {
+    const t = new URLSearchParams(location.search).get("tab");
+    return ["cash", "tournaments", "sng", "clubs"].includes(t) ? t : "cash";
+  });
   const [rows, setRows] = uS([]);
   const [loaded, setLoaded] = uS(false);
   const [connected, setConnected] = uS(false);
@@ -113,7 +117,7 @@ function LobbyApp() {
     <div className="scaler" id="scaler">
       <div className="app lobby" data-dir={theme} data-deck="4">
         <header className="topbar">
-          <div className="group"><span style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }} title="Home" onClick={() => (location.href = "index")}><SparkLogo size={24} /><span className="wordmark" style={{ fontSize: 17 }}>shiny<span className="accent">poker</span></span></span></div>
+          <div className="group"><span style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }} title="Home" onClick={() => (location.href = "/poker/")}><SparkLogo size={24} /><span className="wordmark" style={{ fontSize: 17 }}>shiny<span className="accent">poker</span></span></span></div>
           <div className="switcher">
             <button onClick={() => (location.href = SP.POKER_CONFIG.casinoUrl)}><span className="dot" />ShinyLuck</button>
             <button className="on"><span className="dot" />Poker</button>

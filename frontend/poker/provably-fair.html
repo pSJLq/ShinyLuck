@@ -40,7 +40,7 @@
       </ul>
       <div class="callout">Every deal ID, seed commitment, revealed seed and block-hash entropy is on-chain via the dealer contract's <code>dealInfo</code>. Anyone can call <code>recomputeDeck</code> and confirm the cards they were shown match the committed shuffle — no trust required, and no permission needed.</div>
 
-      <h2>3½. Verify a hand yourself — right now, in this tab</h2>
+      <h2 id="verify">3½. Verify a hand yourself — right now, in this tab</h2>
       <p>Don't take the section above on faith. This tool runs <b>in your browser</b>: it reads the deal from the chain, re-derives the whole deck locally from the revealed seed, cross-checks it against the contract's own <code>recomputeDeck()</code>, and diffs the board that was posted street by street. We can't fake any of it — the only thing it talks to is the public RPC.</p>
       <div class="fairtool">
         <div class="frow">

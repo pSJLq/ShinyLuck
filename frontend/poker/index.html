@@ -4,8 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>ShinyPoker — Provably-fair on-chain poker on Somnia</title>
+<link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="stylesheet" href="styles.css" />
 <link rel="stylesheet" href="marketing.css" />
+<link rel="stylesheet" href="mobile.css" />
 </head>
 <body class="marketing">
   <canvas id="mkt-bg"></canvas>
@@ -15,27 +17,28 @@
     <!-- HERO -->
     <section class="hero">
       <div class="container">
-        <span class="badge"><span class="dot"></span>Live on Somnia Testnet · provably fair provably fair</span>
+        <span class="badge"><span class="dot"></span>Live on Somnia Testnet · every hand verifiable on-chain</span>
         <h1>Provably-fair <span class="accent">on-chain poker</span> on Somnia.</h1>
-        <p class="sub">Your keys, your cards, your chips. Every bet, pot and payout settles on-chain — and nobody, not even us, can ever see your hole cards.</p>
+        <p class="sub">Your keys, your cards, your chips. Every bet, pot and payout settles on-chain, every deck is sealed before the deal and verified after — check any hand yourself, no trust required.</p>
         <div class="ctas">
-          <a class="btn primary lg" href="table.html?t=0">
+          <a class="btn primary lg" href="lobby">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg>
             Connect Wallet &amp; Play</a>
           <a class="btn ghost lg" href="#how">How it works</a>
         </div>
         <div class="trustline">
-          <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg>zkShuffle card secrecy</span>
+          <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg>Provably-fair deal</span>
           <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>Sub-second finality</span>
           <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Non-custodial escrow</span>
           <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>No wallet popup per hand</span>
         </div>
 
-        <div class="mkt-stats">
-          <div class="s"><span class="k"><span class="live"></span>Players online</span><span class="v acc tnum" data-count="12480">0</span></div>
-          <div class="s"><span class="k">Tables running</span><span class="v tnum" data-count="342">0</span></div>
-          <div class="s"><span class="k">Biggest pot today</span><span class="v tnum" data-count="2840" data-suffix=" SOMI">0</span></div>
-          <div class="s"><span class="k">Next major</span><span class="v tnum">1h 12m</span></div>
+        <!-- filled LIVE from the on-chain lobby feed by marketing.js -->
+        <div class="mkt-stats" id="live-stats">
+          <div class="s"><span class="k"><span class="live"></span>Players seated</span><span class="v acc tnum" id="ls-players">—</span></div>
+          <div class="s"><span class="k">Tables live</span><span class="v tnum" id="ls-tables">—</span></div>
+          <div class="s"><span class="k">Hands in play</span><span class="v tnum" id="ls-hands">—</span></div>
+          <div class="s"><span class="k">Biggest pot now</span><span class="v tnum" id="ls-pot">—</span></div>
         </div>
       </div>
     </section>
@@ -53,13 +56,13 @@
             <div class="num">1</div>
             <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg></div>
             <h3>Connect your wallet</h3>
-            <p>MetaMask, WalletConnect or an embedded wallet. We switch you to Somnia mainnet automatically — no custody, ever.</p>
+            <p>Sign in with email for an instant Somnia wallet — or bring MetaMask. Either way it's your key, no custody, ever.</p>
           </div>
           <div class="stepcard">
             <div class="num">2</div>
             <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v12M7 11l5 5 5-5M5 21h14"/></svg></div>
             <h3>Deposit to escrow</h3>
-            <p>Move SOMI from your wallet into the audited escrow contract. Sub-cent fees, instant withdrawals, no lockup.</p>
+            <p>Move STT from your wallet into the open-source escrow contract. Sub-cent fees, instant withdrawals, no lockup.</p>
           </div>
           <div class="stepcard">
             <div class="num">3</div>
@@ -72,24 +75,24 @@
     </section>
 
     <!-- zkSHUFFLE -->
-    <section class="section" id="fair" style="background:linear-gradient(180deg,transparent,rgba(110,110,237,0.04),transparent)">
+    <section class="section" id="fair" style="background:linear-gradient(180deg,transparent,rgba(217,171,74,0.04),transparent)">
       <div class="container">
         <div class="zksplit">
           <div class="zkviz">
             <canvas id="zkviz-canvas"></canvas>
-            <span class="vlabel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" style="width:13px;height:13px"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg>zkShuffle · deck sealed on-chain</span>
+            <span class="vlabel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" style="width:13px;height:13px"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg>commit-reveal · deck sealed on-chain</span>
             <button class="vbtn" id="zk-shuffle-btn">Shuffle ↻</button>
           </div>
           <div class="zktext">
-            <span class="eyebrow">Card secrecy</span>
-            <h2>Nobody sees your cards. Not even us.</h2>
-            <p class="lead">Hands are shuffled and dealt collaboratively by the players themselves using zero-knowledge proofs — mental poker on-chain. There is no server, no operator, and no “trusted dealer” that could ever peek.</p>
+            <span class="eyebrow">Provably fair</span>
+            <h2>The deal can’t be rigged — and you can prove it.</h2>
+            <p class="lead">Before every hand the deck is sealed on-chain with a commitment, then locked to a future block hash no one can predict. After the hand the seed is revealed and the whole deck is re-derived and verified on-chain. No one can stack the deck or change a card, and anyone can re-check any hand.</p>
             <div class="zklist">
-              <div class="zi"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="zt"><b>Commit before the deal.</b> A sealed deck commitment is published on-chain so it can’t be altered mid-hand.</span></div>
-              <div class="zi"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="zt"><b>Prove, don’t trust.</b> Every shuffle is mathematically verifiable — re-check any past hand in the Verification Center.</span></div>
-              <div class="zi"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="zt"><b>Reveal after.</b> The seed is revealed post-hand and re-hashes to the commitment — provably fair, every time.</span></div>
+              <div class="zi"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="zt"><b>Commit before the deal.</b> A sealed deck commitment is published on-chain so the shuffle can’t be altered once the hand starts.</span></div>
+              <div class="zi"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="zt"><b>Prove, don’t trust.</b> The deck is a deterministic function of the seed + block hash — re-derive and verify any past hand yourself.</span></div>
+              <div class="zi"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="zt"><b>Reveal after.</b> The seed is revealed post-hand and re-hashes to the commitment — provably fair, every time. <span style="opacity:.7">During play a dealer service delivers your hole cards; a fully trustless mental-poker dealer is on the roadmap.</span></span></div>
             </div>
-            <a class="btn ghost" href="provably-fair.html" style="margin-top:26px">Read the proof →</a>
+            <a class="btn ghost" href="provably-fair" style="margin-top:26px">Read how it works →</a>
           </div>
         </div>
       </div>
@@ -102,18 +105,15 @@
           <span class="eyebrow">Running now</span>
           <h2>Featured games &amp; tournaments</h2>
         </div>
+        <!-- filled LIVE from the on-chain lobby feed by marketing.js -->
         <div class="featured-split">
           <div class="fcol">
-            <h3>Cash games <a href="lobby.html">All tables →</a></h3>
-            <div class="fitem"><div class="fmain"><div class="ft">NLHE · 6-max</div><div class="fm">5/6 seated · avg pot 18.4 · rake 0.2 capped</div></div><div class="fval tnum">0.5 / 1<span class="u"> SOMI</span></div></div>
-            <div class="fitem"><div class="fmain"><div class="ft">NLHE · 6-max</div><div class="fm">6/6 seated · 3 waiting · avg pot 41.2</div></div><div class="fval tnum">1 / 2<span class="u"> SOMI</span></div></div>
-            <div class="fitem"><div class="fmain"><div class="ft">PLO · 6-max</div><div class="fm">5/6 seated · 52% players/flop</div></div><div class="fval tnum">1 / 2<span class="u"> SOMI</span></div></div>
+            <h3>Cash games <a href="lobby?tab=cash">All tables →</a></h3>
+            <div id="feat-cash"><div class="fitem"><div class="fmain"><div class="fm">Loading live tables…</div></div></div></div>
           </div>
           <div class="fcol">
-            <h3>Tournaments <a href="lobby.html">Full schedule →</a></h3>
-            <div class="fitem"><div class="fmain"><div class="ft">Somnia Sunday Major</div><div class="fm secure">✓ 50,000 SOMI secured on-chain · starts 1h 12m</div></div><div class="fval tnum">20<span class="u"> SOMI</span></div></div>
-            <div class="fitem"><div class="fmain"><div class="ft">Hyper Turbo Bounty KO</div><div class="fm secure">✓ 11,400 SOMI · late reg open</div></div><div class="fval tnum">10<span class="u"> SOMI</span></div></div>
-            <div class="fitem"><div class="fmain"><div class="ft">Whale Room High Roller</div><div class="fm secure">✓ 142,500 SOMI · registering</div></div><div class="fval tnum">500<span class="u"> SOMI</span></div></div>
+            <h3>Tournaments <a href="lobby?tab=tournaments">Full schedule →</a></h3>
+            <div id="feat-trn"><div class="fitem"><div class="fmain"><div class="fm">Loading live events…</div></div></div></div>
           </div>
         </div>
       </div>
@@ -132,8 +132,8 @@
           <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg></div><h3>Instant on-chain payouts</h3><p>Pots, side-pots and tournament prizes settle automatically the moment a hand ends. No cashier delays.</p></div>
           <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M9 12h6M12 9v6"/></svg></div><h3>Transparent rake</h3><p>Every table shows its rake and cap up front — “no flop, no drop”. Tournament fees are split in the open.</p></div>
           <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 12l5 5L20 7"/></svg></div><h3>One-tap session keys</h3><p>Authorize a capped session once at sit-down and play popup-free. Revoke instantly from Settings.</p></div>
-          <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></div><h3>Live via WebSocket</h3><p>Table state, timers and pots are pushed in real time — no polling, no stale screens.</p></div>
-          <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg></div><h3>Provably fair, always</h3><p>zkShuffle guarantees card secrecy and a verifiable shuffle. Audit any hand yourself.</p></div>
+          <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></div><h3>Real-time table state</h3><p>Table state, timers and pots stay in sync live — served from a fast dealer cache so hundreds can watch at once.</p></div>
+          <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg></div><h3>Provably fair, always</h3><p>Every deck is committed on-chain before the deal and re-derived and verified after. The deal can’t be rigged — audit any hand yourself.</p></div>
         </div>
       </div>
     </section>
@@ -148,7 +148,7 @@
           <div class="twin">
             <a class="twincard" href="https://shiny-luck.vercel.app/">{s} ShinyLuck Casino</a>
             <span class="swap">⇄</span>
-            <a class="twincard" href="lobby.html" style="border-color:var(--accent-32)">{s} ShinyPoker</a>
+            <a class="twincard" href="lobby" style="border-color:var(--accent-32)">{s} ShinyPoker</a>
           </div>
         </div>
       </div>
@@ -159,11 +159,11 @@
       <div class="container">
         <div class="sechead"><span class="eyebrow">Questions</span><h2>Good to know</h2></div>
         <div class="faq">
-          <div class="faqitem open"><div class="q">Is my money actually on-chain?<span class="plus">+</span></div><div class="a">Yes. Deposits sit in an audited escrow contract, and every buy-in, bet, pot, rake and payout is an on-chain transaction on Somnia. You can verify all of it on the block explorer.</div></div>
-          <div class="faqitem"><div class="q">Can anyone see my hole cards?<span class="plus">+</span></div><div class="a">No. ShinyPoker uses zkShuffle — a zero-knowledge mental-poker protocol. Cards are shuffled and dealt collaboratively, and no server or operator ever has access to anyone’s hole cards.</div></div>
+          <div class="faqitem open"><div class="q">Is my money actually on-chain?<span class="plus">+</span></div><div class="a">Yes. Deposits sit in a non-custodial escrow contract, and every buy-in, bet, pot, rake and payout is an on-chain transaction on Somnia. You can verify all of it on the block explorer. The contract has no path for the house to move your balance — only you can withdraw it.</div></div>
+          <div class="faqitem"><div class="q">Can the deal be rigged, and can anyone see my cards?<span class="plus">+</span></div><div class="a">The <b>deal cannot be rigged</b>: the deck is sealed on-chain before each hand and locked to an unpredictable block hash, then re-derived and verified on-chain after — anyone can re-check any hand, so no card can be swapped or stacked. On <b>card secrecy</b>, we’re straight with you: in this v1 the dealer service derives the deck to deliver each player their two cards, so it technically holds them during the hand (it cannot change them). Opponents and the public never see your cards until showdown. A fully trustless mental-poker (“no one ever sees a card”) dealer is the v2 on our roadmap.</div></div>
           <div class="faqitem"><div class="q">Do I sign a transaction for every action?<span class="plus">+</span></div><div class="a">No. When you sit down you authorize a capped session key once. After that, folds, calls and raises happen instantly with no wallet popup, while still settling on-chain in the background. Revoke the session any time.</div></div>
-          <div class="faqitem"><div class="q">How fast are withdrawals?<span class="plus">+</span></div><div class="a">Instant. Owner-withdraw from escrow has zero lockup — your SOMI is back in your wallet in seconds, for a sub-cent fee.</div></div>
-          <div class="faqitem"><div class="q">What’s the rake?<span class="plus">+</span></div><div class="a">Shown transparently on every table (e.g. 0.2 SOMI per hand, capped, “no flop no drop”). Tournament fees are displayed as a split, e.g. “20 SOMI = 18.5 prize pool + 1.5 fee”.</div></div>
+          <div class="faqitem"><div class="q">How fast are withdrawals?<span class="plus">+</span></div><div class="a">Instant. Withdrawing from escrow has zero lockup — your STT is back in your wallet in seconds, for a sub-cent fee.</div></div>
+          <div class="faqitem"><div class="q">What’s the rake?<span class="plus">+</span></div><div class="a">Shown transparently on every table — a capped percentage of the pot, “no flop no drop”. Tournament fees are displayed as a split up front: buy-in = prize pool + fee, nothing hidden.</div></div>
         </div>
       </div>
     </section>
@@ -174,7 +174,7 @@
         <div class="ctaband">
           <h2>Your keys. Your cards. Your chips.</h2>
           <p>Sit down at the most transparent poker room in crypto.</p>
-          <a class="btn primary lg" href="table.html?t=0">Connect Wallet &amp; Play</a>
+          <a class="btn primary lg" href="lobby">Connect Wallet &amp; Play</a>
         </div>
       </div>
     </section>
@@ -183,7 +183,7 @@
   </div>
 
   <template id="__bundler_thumbnail">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#070707"/><rect x="30" y="30" width="40" height="40" rx="6" fill="#6E6EED"/><text x="50" y="62" font-family="monospace" font-size="26" fill="#fff" text-anchor="middle">{s}</text></svg>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#070707"/><rect x="30" y="30" width="40" height="40" rx="6" fill="#d9ab4a"/><text x="50" y="62" font-family="monospace" font-size="26" fill="#fff" text-anchor="middle">{s}</text></svg>
   </template>
 
   <script src="poker-grid.js"></script>

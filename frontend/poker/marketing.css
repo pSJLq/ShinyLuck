@@ -129,7 +129,7 @@ p { margin: 0; }
 
 /* ---------------- family banner ---------------- */
 .family { border: 1px solid var(--line-2); border-radius: 20px; padding: 44px; text-align: center; position: relative; overflow: hidden;
-  background: radial-gradient(80% 140% at 50% 0%, rgba(110,110,237,0.12), #0a0a0c 70%); }
+  background: radial-gradient(80% 140% at 50% 0%, rgba(217,171,74,0.12), #0a0a0c 70%); }
 .family h2 { font-size: 32px; }
 .family p { font-family: var(--body); font-size: 15px; color: var(--muted); margin: 14px auto 26px; max-width: 520px; line-height: 1.6; }
 .family .twin { display: inline-flex; gap: 16px; align-items: center; }
@@ -151,7 +151,7 @@ p { margin: 0; }
 
 /* ---------------- CTA band ---------------- */
 .ctaband { text-align: center; border: 1px solid var(--accent-32); border-radius: 20px; padding: 56px 32px;
-  background: radial-gradient(90% 160% at 50% 0%, rgba(110,110,237,0.14), #08080b 72%); }
+  background: radial-gradient(90% 160% at 50% 0%, rgba(217,171,74,0.14), #08080b 72%); }
 .ctaband h2 { font-size: 40px; }
 .ctaband p { font-family: var(--body); font-size: 16px; color: var(--text-2); margin: 16px auto 28px; max-width: 480px; }
 
@@ -227,3 +227,51 @@ p { margin: 0; }
   .section { padding: 60px 0; }
   .mkt-switcher { display: none; }
 }
+
+/* gold rebrand: dark ink on gold surfaces (landing) */
+.cta, .btn-sm.join, .chipset button.on, .pill.primary { color: #1b1407 !important; }
+
+/* two-row slim footer (lobby/tournament) — the one-liner looked chopped off */
+.appfooter.two { flex-direction: column; align-items: stretch; gap: 8px; padding: 14px 18px 12px; }
+.appfooter .afrow { display: flex; align-items: center; gap: 14px; }
+.appfooter .afrow.links { padding-top: 8px; border-top: 1px solid var(--hair, rgba(255,255,255,.05)); font-size: 11px; }
+.appfooter .aftag { color: var(--muted); font-family: var(--label); font-size: 11.5px; }
+.appfooter .fsocial { display: flex; gap: 8px; }
+.appfooter .fsocial a { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); }
+.appfooter .fsocial a:hover { color: var(--accent-soft); border-color: var(--accent-32); }
+.appfooter .fsocial svg { width: 13px; height: 13px; }
+.appfooter .copy { color: var(--muted); font-size: 10.5px; }
+
+/* character pass: display face for landing headings */
+h1, h2, .mkt-hero h1 { font-family: "Bricolage Grotesque", "DM Sans", sans-serif; letter-spacing: -0.02em; }
+
+/* =========================================================================
+   Humanize pass (v1.5): the chrome read as "AI default" — mono-caps labels
+   on every control and 999px pills on everything. UI chrome moves to the
+   humanist body face (DM Sans), mono stays ONLY for numbers/addresses/code,
+   and corners tighten from pills to a consistent 6-12px editorial scale.
+   ========================================================================= */
+h3 { font-family: "Bricolage Grotesque", var(--body), sans-serif; font-weight: 700; letter-spacing: -0.01em; }
+.mkt-nav a { font-family: var(--body); font-size: 13.5px; letter-spacing: 0; border-radius: 6px; }
+.btn { font-family: var(--body); font-weight: 600; letter-spacing: 0.01em; border-radius: 6px; }
+.mkt-switcher { border-radius: 8px; }
+.mkt-switcher a { border-radius: 5px; font-family: var(--body); font-weight: 600; text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+.hero .badge { border-radius: 6px; font-family: var(--body); font-size: 12.5px; letter-spacing: 0; }
+.hero .trustline { font-family: var(--body); font-size: 13px; }
+.mkt-stats { border-radius: 10px; }
+.mkt-stats .s .k { font-family: var(--body); letter-spacing: 0.04em; }
+.stepcard, .featcard { border-radius: 10px; }
+.zkviz { border-radius: 10px; }
+.zkviz .vlabel, .zkviz .vbtn { font-family: var(--body); border-radius: 6px; }
+.fitem { border-radius: 8px; }
+.fitem .fm { font-family: var(--body); }
+.family, .ctaband { border-radius: 12px; }
+.family .twincard { border-radius: 8px; }
+.faqitem { border-radius: 8px; }
+.faqitem .q, .faqitem .a { font-family: var(--body); }
+.legal .callout { border-radius: 8px; }
+.mkt-footer .fcol a, .mkt-footer .tag, .mkt-footer .fh { font-family: var(--body); }
+.mkt-footer .fh { letter-spacing: 0.06em; }
+.mkt-footer .fsocial a, .appfooter .fsocial a { border-radius: 6px; }
+.appfooter .aftag, .appfooter .afrow.links a { font-family: var(--body); }
+.expbanner, .fairtool { border-radius: 8px; }
