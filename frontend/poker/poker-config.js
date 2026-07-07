@@ -8,6 +8,7 @@ export const POKER_CONFIG = {
   pokerTournament: "0xB4808411903Fb8e2Eee23bceB9f274943EDAf766",
   playerProfile: "0x7364E1ED8a07b4659c059fa66D346c42907C3F14", // on-chain nicknames (PlayerProfile.sol) — filled on deploy
   avatarStore: "0x20c39988b480485aD2a9715c32Ff1866Ea890Ec4", // on-chain uploaded avatars (AvatarStore.sol)
+  zkDealerV2: "0x292Ef0e15fC62613B00c55b0eEAC38279Efdb67D", // EXPERIMENTAL zkShuffle v2 on-chain verifier (ZkDealerV2.sol)
   // Off-chain dealer bot's hole-card API (serves each player only their cards).
   dealerApiUrl: "http://localhost:3002",
   // Reciprocal link back to the ShinyLuck casino (Casino⇄Poker switcher).

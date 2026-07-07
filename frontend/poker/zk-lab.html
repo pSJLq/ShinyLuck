@@ -41,10 +41,10 @@
         <div class="lupd">The next trust model: nobody — not our dealer, not the host, not other players — can see your cards during a hand. This page runs the REAL cryptography (not a mock) right here, and lets you try to cheat it.</div>
       </div>
 
-      <div class="expbanner">⚗️ <b>Experimental.</b> This is the v2 protocol core running client-side: ElGamal on secp256k1 (audited @noble/curves), Schnorr proofs for key aggregation, Chaum–Pedersen proofs for every decryption share, optimistic shuffle audit with exact cheater attribution. It is NOT yet wired to live tables and has NOT been externally audited — the current tables run the honest commit-reveal v1 described on the <a href="provably-fair" style="color:#f2d78a">provably-fair page</a>. Roadmap: <code>docs/ZKSHUFFLE-V2-SPEC.md</code> in the repo.</div>
+      <div class="expbanner">⚗️ <b>Experimental — but really on-chain.</b> This runs the v2 protocol core client-side on <b>BN254</b> (the curve the EVM has native precompiles for), and every Schnorr key proof and Chaum–Pedersen decryption-share proof below is <b>verified by a deployed contract</b> (<code>ZkDealerV2</code> on Somnia testnet) via a zero-gas <code>eth_call</code> — you're watching the actual chain accept or reject each proof. It is NOT yet wired to live tables and has NOT been externally audited — the current tables run the honest commit-reveal v1 on the <a href="provably-fair" style="color:#f2d78a">provably-fair page</a>. Roadmap: <code>docs/ZKSHUFFLE-V2-SPEC.md</code>.</div>
 
       <h2>How it works, in one hand</h2>
-      <p>Three players (simulated below, each with its own secret key your browser never shares between them): they aggregate a table key, each one <b>shuffles and re-encrypts the deck themselves</b>, then each hole card is decrypted <b>only by its owner</b> using the other players' proven decryption shares. After the hand, everyone opens their shuffle — any tampering is caught and attributed. Watch the log: at no point does any party other than the owner hold a readable card.</p>
+      <p>Three players (simulated below, each with its own secret key your browser never shares between them): they aggregate a table key, each one <b>shuffles and re-encrypts the deck themselves</b>, then each hole card is decrypted <b>only by its owner</b> using the other players' decryption shares — and each of those shares is proven correct and <b>checked by the contract on-chain</b>. After the hand, everyone opens their shuffle — any tampering is caught, attributed, and provable on-chain (<code>ZkDealerV2.checkStage</code>). Watch the log: no party other than the owner ever holds a readable card.</p>
 
       <div class="lab">
         <div class="btns">
@@ -58,8 +58,8 @@
 
       <h2>What this stage does and doesn't prove</h2>
       <ul>
-        <li><b>Does:</b> in-hand secrecy (your cards are ElGamal-encrypted under everyone's keys; only you can complete the decryption), share integrity (Chaum–Pedersen — a forged share is rejected instantly), deterministic post-hand cheat detection with the exact cheater named.</li>
-        <li><b>Doesn't yet:</b> zero-knowledge shuffle arguments (verifying each shuffle DURING the hand, with nothing opened after) — that's stage R2 of the spec, replacing the post-hand audit; and the on-chain contract (<code>IZkDealerV2</code>) with escrow slashing for caught cheaters.</li>
+        <li><b>Does, on-chain:</b> the aggregate table key (each player's Schnorr proof is verified by the contract), and every decryption share (Chaum–Pedersen, verified by the contract — a forged share is rejected by the chain). In-hand secrecy: your cards are ElGamal-encrypted under everyone's keys, so only you can complete the decryption. Cheat detection is deterministic and attributable, and the shuffle audit is re-derivable on-chain (<code>checkStage</code>).</li>
+        <li><b>Doesn't yet:</b> zero-knowledge shuffle arguments (verifying each shuffle DURING the hand with nothing opened after) — stage R2 of the spec, replacing the optimistic audit; escrow slashing wired to the room; and an external audit. Deck storage on-chain is also currently heavy (~0.26 STT/hand) and will move to a hash-commit + calldata-verify model.</li>
       </ul>
 
       <div style="margin-top:36px"><a class="btn primary" href="lobby">Play (v1 tables)</a> <a class="btn ghost" href="provably-fair" style="margin-left:8px">Provably fair — v1 model</a></div>
