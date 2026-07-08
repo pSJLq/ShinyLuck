@@ -10,7 +10,8 @@
     "pokerTournament": "0xB4808411903Fb8e2Eee23bceB9f274943EDAf766",
     "playerProfile": "0x7364E1ED8a07b4659c059fa66D346c42907C3F14",
     "avatarStore": "0x20c39988b480485aD2a9715c32Ff1866Ea890Ec4",
-    "zkDealerV2": "0x292Ef0e15fC62613B00c55b0eEAC38279Efdb67D"
+    "zkDealerV2": "0x292Ef0e15fC62613B00c55b0eEAC38279Efdb67D",
+    "zkTableDealer": "0x3D3611364FaCc7b8AFdECD77755708cCec41D6a9"
   },
   "defaultTable": {
     "maxSeats": 6,
@@ -24,5 +25,6 @@
   "tournamentRedeployedAt": "2026-07-04T12:34:17.070Z",
   "roomRedeployedAt": "2026-07-05T08:03:54.512Z",
   "avatarStoreDeployedAt": "2026-07-07T01:37:59.835Z",
-  "zkDealerV2DeployedAt": "2026-07-07T17:38:50.382Z"
+  "zkDealerV2DeployedAt": "2026-07-07T17:38:50.382Z",
+  "zkTableDealerDeployedAt": "2026-07-08T05:04:08.498Z"
 }

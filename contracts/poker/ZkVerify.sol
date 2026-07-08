@@ -11,6 +11,19 @@ library ZkVerify {
     // BN254 G1 group (scalar field) order r.
     uint256 internal constant R =
         21888242871839275222246405745257275088548364400416034343698204186575808495617;
+    // BN254 base field prime p (for point negation: −(x,y) = (x, p−y)).
+    uint256 internal constant P =
+        21888242871839275222246405745257275088696311157297823662689037894645226208583;
+
+    function field() internal pure returns (uint256) {
+        return P;
+    }
+
+    /// −P = (x, p−y); the point at infinity (0,0) negates to itself.
+    function neg(G1Point memory p) internal pure returns (G1Point memory) {
+        if (p.x == 0 && p.y == 0) return G1Point(0, 0);
+        return G1Point(p.x, P - (p.y % P));
+    }
 
     struct G1Point {
         uint256 x;
