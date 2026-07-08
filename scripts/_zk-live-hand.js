@@ -32,8 +32,9 @@ const shareDomain = (d, c, s) => `SPZK:${d}:share:${c}:${s}`;
 
 const provider = new ethers.JsonRpcProvider(RPC); provider.pollingInterval = 500;
 const master = process.env.POKER_SEED_MASTER_KEY;
-const casino = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-const deployer = new ethers.Wallet(ethers.keccak256(ethers.solidityPacked(["bytes32", "string"], [master, "zk-coord"])), provider);
+// funded from the faucet by the user (10 STT); also acts as coordinator/deployer
+const casino = new ethers.Wallet(ethers.keccak256(ethers.solidityPacked(["bytes32", "string"], [master, "zkv2-live-fund"])), provider);
+const deployer = casino;
 const p0 = new ethers.Wallet(ethers.keccak256(ethers.solidityPacked(["bytes32", "string"], [master, "zk-p0"])), provider);
 const p1 = new ethers.Wallet(ethers.keccak256(ethers.solidityPacked(["bytes32", "string"], [master, "zk-p1"])), provider);
 let gasPrice;
@@ -51,22 +52,31 @@ async function main() {
   gasPrice = (await provider.getFeeData()).gasPrice;
   console.log("=== zkShuffle v2 LIVE heads-up hand (real STT) ===");
 
-  // fund coordinator + players from the casino key
-  for (const [w, amt] of [[deployer, "0.6"], [p0, "0.08"], [p1, "0.08"]]) {
-    const bal = await provider.getBalance(w.address);
-    if (bal < E(amt)) { await (await casino.sendTransaction({ to: w.address, value: E(amt) - bal, ...G(21000) })).wait(); }
-  }
-  console.log("funded. casino left:", F(await provider.getBalance(casino.address)));
+  // fund the two players from the coordinator wallet (Somnia meters plain
+  // transfers heavy — ~630k gas — so estimate, don't assume 21000)
+  const xfer = async (to, amt) => {
+    const bal = await provider.getBalance(to);
+    if (bal >= E(amt)) return;
+    const value = E(amt) - bal;
+    const est = await provider.estimateGas({ from: casino.address, to, value });
+    await (await casino.sendTransaction({ to, value, gasLimit: est * 13n / 10n, gasPrice, type: 0 })).wait();
+  };
+  await xfer(p0.address, "0.09"); await xfer(p1.address, "0.09");
+  console.log("funded players. coordinator:", F(await provider.getBalance(casino.address)));
 
   // 1. deploy v2 room + ZkTableDealer, wire them
+  const deployWith = async (name, factory, args) => {
+    const dtx = await factory.getDeployTransaction(...args);
+    const est = await provider.estimateGas({ from: deployer.address, data: dtx.data });
+    const c = await factory.deploy(...args, { gasLimit: est * 12n / 10n, gasPrice, type: 0 });
+    await c.waitForDeployment();
+    return c;
+  };
   const Room = new ethers.ContractFactory(abi("PokerRoom").abi, abi("PokerRoom").bytecode, deployer);
-  const room = await Room.deploy(deployer.address, G(await provider.estimateGas({ from: deployer.address, data: abi("PokerRoom").bytecode }) * 12n / 10n));
-  await room.waitForDeployment();
+  const room = await deployWith("PokerRoom", Room, [deployer.address]);
   const roomAddr = await room.getAddress();
   const ZKD = new ethers.ContractFactory(abi("ZkTableDealer").abi, abi("ZkTableDealer").bytecode, deployer);
-  const ctorData = ZKD.interface.encodeDeploy([roomAddr, deployer.address]);
-  const zkd = await ZKD.deploy(roomAddr, deployer.address, G(await provider.estimateGas({ from: deployer.address, data: abi("ZkTableDealer").bytecode + ctorData.slice(2) }) * 12n / 10n));
-  await zkd.waitForDeployment();
+  const zkd = await deployWith("ZkTableDealer", ZKD, [roomAddr, deployer.address]);
   const zkdAddr = await zkd.getAddress();
   console.log(`deployed v2 PokerRoom=${roomAddr}`);
   console.log(`deployed ZkTableDealer=${zkdAddr}`);
@@ -82,10 +92,10 @@ async function main() {
   // 3. both players deposit + sit
   const roomAbi = abi("PokerRoom").abi;
   const r0 = new ethers.Contract(roomAddr, roomAbi, p0), r1 = new ethers.Contract(roomAddr, roomAbi, p1);
-  async function deposit(rc, amt) { const tx = await rc.deposit({ value: E(amt), ...G(400000n) }); await tx.wait(); }
+  async function deposit(rc, amt) { const est = await rc.deposit.estimateGas({ value: E(amt) }); const tx = await rc.deposit({ value: E(amt), gasLimit: est * 13n / 10n, gasPrice, type: 0 }); await tx.wait(); }
   await deposit(r0, "0.05"); await deposit(r1, "0.05");
-  await send(null, r0, "sitDown", [tableId, 0, E("0.05")], 600000n);
-  await send(null, r1, "sitDown", [tableId, 1, E("0.05")], 600000n);
+  await send(null, r0, "sitDown", [tableId, 0, E("0.05")]);
+  await send(null, r1, "sitDown", [tableId, 1, E("0.05")]);
   console.log("both players seated heads-up, 0.05 STT each");
 
   // 4. COORDINATOR prepares the mentally-shuffled deck for the next hand
@@ -106,7 +116,7 @@ async function main() {
 
   // 5. start the hand (binds the prepared deal), then play all-in preflop
   const roomOp = new ethers.Contract(roomAddr, roomAbi, deployer);
-  await send("room.startHand (binds v2 deal)", roomOp, "startHand", [tableId], 1200000n);
+  await send("room.startHand (binds v2 deal)", roomOp, "startHand", [tableId]);
   const seatWallet = { 0: p0, 1: p1 };
   for (let guard = 0; guard < 6; guard++) {
     const h = await room.getHand(tableId);
@@ -114,7 +124,7 @@ async function main() {
     if (!h.inProgress) break;
     const acting = Number(h.actingSeat);
     const rc = new ethers.Contract(roomAddr, roomAbi, seatWallet[acting]);
-    await send(`seat ${acting} all-in`, rc, "act", [tableId, A.ALLIN, 0], 700000n);
+    await send(`seat ${acting} all-in`, rc, "act", [tableId, A.ALLIN, 0]);
   }
   let h = await room.getHand(tableId);
   console.log(`street after betting = ${Number(h.street)} (4 = showdown), pot ${F(h.pot)}`);
@@ -131,7 +141,7 @@ async function main() {
   const boardCards = [];
   for (let slot = 0; slot < 5; slot++) {
     const sh = sharesFor(2 * k + slot);
-    await send(`board[${slot}] = card ${sh.card} (decrypt verified on-chain)`, zc, "revealBoardCard", [dealId, slot, sh.card, sh.d, sh.R1, sh.R2, sh.s], 900000n);
+    await send(`board[${slot}] = card ${sh.card} (decrypt verified on-chain)`, zc, "revealBoardCard", [dealId, slot, sh.card, sh.d, sh.R1, sh.R2, sh.s]);
     boardCards.push(sh.card);
   }
   for (let seat = 0; seat < 2; seat++) {
@@ -139,14 +149,13 @@ async function main() {
     await send(`seat ${seat} hole = [${c0.card},${c1.card}] (verified on-chain)`, zc, "revealHoleCards", [
       dealId, seat, seat, [c0.card, c1.card],
       [...c0.d, ...c1.d], [...c0.R1, ...c1.R1], [...c0.R2, ...c1.R2], [...c0.s, ...c1.s],
-    ], 1400000n);
+    ]);
   }
-  await send("markShowdownReady", zc, "markShowdownReady", [dealId], 120000n);
+  await send("markShowdownReady", zc, "markShowdownReady", [dealId]);
 
   // 7. settle — room reads the v2-revealed cards, ranks, pays the winner
-  const before = [await room.balance(p0.address), await room.balance(p1.address)];
   const seatBefore = [(await room.getSeat(tableId, 0)).stack, (await room.getSeat(tableId, 1)).stack];
-  await send("room.resolveShowdown (pays winner)", roomOp, "resolveShowdown", [tableId], 1500000n);
+  await send("room.resolveShowdown (pays winner)", roomOp, "resolveShowdown", [tableId]);
   const seatAfter = [(await room.getSeat(tableId, 0)).stack, (await room.getSeat(tableId, 1)).stack];
 
   // verify: the on-chain board matches our decryption; the paid winner is the
