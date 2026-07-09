@@ -174,6 +174,40 @@ describe("PokerRoom — engine", function () {
     await expect(tx).to.emit(poker, "HandSettled").withArgs(t, 1, 1, E(3), 0);
   });
 
+  it("anti-AFK: 3 straight timeouts let the operator kick the seat; a real action resets the streak", async function () {
+    const { owner, operator, alice, bob, poker } = await loadFixture(setup);
+    const t = await makeTable(poker, owner, tableCfg({ maxSeats: 2, actionTimeout: 30 }));
+    await buyIn(poker, alice, t, 0);
+    await buyIn(poker, bob, t, 1);
+
+    // three hands in a row alice times out facing a bet → timeout-FOLD settles
+    // the HU hand every time (bob raises first when he has the button)
+    for (let i = 0; i < 3; i++) {
+      await poker.connect(operator).startHand(t);
+      if (Number((await poker.getHand(t)).actingSeat) === 1) await poker.connect(bob).act(t, RAISE, E(4));
+      await time.increase(31);
+      await poker.connect(operator).timeoutAct(t); // alice owes → folded
+      expect((await poker.getHand(t)).inProgress).to.equal(false);
+    }
+    expect(Number(await poker.timeoutStreak(t, 0))).to.be.gte(3);
+
+    // premature kick of an ACTIVE player reverts; the idle one gets stood up
+    await expect(poker.connect(operator).kickIdle(t, 1)).to.be.revertedWithCustomError(poker, "NotIdle");
+    const stackBefore = (await poker.getSeat(t, 0)).stack;
+    const balBefore = await poker.balance(alice.address);
+    await expect(poker.connect(operator).kickIdle(t, 0)).to.emit(poker, "PlayerKicked");
+    expect((await poker.getSeat(t, 0)).occupied).to.equal(false); // seat freed
+    expect(await poker.balance(alice.address)).to.equal(balBefore + stackBefore); // stack returned to her bankroll
+
+    // a voluntary action resets the streak
+    await buyIn(poker, alice, t, 0, E(50));
+    await poker.connect(operator).startHand(t);
+    const h2 = await poker.getHand(t);
+    const actor = Number(h2.actingSeat) === 0 ? alice : bob;
+    await poker.connect(actor).act(t, FOLD, 0);
+    expect(Number(await poker.timeoutStreak(t, Number(h2.actingSeat)))).to.equal(0);
+  });
+
   it("a folded player cannot leave mid-hand (their chips are in the pot accounting)", async function () {
     const { owner, operator, alice, bob, carol, poker } = await loadFixture(setup);
     const t = await makeTable(poker, owner);

@@ -3,11 +3,12 @@
   "chainId": "50312",
   "deployer": "0x6E26D7A5f90CD020F7Bee7c4e02f6d1eB3643e41",
   "operator": "0x6E26D7A5f90CD020F7Bee7c4e02f6d1eB3643e41",
-  "deploymentBlock": 405387795,
+  "deploymentBlock": 426811488,
   "addresses": {
-    "pokerRoom": "0x2F3E786F353978051d3923E19Ea3C12701523173",
+    "pokerRoom": "0x7E1387FCE14522B981C07bca921e857CfeD636e3",
     "commitRevealDealer": "0x551C3ee9352199Ad0b100D7deD0fD13637B30E79",
-    "pokerTournament": "0xE77F0e6648f986c231F2cacCc82dE92fc1DDA823"
+    "pokerTournament": "0xB4808411903Fb8e2Eee23bceB9f274943EDAf766",
+    "playerProfile": "0x7364E1ED8a07b4659c059fa66D346c42907C3F14"
   },
   "defaultTable": {
     "maxSeats": 6,
@@ -17,5 +18,7 @@
     "maxBuyIn": "2000000000000000000"
   },
   "seedBatch": 120,
-  "deployedAt": "2026-06-10T09:28:57.710Z"
+  "deployedAt": "2026-06-10T09:28:57.710Z",
+  "tournamentRedeployedAt": "2026-07-04T12:34:17.070Z",
+  "roomRedeployedAt": "2026-07-05T08:03:54.512Z"
 }

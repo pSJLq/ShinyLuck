@@ -16,7 +16,7 @@ function TopBar({ scene, product, onProduct, onSettings, deckMode, balance, mode
     <header className="topbar">
       <div className="group">
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <BraceLogo size={22} />
+          <SparkLogo size={24} />
           <span className="wordmark" style={{ fontSize: 17 }}>shiny<span className="accent">poker</span></span>
         </span>
       </div>
@@ -56,7 +56,7 @@ function TopBar({ scene, product, onProduct, onSettings, deckMode, balance, mode
         </div>
       )}
       <div className={"wallet" + (wrongNetwork ? " wrongnet" : "")} data-anno="wallet">
-        <SomiIcon className="somi" />
+        <BraceLogo size={16} />
         <span className="bal tnum">{balance.toFixed(1)}</span>
         <span className="net">{wrongNetwork ? "Wrong network" : "Somnia"}</span>
       </div>
@@ -99,7 +99,7 @@ function SideRail() {
       </div>
       <div className="pfwidget" data-anno="pf">
         <div className="pfhead">
-          <span className="ttl">{I.shield} zkShuffle · provably fair</span>
+          <span className="ttl">{I.shield} provably fair · commit-reveal</span>
           <span className="zkbadge" style={{ padding: "3px 8px" }}><span className="chk">{I.check}</span>Verify</span>
         </div>
         <div className="commit">
@@ -118,18 +118,18 @@ function ActionBar({ action, deckMode, onFold, onCheckCall, onRaise, betValue, s
   const min = minRaise, max = heroStack;
   const fill = ((betValue - min) / (max - min)) * 100;
   const quick = [
-    { k: "Min", v: minRaise },
+    { k: SPT("Min"), v: minRaise },
     { k: "½", v: round1(potForBet * 0.5 + toCall) },
     { k: "⅔", v: round1(potForBet * 0.66 + toCall) },
-    { k: "Pot", v: round1(potForBet + toCall) },
-    { k: "All-in", v: heroStack },
+    { k: SPT("Pot"), v: round1(potForBet + toCall) },
+    { k: SPT("All-in"), v: heroStack },
   ];
   return (
     <div className="actionbar">
       <div className="helpers" data-anno="helpers">
-        <span className="helperchip best"><span className="k">Best</span><b>{best}</b></span>
+        <span className="helperchip best"><span className="k">{SPT("Best")}</span><b>{best}</b></span>
         <div style={{ display: "flex", gap: 7 }}>
-          <span className="helperchip"><span className="k">Pot odds</span><b>{potOdds}</b></span>
+          <span className="helperchip"><span className="k">{SPT("Pot odds")}</span><b>{potOdds}</b></span>
         </div>
       </div>
 
@@ -163,9 +163,9 @@ function ActionBar({ action, deckMode, onFold, onCheckCall, onRaise, betValue, s
       </div>
 
       <div className="actions" data-anno="actions">
-        <button className="abtn fold" onClick={onFold}><span className="key">F</span><span className="lbl">Fold</span></button>
-        <button className="abtn call" onClick={onCheckCall}><span className="key">C</span><span className="lbl">{canCheck ? "Check" : "Call"}</span>{!canCheck && <span className="amt tnum">{toCall.toFixed(2)}</span>}</button>
-        <button className="abtn raise" onClick={() => onRaise(betValue)}><span className="key">R</span><span className="lbl">{raiseLabel || "Raise to"}</span><span className="amt tnum">{betValue.toFixed(betValue % 1 ? 1 : 0)}</span></button>
+        <button className="abtn fold" onClick={onFold}><span className="key">F</span><span className="lbl">{SPT("Fold")}</span></button>
+        <button className="abtn call" onClick={onCheckCall}><span className="key">C</span><span className="lbl">{canCheck ? SPT("Check") : SPT("Call")}</span>{!canCheck && <span className="amt tnum">{toCall.toFixed(2)}</span>}</button>
+        <button className="abtn raise" onClick={() => onRaise(betValue)}><span className="key">R</span><span className="lbl">{raiseLabel || SPT("Raise to")}</span><span className="amt tnum">{betValue.toFixed(betValue % 1 ? 1 : 0)}</span></button>
       </div>
     </div>
   );
@@ -187,13 +187,21 @@ function StatusStrip({ text, sub, accent }) {
 }
 
 /* ---------------- Banners & overlays ---------------- */
-function WinBanner({ hand, won, lose }) {
+/* name → "<nick> wins" (spectators + when the hero lost see WHO won);
+   pending → showdown announced, pot still settling on-chain;
+   won → PRE-FORMATTED amount string, shown to EVERYONE (loser & observers
+   should also see what the pot paid), red-tinted on a loss. */
+function WinBanner({ hand, won, lose, unit, name, pending }) {
+  const title = name ? name + " " + SPT("wins") : (lose ? SPT("You lose") : SPT("You win"));
   return (
     <div className={"winbanner" + (lose ? " lose" : "")}>
-      <div className="won">{lose ? "You lose" : "You win"}</div>
-      <div className="hand">{hand}</div>
-      {won != null && !lose && <div className="zkbadge" style={{ marginTop: 4 }}><span className="chk">{I.check}</span>{won.toFixed(1)} SOMI paid out on-chain</div>}
-      {lose && <div className="zkbadge" style={{ marginTop: 4, borderColor: "rgba(229,86,42,0.4)", color: "var(--danger-soft)" }}>pot settled on-chain</div>}
+      <div className="won">{title}</div>
+      {hand ? <div className="hand">{hand}</div> : null}
+      {pending
+        ? <div className="zkbadge" style={{ marginTop: 4 }}><span className="chk sp-spin">{I.check}</span>{SPT("Settling pot on-chain…")}</div>
+        : won != null
+          ? <div className="zkbadge" style={{ marginTop: 4, ...(lose ? { borderColor: "rgba(229,86,42,0.4)", color: "var(--danger-soft)" } : {}) }}><span className="chk">{I.check}</span>{won} {unit || "SOMI"} {SPT("paid out on-chain")}</div>
+          : <div className="zkbadge" style={{ marginTop: 4, ...(lose ? { borderColor: "rgba(229,86,42,0.4)", color: "var(--danger-soft)" } : {}) }}>{SPT("pot settled on-chain")}</div>}
     </div>
   );
 }
@@ -234,12 +242,12 @@ function TxToast() {
 
 /* ---------------- Settings popover ---------------- */
 const THEME_SWATCHES = [
-  { k: "a", name: "Terminal", bg: "radial-gradient(120% 120% at 50% 30%, rgba(110,110,237,0.18), #08080b 60%)", border: "1px solid rgba(255,255,255,0.14)" },
-  { k: "b", name: "Premium", bg: "radial-gradient(70% 70% at 50% 35%, #2a2150, #140f29 60%, #0a0813)", border: "2px solid rgba(110,110,237,0.5)" },
+  { k: "a", name: "Terminal", bg: "radial-gradient(120% 120% at 50% 30%, rgba(217,171,74,0.18), #08080b 60%)", border: "1px solid rgba(255,255,255,0.14)" },
+  { k: "b", name: "Premium", bg: "radial-gradient(70% 70% at 50% 35%, #2b2310, #171208 60%, #0d0a05)", border: "2px solid rgba(217,171,74,0.5)" },
   { k: "c", name: "Grid", bg: "linear-gradient(180deg,#0e0e11,#0a0a0c)", border: "1px solid rgba(255,255,255,0.1)", grid: true },
 ];
 
-function SettingsPanel({ t, set, dir, setDir, onClose, session }) {
+function SettingsPanel({ t, set, dir, setDir, onClose, session, lang, setLang }) {
   const Row = ({ label, children }) => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "9px 0", borderBottom: "1px solid var(--hair)" }}>
       <span style={{ fontFamily: "var(--label)", fontSize: 12, color: "var(--text-2)" }}>{label}</span>{children}
@@ -253,16 +261,33 @@ function SettingsPanel({ t, set, dir, setDir, onClose, session }) {
     <div style={{ position: "absolute", top: 50, right: 14, zIndex: 60, width: 280, padding: "12px 14px",
       borderRadius: 12, background: "rgba(13,13,18,0.97)", border: "1px solid var(--line-2)",
       boxShadow: "0 24px 70px rgba(0,0,0,0.6)", backdropFilter: "blur(10px)", maxHeight: "calc(100% - 70px)", overflowY: "auto" }}>
-      <div className="tag" style={{ marginBottom: 8 }}>table settings</div>
+      <div className="tag" style={{ marginBottom: 8 }}>{SPT("table settings")}</div>
+
+      {/* Language (EN/RU) — the quiet switch the gear panel was made for */}
+      {setLang && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "2px 0 10px" }}>
+          <span style={{ fontFamily: "var(--label)", fontSize: 12, color: "var(--text-2)" }}>{SPT("Language")}</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[["en", "EN"], ["ru", "RU"]].map(([k, l]) => (
+              <button key={k} onClick={() => setLang(k)} style={{
+                padding: "4px 12px", borderRadius: 7, cursor: "pointer", fontFamily: "var(--label)", fontSize: 11,
+                border: lang === k ? "1px solid var(--accent)" : "1px solid var(--line-2)",
+                background: lang === k ? "var(--accent-12)" : "transparent",
+                color: lang === k ? "var(--accent-soft)" : "var(--muted)",
+              }}>{l}</button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Table theme selector */}
       <div style={{ fontFamily: "var(--label)", fontSize: 10.5, letterSpacing: "0.08em", textTransform: "uppercase",
-        color: "var(--muted)", marginBottom: 8 }}>Table theme</div>
+        color: "var(--muted)", marginBottom: 8 }}>{SPT("Table theme")}</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 6 }}>
         {THEME_SWATCHES.map(s => (
           <button key={s.k} onClick={() => setDir(s.k)} style={{ background: "transparent", border: 0, padding: 0, cursor: "pointer" }}>
             <div style={{ height: 46, borderRadius: 8, background: s.bg, border: dir === s.k ? "1px solid var(--accent)" : s.border,
-              boxShadow: dir === s.k ? "0 0 0 1px var(--accent), 0 0 14px rgba(110,110,237,0.35)" : "none",
+              boxShadow: dir === s.k ? "0 0 0 1px var(--accent), 0 0 14px rgba(217,171,74,0.35)" : "none",
               position: "relative", overflow: "hidden", transition: ".15s" }}>
               {s.grid && <div style={{ position: "absolute", inset: 0, backgroundImage: "linear-gradient(rgba(255,255,255,0.07) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.07) 1px,transparent 1px)", backgroundSize: "8px 8px" }} />}
               <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: 18, height: 12, borderRadius: 2,
@@ -275,10 +300,11 @@ function SettingsPanel({ t, set, dir, setDir, onClose, session }) {
       </div>
       <div style={{ height: 1, background: "var(--hair)", margin: "6px 0 2px" }} />
 
-      <Row label="Sound effects"><Sw on={t.sound} onClick={() => set("sound", !t.sound)} /></Row>
-      <Row label="4-color deck"><Sw on={t.deck === "4"} onClick={() => set("deck", t.deck === "4" ? "2" : "4")} /></Row>
-      <Row label="Turbo animations"><Sw on={t.turbo} onClick={() => set("turbo", !t.turbo)} /></Row>
-      <Row label="Reduced motion"><Sw on={t.reduced} onClick={() => set("reduced", !t.reduced)} /></Row>
+      <Row label={SPT("Sound effects")}><Sw on={t.sound} onClick={() => set("sound", !t.sound)} /></Row>
+      <Row label={SPT("4-color deck")}><Sw on={t.deck === "4"} onClick={() => set("deck", t.deck === "4" ? "2" : "4")} /></Row>
+      <Row label={SPT("Stacks in big blinds")}><Sw on={t.bbstacks} onClick={() => set("bbstacks", !t.bbstacks)} /></Row>
+      <Row label={SPT("Turbo animations")}><Sw on={t.turbo} onClick={() => set("turbo", !t.turbo)} /></Row>
+      <Row label={SPT("Reduced motion")}><Sw on={t.reduced} onClick={() => set("reduced", !t.reduced)} /></Row>
       {session && (
         <div style={{ marginTop: 10, padding: "10px 11px", borderRadius: 8, border: "1px solid var(--accent-32)", background: "var(--accent-12)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: "var(--label)", fontSize: 11, color: "var(--accent-soft)" }}>
@@ -291,7 +317,7 @@ function SettingsPanel({ t, set, dir, setDir, onClose, session }) {
             {session.active ? "Revoke session key" : "Activate session"}</button>
         </div>
       )}
-      <button className="pill" style={{ fontSize: 11, padding: "7px 12px", width: "100%", marginTop: 8 }} onClick={onClose}>Close</button>
+      <button className="pill" style={{ fontSize: 11, padding: "7px 12px", width: "100%", marginTop: 8 }} onClick={onClose}>{SPT("Close")}</button>
     </div>
   );
 }

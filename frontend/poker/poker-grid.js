@@ -24,8 +24,8 @@
     this.speed = opts.speed != null ? opts.speed : 1;     // flow speed multiplier
     this.density = opts.density != null ? opts.density : 1; // how much of grid lights
     this.base = hexToRgb(opts.base || '#101014');         // dim cell color
-    this.accent = hexToRgb(opts.accent || '#6E6EED');     // hero accent
-    this.accent2 = hexToRgb(opts.accent2 || '#6E6EED');   // secondary band
+    this.accent = hexToRgb(opts.accent || '#d9ab4a');     // hero accent
+    this.accent2 = hexToRgb(opts.accent2 || '#d9ab4a');   // secondary band
     this.bg = opts.bg || '#070707';
     this.shape = opts.shape || 'square';   // square | dot
     this.maxAlpha = opts.maxAlpha != null ? opts.maxAlpha : 1;

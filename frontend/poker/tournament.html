@@ -3,49 +3,42 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ShinyPoker — Table</title>
+<title>ShinyPoker — Tournament</title>
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Source+Code+Pro:wght@400;500;600&family=DM+Sans:wght@400;500;600&family=Bricolage+Grotesque:opsz,wght@12..96,600..800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
-<link rel="stylesheet" href="table-anim.css" />
+<link rel="stylesheet" href="lobby.css" />
 <link rel="stylesheet" href="poker-live.css" />
 <link rel="stylesheet" href="mobile.css" />
+<link rel="stylesheet" href="marketing.css" />
 <style>
-  #stage { position: fixed; inset: 0; display: grid; place-items: center; padding-top: 0;
-    background: radial-gradient(120% 90% at 50% -10%, #0c0c11 0%, #070707 62%); overflow: hidden; }
-  #bgcanvas { position: fixed; inset: 0; width: 100%; height: 100%; opacity: 0.26; pointer-events: none; }
+  #stage { position: fixed; inset: 0 0 38px 0; display: grid; place-items: center; background: radial-gradient(120% 90% at 50% -10%, #0c0c11 0%, #070707 62%); overflow: hidden; }
   #root { position: relative; z-index: 2; }
+  #app-footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; }
 </style>
 </head>
 <body>
-<canvas id="bgcanvas"></canvas>
 <div id="stage"><div id="root"></div></div>
+<div id="app-footer"></div>
+<script src="marketing.js"></script>
+<script>
+  window.addEventListener("load", function () {
+    var f = document.getElementById("app-footer");
+    if (f && window.SPSlimFooter) f.innerHTML = window.SPSlimFooter();
+  });
+</script>
 
-<!-- Privy (email → embedded Somnia wallet, headless). Same bundle/app as the casino. -->
 <script src="/vendor/privy.bundle.js"></script>
 <script src="poker-grid.js"></script>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
 
-<!-- design visual components (export to window) -->
 <script type="text/babel" src="poker-cards.jsx"></script>
-<script type="text/babel" src="poker-seats.jsx"></script>
-<script type="text/babel" src="poker-chrome.jsx"></script>
-
-<!-- live data bridge (ES module → window.SP) + the live app -->
 <script type="module" src="poker-bridge.js"></script>
-<script type="text/babel" src="poker-live-table.jsx"></script>
-
-<script>
-  // ambient background grid (behind the table)
-  window.addEventListener("load", function () {
-    var c = document.getElementById("bgcanvas");
-    if (window.GridField && c) new GridField(c, { cell: 22, gap: 7, speed: 0.4, density: 0.5,
-      accent: "#d9ab4a", accent2: "#f2d78a", maxAlpha: 0.7, minBright: 0.01, shape: "square" }).start();
-  });
-</script>
+<script type="text/babel" src="poker-cashier.jsx"></script>
+<script type="text/babel" src="poker-tournament-app.jsx"></script>
 </body>
 </html>

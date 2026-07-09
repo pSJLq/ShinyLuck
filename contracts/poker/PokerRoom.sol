@@ -130,6 +130,10 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
     // tableId => player => (seatIndex + 1); 0 means "not seated here".
     mapping(uint256 => mapping(address => uint8)) internal _seatOf;
     mapping(uint256 => uint8) internal _lastButton; // tableId => previous dealer-button seat
+    // Consecutive TIMEOUT folds/checks per seat (any voluntary action resets it).
+    // Once it reaches KICK_AFTER the dealer/operator may kick the seat — an AFK
+    // player can't squat a cash seat blinding away forever.
+    mapping(uint256 => mapping(uint8 => uint16)) public timeoutStreak;
 
     // ---------------------------------------------------------------------
     // Storage — collected rake
@@ -182,6 +186,7 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
 
     event PlayerSeated(uint256 indexed tableId, uint8 indexed seat, address indexed player, uint128 buyIn);
     event PlayerLeft(uint256 indexed tableId, uint8 indexed seat, address indexed player, uint128 stackReturned);
+    event PlayerKicked(uint256 indexed tableId, uint8 indexed seat, address indexed player, uint128 stackReturned);
     event PlayerToppedUp(uint256 indexed tableId, uint8 indexed seat, address indexed player, uint128 amount);
     event SitOutToggled(uint256 indexed tableId, uint8 indexed seat, address indexed player, bool sittingOut);
 
@@ -221,6 +226,7 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
     error BuyInOutOfRange();
     error MaxStackExceeded();
     error InHand();
+    error NotIdle();
     error ZeroAmount();
     error TransferFailed();
     error HandAlreadyInProgress();
@@ -451,6 +457,7 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         // Eligible to be dealt into the next hand that starts.
         s.sitInHandId = handCounter[tableId] + 1;
         _seatOf[tableId][msg.sender] = seat + 1;
+        timeoutStreak[tableId][seat] = 0;
 
         emit PlayerSeated(tableId, seat, msg.sender, buyIn);
     }
@@ -482,15 +489,18 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         // corrupt the pot & side-pot accounting (their chips would be lost).
         if (_hands[tableId].inProgress && (sh.inHand || sh.folded || sh.committedTotal > 0)) revert InHand();
 
-        Seat storage s = _seats[tableId][seat];
-        uint128 stack = s.stack;
-        balance[msg.sender] += stack;
+        uint128 stack = _standUp(tableId, seat, msg.sender);
+        emit PlayerLeft(tableId, seat, msg.sender, stack);
+    }
 
+    /// @dev Return the seat's stack to the player's bankroll and free the seat.
+    function _standUp(uint256 tableId, uint8 seat, address player) internal returns (uint128 stack) {
+        stack = _seats[tableId][seat].stack;
+        balance[player] += stack;
         delete _seats[tableId][seat];
         delete _seatHands[tableId][seat];
-        _seatOf[tableId][msg.sender] = 0;
-
-        emit PlayerLeft(tableId, seat, msg.sender, stack);
+        _seatOf[tableId][player] = 0;
+        delete timeoutStreak[tableId][seat];
     }
 
     /// @notice Toggle sitting out (you keep your seat & stack but aren't dealt in).
@@ -502,6 +512,24 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
             _seats[tableId][seat].sitInHandId = handCounter[tableId] + 1;
         }
         emit SitOutToggled(tableId, seat, msg.sender, sittingOut);
+    }
+
+    /// @notice Kick an AFK seat: after KICK_AFTER consecutive timeout-folds the
+    ///         dealer/operator stands the player up between hands. Their remaining
+    ///         stack goes back to their in-room balance (their funds are theirs —
+    ///         what the AFK squat cost them is the blinds they already lost).
+    ///         Cash tables only; tournaments handle idle stacks via the blinds.
+    function kickIdle(uint256 tableId, uint8 seat) external onlyDealerOrOperator nonReentrant {
+        if (tableController[tableId] != address(0)) revert ControlledTable();
+        Seat storage s = _seats[tableId][seat];
+        if (!s.occupied) revert NotSeated();
+        if (timeoutStreak[tableId][seat] < 3) revert NotIdle(); // 3 straight timeouts = AFK
+        SeatHand storage sh = _seatHands[tableId][seat];
+        if (_hands[tableId].inProgress && (sh.inHand || sh.folded || sh.committedTotal > 0)) revert InHand();
+
+        address player = s.player;
+        uint128 stack = _standUp(tableId, seat, player);
+        emit PlayerKicked(tableId, seat, player, stack);
     }
 
     // ---------------------------------------------------------------------
@@ -670,6 +698,7 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         if (actor == address(0)) actor = msg.sender;
         uint8 seat = _seatOfAddr(tableId, actor);
         if (seat != h.actingSeat) revert NotYourTurn();
+        timeoutStreak[tableId][seat] = 0; // voluntary action — the player is alive
         _doAction(tableId, seat, action, amount);
     }
 
@@ -682,6 +711,7 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         if (block.timestamp <= h.actingDeadline) revert TooEarly();
         uint8 seat = h.actingSeat;
         SeatHand storage sh = _seatHands[tableId][seat];
+        timeoutStreak[tableId][seat] += 1;
         uint128 toCall = h.currentBet > sh.committedStreet ? h.currentBet - sh.committedStreet : 0;
         _doAction(tableId, seat, toCall == 0 ? ActionType.CHECK : ActionType.FOLD, 0);
     }

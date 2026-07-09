@@ -1,9 +1,9 @@
-/* ShinyPoker — live table styling. Somnia brand tokens (dark + #6E6EED,
+/* ShinyPoker — live table styling. Somnia brand tokens (dark + #d9ab4a,
    IBM Plex Mono numbers, Source Code Pro labels). */
 :root {
   --bg: #070707; --surface: #111114; --elev: #1c1c22; --elev2: #252530;
   --border: #2c2c36; --border2: #4c4c5a; --muted: #9a9aa8; --text: #e6e6ee;
-  --accent: #6e6eed; --accent2: #9b9bf4; --accent-soft: rgba(110, 110, 237, .16);
+  --accent: #d9ab4a; --accent2: #f2d78a; --accent-soft: rgba(217, 171, 74, .16);
   --win: #46d39a; --danger: #ef5a6f; --gold: #e8c15a;
   --mono: 'IBM Plex Mono', ui-monospace, monospace;
   --label: 'Source Code Pro', ui-monospace, monospace;
@@ -48,7 +48,7 @@ button { font-family: var(--label); cursor: pointer; }
 .felt {
   position: absolute; inset: 6%; border-radius: 46% / 52%;
   background: radial-gradient(120% 120% at 50% 30%, #1a1a3a 0%, #12121f 45%, #0c0c14 100%);
-  border: 2px solid var(--border2); box-shadow: inset 0 0 80px rgba(0,0,0,.6), 0 0 60px rgba(110,110,237,.08);
+  border: 2px solid var(--border2); box-shadow: inset 0 0 80px rgba(0,0,0,.6), 0 0 60px rgba(217,171,74,.08);
 }
 .felt-rail { position: absolute; inset: 2%; border-radius: 46% / 52%; border: 8px solid #0a0a10; }
 .center { position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 12px; }

@@ -64,8 +64,15 @@ async function main() {
   // ---------------- CASH: full hand on the heads-up table ----------------
   const T = 2; // 2-max 0.01/0.02 table from _add-poker-tables
   console.log("\n[e2e] === CASH hand on table", T, "===");
-  await (await room1.deposit({ value: E("0.5") })).wait();
-  await (await room2.deposit({ value: E("0.5") })).wait();
+  // top up the in-room balance only if it can't cover the buy-in — repeated
+  // runs otherwise drain the wallets' native STT into the room until the
+  // unconditional 0.5 deposit exceeds the native balance and reverts
+  for (const [pl, room] of [[p1, room1], [p2, room2]]) {
+    const have = await roomR.balance(pl.address);
+    const need = E("0.45");
+    if (have < need) { await (await room.deposit({ value: need - have })).wait(); console.log("[e2e] topped up", pl.address, "by", F(need - have)); }
+    else console.log("[e2e] room balance ok", pl.address, F(have));
+  }
   await (await room1.sitDown(T, 0, E("0.4"))).wait();
   await (await room2.sitDown(T, 1, E("0.4"))).wait();
   console.log("[e2e] both seated 0.4 — waiting for the bot to deal…");
@@ -94,9 +101,17 @@ async function main() {
   }
   check("cash: a full hand played through the live bot", handsPlayed === 1);
 
-  // chip conservation: stacks + rake-side == everything that went in
+  // chip conservation: stacks + anything in flight in the NEXT hand the bot may
+  // already have dealt (pot + posted blinds) == everything that went in, minus rake
   const s0 = (await roomR.getSeat(T, 0)).stack, s1 = (await roomR.getSeat(T, 1)).stack;
-  check("cash: chip conservation (stacks sum sane)", s0 + s1 <= E("0.8") && s0 + s1 >= E("0.79"), `${F(s0)} + ${F(s1)}`);
+  const h2 = await roomR.getHand(T);
+  let inFlight = 0n;
+  if (h2.inProgress) {
+    inFlight = h2.pot;
+    for (const i of [0, 1]) inFlight += (await roomR.getSeatHand(T, i)).committedStreet;
+  }
+  const sum = s0 + s1 + inFlight;
+  check("cash: chip conservation (stacks sum sane)", sum <= E("0.8") && sum >= E("0.79"), `${F(s0)} + ${F(s1)} + ${F(inFlight)} in flight`);
   // wait out any started hand, then leave
   for (let i = 0; i < 30; i++) { if (!(await roomR.getHand(T)).inProgress) break; await sleep(2000); }
   await (await room1.leaveTable(T)).wait();
@@ -107,7 +122,12 @@ async function main() {
   console.log("\n[e2e] === SNG tournament (all-in until someone busts) ===");
   const balBefore1 = await roomR.balance(p1.address);
   const balBefore2 = await roomR.balance(p2.address);
-  await (await trn1.createTournament(E("0.05"), 0, 2, 200, 10, 20, 60, [10000])).wait();
+  // v2 signature: one TournamentParams struct (apply/approve, scheduling, antes)
+  await (await trn1.createTournament({
+    buyIn: E("0.05"), fee: 0, maxPlayers: 2, seatsPerTable: 0, startStack: 200,
+    sbStart: 10, bbStart: 20, anteStart: 0, levelDur: 60, growthBps: 20000,
+    startTime: 0, approvalRequired: false, actionSecs: 0, payoutBps: [10000], structure: [], hostBps: 0,
+  })).wait();
   const id = Number(await trn1.count()) - 1;
   await (await trn1.register(id, { value: E("0.05") })).wait();
   await (await trn2.register(id, { value: E("0.05") })).wait();

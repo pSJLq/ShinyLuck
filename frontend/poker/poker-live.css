@@ -7,7 +7,7 @@
   background: rgba(255, 255, 255, 0.02); color: var(--muted, #9a9aa8);
   font-family: var(--label, monospace); font-size: 12px; cursor: pointer; transition: .15s;
 }
-.emptyseat:hover { border-color: var(--accent, #6e6eed); color: var(--accent-soft, #9b9bf4); background: rgba(110, 110, 237, .08); }
+.emptyseat:hover { border-color: var(--accent, #d9ab4a); color: var(--accent-soft, #f2d78a); background: rgba(217, 171, 74, .08); }
 .emptyseat .plus { font-size: 22px; line-height: 1; }
 
 .lt-strip { display: flex !important; align-items: center; justify-content: center; gap: 18px;
@@ -29,28 +29,88 @@
   color: var(--text, #e6e6ee); border-radius: 9px; padding: 11px; font-family: var(--mono, monospace); font-size: 15px; }
 .lt-modal .row { display: flex; gap: 10px; margin-top: 16px; }
 .lt-modal .row .pill { flex: 1; text-align: center; }
-.pill.primary { background: var(--accent, #6e6eed); border-color: var(--accent, #6e6eed); color: #fff; }
+.pill.primary { background: var(--accent, #d9ab4a); border-color: var(--accent, #d9ab4a); color: #fff; }
 .abtn:disabled, .pill:disabled { opacity: .45; cursor: not-allowed; }
 
-/* tournament HUD strip (under the topbar on controlled tables) */
-.trn-hud { display: flex; align-items: center; gap: 22px; padding: 8px 18px;
+/* tournament HUD strip (under the topbar on controlled tables).
+   MUST be an absolute overlay: as a static flex child of .app it stretched to
+   ~560px tall and shoved the felt half off-screen. */
+.trn-hud { display: flex; align-items: center; gap: 22px; padding: 8px 18px; flex-wrap: wrap;
+  position: absolute; top: 56px; left: 0; right: 0; z-index: 30;
   font-family: var(--label, 'Source Code Pro', monospace); font-size: 12px; color: var(--muted, #9a9aa8);
-  background: linear-gradient(90deg, rgba(110,110,237,.14), rgba(110,110,237,.05)); border-bottom: 1px solid var(--accent-32, rgba(110,110,237,.32)); }
-.trn-hud .tag { color: var(--accent-soft, #9b9bf4); letter-spacing: .1em; font-size: 10.5px; }
+  background: linear-gradient(90deg, rgba(217,171,74,.14), rgba(217,171,74,.05)); border-bottom: 1px solid var(--accent-32, rgba(217,171,74,.32)); }
+.trn-hud .tag { color: var(--accent-soft, #f2d78a); letter-spacing: .1em; font-size: 10.5px; }
 .trn-hud b { color: var(--text, #e6e6ee); font-family: var(--mono, 'IBM Plex Mono', monospace); font-weight: 600; margin-left: 2px; }
 .trn-hud .done { color: var(--gold, #e8c15a); letter-spacing: .1em; }
 
 /* funding box in the cashier / fund modal */
-.lt-modal .fundbox { margin: 12px 0 4px; padding: 12px; border-radius: 10px; border: 1px solid var(--accent-32, rgba(110,110,237,.32)); background: var(--accent-12, rgba(110,110,237,.1)); }
+.lt-modal .fundbox { margin: 12px 0 4px; padding: 12px; border-radius: 10px; border: 1px solid var(--accent-32, rgba(217,171,74,.32)); background: var(--accent-12, rgba(217,171,74,.1)); }
 .lt-modal .fundbox .fh { font-size: 12.5px; color: var(--text, #e6e6ee); line-height: 1.5; }
 .lt-modal .fundbox .fa { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.lt-modal .fundbox .fa .mono { flex: 1; font-family: var(--mono, monospace); font-size: 11px; color: var(--accent-soft, #9b9bf4); word-break: break-all; }
+.lt-modal .fundbox .fa .mono { flex: 1; font-family: var(--mono, monospace); font-size: 11px; color: var(--accent-soft, #f2d78a); word-break: break-all; }
 .lt-modal .mono { font-family: var(--mono, 'IBM Plex Mono', monospace); }
 
 /* current best-hand label under the hero's hole cards */
 .herocombo {
   margin: 4px auto 2px; text-align: center; font-family: var(--label, monospace); font-size: 12px;
-  letter-spacing: .02em; color: var(--accent-soft, #9b9bf4); background: var(--accent-12, rgba(110,110,237,.12));
-  border: 1px solid var(--accent-32, rgba(110,110,237,.32)); border-radius: 999px; padding: 3px 12px; width: fit-content;
-  white-space: nowrap;
+  letter-spacing: .02em; color: var(--accent-soft, #f2d78a); background: var(--accent-12, rgba(217,171,74,.12));
+  border: 1px solid var(--accent-32, rgba(217,171,74,.32)); border-radius: 999px; padding: 3px 12px; width: fit-content;
+  white-space: nowrap; transition: color .25s, background .25s, border-color .25s, box-shadow .25s;
 }
+
+/* showdown reveal: absolutely positioned outside the seat card, opening toward
+   the TABLE CENTER, so the cards never change the seat's box and never clip
+   off-screen (top seats used to lose their cards under the HUD) */
+.seatreveal { position: absolute; bottom: calc(100% - 4px); left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 2px; z-index: 9; pointer-events: none; }
+/* top-half seats open DOWNWARD (under the seat card) */
+.seatreveal.below { bottom: auto; top: calc(100% - 2px); }
+/* the 0.62-scaled cards leave dead space in their layout box on the side away
+   from the transform origin — pull the combo badge back over it */
+.seatreveal.below .hole { margin-bottom: -40px; }
+.combobadge { display: inline-block; padding: 2px 9px; border-radius: 6px; border: 1px solid transparent;
+  font-family: var(--label, monospace); font-size: 10px; white-space: nowrap; }
+
+/* fold fade is a state change, not a glitch — ease it in */
+.seat .seatcard { transition: opacity .3s ease, filter .3s ease; }
+
+/* settling spinner inside the win banner */
+.sp-spin svg { animation: spin .9s linear infinite; }
+
+/* floating last-action badge above a seat ("Fold", "Raise 0.06", …) */
+.actchip { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); z-index: 11;
+  font-family: var(--label, monospace); font-size: 10px; letter-spacing: .05em; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 999px; background: rgba(18, 18, 26, .96); border: 1px solid var(--line-2, #3a3a48);
+  color: var(--text, #e6e6ee); white-space: nowrap; pointer-events: none;
+  animation: actPop .18s ease-out; }
+@keyframes actPop { from { opacity: 0; transform: translateX(-50%) translateY(5px) scale(.9); } to { opacity: 1; transform: translateX(-50%); } }
+.actchip.fold { color: #ff8d9d; border-color: rgba(239, 90, 111, .5); background: rgba(56, 16, 24, .96); }
+.actchip.check { color: var(--muted, #9a9aa8); }
+.actchip.call { color: var(--accent-soft, #f2d78a); border-color: var(--accent-32, rgba(217,171,74,.32)); }
+.actchip.bet, .actchip.raise { color: var(--gold, #e8c15a); border-color: rgba(232, 193, 90, .45); }
+.actchip.allin { color: #ff9d5c; border-color: rgba(229, 86, 42, .55); box-shadow: 0 0 12px rgba(229, 86, 42, .3); }
+.heroinfo { position: relative; }
+.heroinfo .actchip { top: -16px; }
+
+/* ---- gold rebrand (SparkLogo palette): dark ink on gold surfaces — the old
+   white-on-purple text is unreadable on gold ---- */
+.switcher button.on, .btnmark.bb, .quickchips button.on, .pill.primary,
+.hud .hgroup button.on, .chipset button.on, .cta, .btn-sm.join, .spinbtn, .regbtn { color: #1b1407 !important; }
+.abtn.raise { background: linear-gradient(180deg, #e7c26a, #c8963a) !important; border-color: var(--accent) !important; }
+.abtn.raise .lbl, .abtn.raise .amt, .abtn.raise .key { color: #1b1407 !important; }
+
+/* fold: the face-down cards fling toward the pot and fade (muck) */
+@keyframes muckFly {
+  from { opacity: 1; transform: translate(-50%, -50%) rotate(0deg); }
+  to   { opacity: 0; transform: translate(calc(-50% + var(--mx, 0px)), calc(-50% + var(--my, -40px))) rotate(16deg) scale(.72); }
+}
+.app[data-anim="on"] .seatbacks.muck { animation: muckFly 700ms cubic-bezier(.4, .1, .6, 1) forwards; }
+.app[data-anim="off"] .seatbacks.muck { display: none; }
+
+/* ---- character pass: display face for brand + hero numbers, avatar deco ---- */
+.wordmark { font-family: "Bricolage Grotesque", var(--label), sans-serif; font-weight: 800; letter-spacing: -0.01em; }
+.winbanner .hand { font-family: "Bricolage Grotesque", var(--mono), monospace; font-weight: 800; letter-spacing: -0.01em; }
+.pot .v { font-family: "Bricolage Grotesque", var(--mono), monospace !important; font-weight: 800; }
+.stat .v { font-family: "Bricolage Grotesque", var(--mono), monospace !important; font-weight: 800; }
+.avatar.deco { color: #fff; overflow: hidden; border: 0; text-shadow: 0 1px 3px rgba(0,0,0,.45); }
+.avatar.deco svg { pointer-events: none; }

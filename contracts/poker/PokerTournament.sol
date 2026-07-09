@@ -54,6 +54,14 @@ contract PokerTournament is Ownable, ReentrancyGuard {
     uint8 internal constant FINISHED = 2;
     uint8 internal constant CANCELLED = 3;
 
+    /// One blind level in a custom structure (LePoker-style).
+    struct Level {
+        uint128 sb;
+        uint128 bb;
+        uint128 ante;
+        uint32 durationSecs;
+    }
+
     struct T {
         address creator;
         uint128 buyIn; // per-player, added to the pool
@@ -61,18 +69,32 @@ contract PokerTournament is Ownable, ReentrancyGuard {
         uint128 startStack; // tournament chips per player
         uint128 sbStart;
         uint128 bbStart;
+        uint128 curSb; // current blind level values
+        uint128 curBb;
+        uint128 anteStart;
+        uint128 curAnte;
+        uint64 startTime; // 0 = manual / when-full; else earliest scheduled start (unix)
         uint128 sponsored; // creator-funded prize
         uint128 pool; // sponsored + sum(buyIns)
         uint64 levelDur; // seconds per blind level
         uint64 startedAt;
+        uint16 growthBps; // blind growth per level, e.g. 15000 = ×1.5, 20000 = ×2
+        uint16 hostBps; // creator's cut of the final pool (host reward), ≤10%
+        bool approvalRequired; // creator screens entries (sponsor-gated events)
         uint8 maxPlayers;
+        uint8 seatsPerTable; // players per table (MTT); == field size for single-table
+        uint32 actionSecs; // per-action clock (seconds)
         uint8 status;
         uint8 remaining;
         uint8 level;
-        uint256 tableId;
+        uint256 tableId; // == tables[0] (kept for the single-table HUD)
+        uint256[] tables; // one entry per controlled table (MTT spans several)
         uint16[] payoutBps; // [6500, 3500, …]; must sum to 10000
+        Level[] structure; // custom blind schedule; empty → geometric growthBps/levelDur
         address[] players;
+        address[] applicants; // approval mode: who has applied (escrowed)
         mapping(address => bool) registered;
+        mapping(address => bool) pending; // applied, awaiting creator approval
         mapping(address => bool) busted;
     }
 
@@ -83,11 +105,16 @@ contract PokerTournament is Ownable, ReentrancyGuard {
     event TournamentCreated(uint256 indexed id, address indexed creator, uint128 buyIn, uint128 fee, uint128 sponsored, uint8 maxPlayers);
     event Registered(uint256 indexed id, address indexed player, uint128 pool, uint8 count);
     event Unregistered(uint256 indexed id, address indexed player);
+    event Applied(uint256 indexed id, address indexed player);
+    event ApplicationRejected(uint256 indexed id, address indexed player);
+    event ApplicationWithdrawn(uint256 indexed id, address indexed player);
     event Started(uint256 indexed id, uint256 indexed tableId, uint8 players);
     event LevelUp(uint256 indexed id, uint8 level, uint128 sb, uint128 bb);
     event Busted(uint256 indexed id, address indexed player, uint8 place, uint128 prize);
     event Finished(uint256 indexed id, address indexed winner, uint128 prize);
+    event HostPaid(uint256 indexed id, address indexed host, uint128 amount);
     event Cancelled(uint256 indexed id);
+    event PlayerMoved(uint256 indexed id, address indexed player, uint256 fromTable, uint256 toTable);
 
     error NotOperator();
     error BadParams();
@@ -101,6 +128,8 @@ contract PokerTournament is Ownable, ReentrancyGuard {
     error HandLive();
     error NotDue();
     error NotBusted();
+    error NotCreator();
+    error NotPending();
 
     constructor(address initialOwner, IPokerRoomT room_) Ownable(initialOwner) {
         room = room_;
@@ -119,56 +148,150 @@ contract PokerTournament is Ownable, ReentrancyGuard {
         room = r;
     }
 
+    /// @dev Creation params bundled in a struct to keep the call clean and avoid
+    ///      stack-too-deep as the feature set grows (antes, scheduling, …).
+    struct TournamentParams {
+        uint128 buyIn;
+        uint128 fee;
+        uint8 maxPlayers;
+        uint8 seatsPerTable; // 0 = single table (<=9 players); else players/table → MTT
+        uint128 startStack;
+        uint128 sbStart;
+        uint128 bbStart;
+        uint128 anteStart; // 0 = no ante; grows with the blinds each level
+        uint64 levelDur;
+        uint16 growthBps;
+        uint64 startTime; // 0 = start manually / when full; else earliest start (unix)
+        bool approvalRequired;
+        uint32 actionSecs; // per-action clock (0 → default 30s)
+        uint16[] payoutBps;
+        Level[] structure; // if non-empty, overrides geometric sbStart/growthBps/levelDur
+        uint16 hostBps; // creator's cut of the final pool (0 = none, max 1000 = 10%);
+        // only meaningful for buy-in events — a sponsor "rewarding" himself from
+        // his own sponsorship is pointless, so buyIn == 0 forbids it
+    }
+
     /// @notice Create a tournament. Any msg.value is a creator-sponsored prize
-    ///         added to the pool (so one person can fund the whole prize). Set
-    ///         buyIn>0 to also collect from players. payoutBps must sum to 10000.
-    function createTournament(
-        uint128 buyIn,
-        uint128 fee,
-        uint8 maxPlayers,
-        uint128 startStack,
-        uint128 sbStart,
-        uint128 bbStart,
-        uint64 levelDur,
-        uint16[] calldata payoutBps
-    ) external payable returns (uint256 id) {
-        if (maxPlayers < 2 || maxPlayers > 9) revert BadParams();
-        if (startStack == 0 || bbStart == 0 || sbStart == 0 || sbStart > bbStart) revert BadParams();
-        if (levelDur < 30) revert BadParams();
-        if (payoutBps.length == 0 || payoutBps.length > maxPlayers) revert BadParams();
+    ///         added to the pool — set buyIn=0 + sponsor the pool for a FREE,
+    ///         fully-sponsored event. `payoutBps` must sum to 10000 (custom,
+    ///         unequal, top-N splits allowed). `growthBps` = blind/ante growth
+    ///         per level (15000 = ×1.5, 20000 = ×2). `startTime` (unix) schedules
+    ///         the start; 0 = manual/when-full. `approvalRequired` = entries wait
+    ///         for the creator's approval (private games).
+    function createTournament(TournamentParams calldata p) external payable returns (uint256 id) {
+        if (p.maxPlayers < 2 || p.maxPlayers > 45) revert BadParams();
+        uint8 tableSize = p.seatsPerTable == 0 ? (p.maxPlayers <= 9 ? p.maxPlayers : 9) : p.seatsPerTable;
+        if (tableSize < 2 || tableSize > 9) revert BadParams();
+        if (p.startStack == 0) revert BadParams();
+        bool hasStruct = p.structure.length > 0;
+        if (hasStruct) {
+            if (p.structure.length > 40) revert BadParams();
+            for (uint256 i = 0; i < p.structure.length; i++) {
+                Level calldata lv = p.structure[i];
+                if (lv.bb == 0 || lv.sb == 0 || lv.sb > lv.bb || lv.ante > lv.bb || lv.durationSecs < 15) revert BadParams();
+            }
+        } else {
+            if (p.bbStart == 0 || p.sbStart == 0 || p.sbStart > p.bbStart) revert BadParams();
+            if (p.anteStart > p.bbStart) revert BadParams();
+            if (p.levelDur < 30) revert BadParams();
+            if (p.growthBps < 10500 || p.growthBps > 40000) revert BadParams();
+        }
+        if (p.startTime != 0 && p.startTime <= block.timestamp) revert BadParams();
+        if (p.payoutBps.length == 0 || p.payoutBps.length > p.maxPlayers) revert BadParams();
         uint256 sum;
-        for (uint256 i = 0; i < payoutBps.length; i++) sum += payoutBps[i];
+        for (uint256 i = 0; i < p.payoutBps.length; i++) sum += p.payoutBps[i];
         if (sum != 10000) revert BadParams();
+        if (p.hostBps > 1000) revert BadParams(); // host reward capped at 10% of the pool
+        if (p.hostBps > 0 && p.buyIn == 0) revert BadParams(); // buy-in events only
 
         id = count++;
         T storage t = _t[id];
         t.creator = msg.sender;
-        t.buyIn = buyIn;
-        t.fee = fee;
-        t.maxPlayers = maxPlayers;
-        t.startStack = startStack;
-        t.sbStart = sbStart;
-        t.bbStart = bbStart;
-        t.levelDur = levelDur;
+        t.buyIn = p.buyIn;
+        t.fee = p.fee;
+        t.maxPlayers = p.maxPlayers;
+        t.seatsPerTable = tableSize;
+        t.startStack = p.startStack;
+        t.sbStart = p.sbStart;
+        t.bbStart = p.bbStart;
+        t.anteStart = p.anteStart;
+        t.levelDur = p.levelDur;
+        t.growthBps = p.growthBps;
+        t.actionSecs = p.actionSecs == 0 ? 30 : (p.actionSecs > 120 ? 120 : p.actionSecs);
+        if (hasStruct) {
+            for (uint256 i = 0; i < p.structure.length; i++) t.structure.push(p.structure[i]);
+            t.curSb = p.structure[0].sb;
+            t.curBb = p.structure[0].bb;
+            t.curAnte = p.structure[0].ante;
+        } else {
+            t.curSb = p.sbStart;
+            t.curBb = p.bbStart;
+            t.curAnte = p.anteStart;
+        }
+        t.startTime = p.startTime;
+        t.approvalRequired = p.approvalRequired;
+        t.hostBps = p.hostBps;
         t.sponsored = uint128(msg.value);
         t.pool = uint128(msg.value);
         t.status = REGISTERING;
-        for (uint256 i = 0; i < payoutBps.length; i++) t.payoutBps.push(payoutBps[i]);
-        emit TournamentCreated(id, msg.sender, buyIn, fee, uint128(msg.value), maxPlayers);
+        for (uint256 i = 0; i < p.payoutBps.length; i++) t.payoutBps.push(p.payoutBps[i]);
+        emit TournamentCreated(id, msg.sender, p.buyIn, p.fee, uint128(msg.value), p.maxPlayers);
     }
 
-    /// @notice Register + pay buy-in (+ fee). For a free sponsored tournament set buyIn=fee=0.
+    /// @notice Register + pay buy-in (+ fee). In approval mode your entry waits
+    ///         (escrowed) until the creator approves it — withdraw any time.
     function register(uint256 id) external payable nonReentrant {
         T storage t = _t[id];
         if (t.status != REGISTERING) revert NotRegistering();
-        if (t.players.length >= t.maxPlayers) revert Full();
-        if (t.registered[msg.sender]) revert AlreadyIn();
+        if (t.registered[msg.sender] || t.pending[msg.sender]) revert AlreadyIn();
         if (msg.value != uint256(t.buyIn) + uint256(t.fee)) revert WrongValue();
+        if (t.approvalRequired && msg.sender != t.creator) {
+            if (t.applicants.length >= 64) revert Full(); // bound refund loops
+            t.pending[msg.sender] = true;
+            t.applicants.push(msg.sender);
+            emit Applied(id, msg.sender);
+            return;
+        }
+        _admit(t, id, msg.sender);
+    }
+
+    function _admit(T storage t, uint256 id, address player) internal {
+        if (t.players.length >= t.maxPlayers) revert Full();
         t.pool += t.buyIn;
         feeCollected += t.fee;
-        t.registered[msg.sender] = true;
-        t.players.push(msg.sender);
-        emit Registered(id, msg.sender, t.pool, uint8(t.players.length));
+        t.registered[player] = true;
+        t.players.push(player);
+        emit Registered(id, player, t.pool, uint8(t.players.length));
+    }
+
+    /// @notice Creator approves a pending entry (approval mode).
+    function approveEntry(uint256 id, address player) external {
+        T storage t = _t[id];
+        if (msg.sender != t.creator) revert NotCreator();
+        if (t.status != REGISTERING) revert NotRegistering();
+        if (!t.pending[player]) revert NotPending();
+        t.pending[player] = false;
+        _admit(t, id, player);
+    }
+
+    /// @notice Creator rejects a pending entry — full refund.
+    function rejectEntry(uint256 id, address player) external nonReentrant {
+        T storage t = _t[id];
+        if (msg.sender != t.creator) revert NotCreator();
+        if (!t.pending[player]) revert NotPending();
+        t.pending[player] = false;
+        payable(player).sendValue(uint256(t.buyIn) + uint256(t.fee));
+        emit ApplicationRejected(id, player);
+    }
+
+    /// @notice Withdraw your own pending application (works in ANY status, so
+    ///         an entry never gets stuck if the event starts/finishes without you).
+    function withdrawApplication(uint256 id) external nonReentrant {
+        T storage t = _t[id];
+        if (!t.pending[msg.sender]) revert NotPending();
+        t.pending[msg.sender] = false;
+        payable(msg.sender).sendValue(uint256(t.buyIn) + uint256(t.fee));
+        emit ApplicationWithdrawn(id, msg.sender);
     }
 
     /// @notice Unregister before the tournament starts; refunds buy-in + fee.
@@ -198,69 +321,156 @@ contract PokerTournament is Ownable, ReentrancyGuard {
         T storage t = _t[id];
         if (t.status != REGISTERING) revert NotRegistering();
         if (msg.sender != t.creator && msg.sender != operator && msg.sender != owner()) revert NotOperator();
+        // Scheduled events: only the creator may start before the scheduled time;
+        // the operator/owner (the bot) waits until startTime to kick it off.
+        if (t.startTime != 0 && block.timestamp < t.startTime && msg.sender != t.creator) revert NotDue();
         uint8 n = uint8(t.players.length);
         if (n < 2) revert TooFew();
 
-        RoomTableConfig memory cfg = RoomTableConfig({
-            maxSeats: n,
-            smallBlind: t.sbStart,
-            bigBlind: t.bbStart,
-            ante: 0,
-            minBuyIn: 0,
-            maxBuyIn: 0,
-            rakeBps: 0,
-            rakeCap: 0,
-            actionTimeout: 45,
-            active: true
-        });
-        uint256 tableId = room.createControlledTable(cfg);
-        t.tableId = tableId;
-        for (uint8 i = 0; i < n; i++) {
-            room.seatPlayerWithChips(tableId, i, t.players[i], t.startStack);
+        // Open ceil(n / seatsPerTable) controlled tables (each full-size so the
+        // bot can later rebalance/consolidate into them via movePlayer).
+        uint8 ts = t.seatsPerTable;
+        uint8 numTables = uint8((uint16(n) + ts - 1) / ts);
+        for (uint8 j = 0; j < numTables; j++) {
+            RoomTableConfig memory cfg = RoomTableConfig({
+                maxSeats: ts,
+                smallBlind: t.curSb,
+                bigBlind: t.curBb,
+                ante: t.curAnte,
+                minBuyIn: 0,
+                maxBuyIn: 0,
+                rakeBps: 0,
+                rakeCap: 0,
+                actionTimeout: t.actionSecs == 0 ? 30 : t.actionSecs,
+                active: true
+            });
+            t.tables.push(room.createControlledTable(cfg));
         }
+        // round-robin seating → balanced starting fields across the tables
+        uint8[] memory seatIdx = new uint8[](numTables);
+        for (uint8 i = 0; i < n; i++) {
+            uint8 tj = i % numTables;
+            room.seatPlayerWithChips(t.tables[tj], seatIdx[tj], t.players[i], t.startStack);
+            seatIdx[tj] += 1;
+        }
+        t.tableId = t.tables[0];
         t.startedAt = uint64(block.timestamp);
         t.remaining = n;
         t.status = RUNNING;
-        emit Started(id, tableId, n);
+        emit Started(id, t.tables[0], n);
     }
 
-    /// @notice Raise the blinds once the current level's time has elapsed.
+    /// @notice Raise the blinds when the current level's time has elapsed. Uses
+    ///         the custom `structure` if one was set, else geometric `growthBps`.
     function levelUp(uint256 id) external onlyOp {
         T storage t = _t[id];
         if (t.status != RUNNING) revert NotRunning();
-        if (block.timestamp < t.startedAt + uint64(t.level + 1) * t.levelDur) revert NotDue();
-        if (room.handInProgress(t.tableId)) revert HandLive();
+        bool custom = t.structure.length > 0;
+        if (block.timestamp < t.startedAt + _timeForNextLevel(t)) revert NotDue();
+        for (uint256 k = 0; k < t.tables.length; k++) if (room.handInProgress(t.tables[k])) revert HandLive();
+
         t.level += 1;
-        uint128 mult = uint128(1) << t.level; // blinds double each level
-        uint128 sb = t.sbStart * mult;
-        uint128 bb = t.bbStart * mult;
-        room.setBlinds(t.tableId, sb, bb, 0);
+        uint128 sb;
+        uint128 bb;
+        if (custom && t.level < t.structure.length) {
+            Level storage lv = t.structure[t.level];
+            sb = lv.sb; bb = lv.bb; t.curAnte = lv.ante;
+        } else {
+            // Past the end of the schedule (or geometric mode): keep escalating so
+            // an abandoned table can't blind-oscillate forever — someone must bust.
+            uint16 g = t.growthBps < 10500 ? 15000 : t.growthBps; // structure events may not set growthBps
+            sb = uint128((uint256(t.curSb) * g) / 10000);
+            bb = uint128((uint256(t.curBb) * g) / 10000);
+            if (bb <= t.curBb) bb = t.curBb + 1; // rounding floor — always move up
+            if (sb <= t.curSb) sb = t.curSb + 1;
+            if (sb > bb) sb = bb;
+            if (t.curAnte > 0) {
+                uint128 ante = uint128((uint256(t.curAnte) * g) / 10000);
+                if (ante <= t.curAnte) ante = t.curAnte + 1; // always move up
+                t.curAnte = ante;
+            }
+        }
+        t.curSb = sb;
+        t.curBb = bb;
+        for (uint256 k = 0; k < t.tables.length; k++) room.setBlinds(t.tables[k], sb, bb, t.curAnte);
         emit LevelUp(id, t.level, sb, bb);
+    }
+
+    /// @dev Seconds after startedAt when level `t.level+1` becomes due. Custom
+    ///      schedules: sum the scheduled durations; levels past the end of the
+    ///      schedule (escalation overtime) each last as long as the final level.
+    function _timeForNextLevel(T storage t) internal view returns (uint256 req) {
+        uint256 n = t.structure.length;
+        if (n == 0) return uint256(t.level + 1) * t.levelDur;
+        for (uint256 i = 0; i <= t.level && i < n; i++) req += t.structure[i].durationSecs;
+        if (t.level + 1 > n) req += (t.level + 1 - n) * t.structure[n - 1].durationSecs;
+    }
+
+    /// @notice True when the next blind level is due right now (off-chain driver helper).
+    function dueForLevelUp(uint256 id) external view returns (bool) {
+        T storage t = _t[id];
+        if (t.status != RUNNING) return false;
+        return block.timestamp >= t.startedAt + _timeForNextLevel(t);
+    }
+
+    /// @notice The custom blind schedule (empty if the event uses geometric growth).
+    function structureOf(uint256 id) external view returns (Level[] memory) {
+        return _t[id].structure;
     }
 
     /// @notice Report a busted seat (stack 0). Pays the finisher if in the money,
     ///         and when one player is left pays the winner and ends the event.
-    function reportBust(uint256 id, uint8 seat) external onlyOp nonReentrant {
+    function reportBust(uint256 id, uint8 tableIdx, uint8 seat) external onlyOp nonReentrant {
         T storage t = _t[id];
         if (t.status != RUNNING) revert NotRunning();
-        if (room.handInProgress(t.tableId)) revert HandLive();
-        RoomSeat memory s = room.getSeat(t.tableId, seat);
+        if (tableIdx >= t.tables.length) revert BadParams();
+        uint256 tid = t.tables[tableIdx];
+        if (room.handInProgress(tid)) revert HandLive();
+        RoomSeat memory s = room.getSeat(tid, seat);
         address player = s.player;
         if (player == address(0) || !t.registered[player] || t.busted[player] || s.stack != 0) revert NotBusted();
 
-        uint8 place = t.remaining; // this player finishes here (e.g. 9th of 9)
+        uint8 place = t.remaining; // this player finishes here (global place, e.g. 18th of 18)
         t.busted[player] = true;
         t.remaining -= 1;
-        room.removeSeat(t.tableId, seat);
+        room.removeSeat(tid, seat);
         _pay(t, id, player, place);
 
         if (t.remaining == 1) {
             address winner = _lastStanding(t);
             uint128 prize = _prize(t, 1);
             if (prize > 0) room.depositFor{value: prize}(winner);
+            // host reward: the creator's cut of the pool, paid once at the finish
+            uint128 hostCut = _hostCut(t);
+            if (hostCut > 0) {
+                room.depositFor{value: hostCut}(t.creator);
+                emit HostPaid(id, t.creator, hostCut);
+            }
             t.status = FINISHED;
             emit Finished(id, winner, prize);
         }
+    }
+
+    /// @notice MTT rebalancing: move a player (with their whole stack) from one
+    ///         of the tournament's tables to an EMPTY seat on another. Operator,
+    ///         between hands on both tables. Chip-conserving (removeSeat then
+    ///         re-seat the same stack) — the bot computes which moves to make to
+    ///         keep tables playable and to form the final table.
+    function movePlayer(uint256 id, uint8 fromTableIdx, uint8 fromSeat, uint8 toTableIdx, uint8 toSeat) external onlyOp {
+        T storage t = _t[id];
+        if (t.status != RUNNING) revert NotRunning();
+        if (fromTableIdx >= t.tables.length || toTableIdx >= t.tables.length) revert BadParams();
+        uint256 fromTid = t.tables[fromTableIdx];
+        uint256 toTid = t.tables[toTableIdx];
+        if (fromTid == toTid) revert BadParams();
+        if (room.handInProgress(fromTid) || room.handInProgress(toTid)) revert HandLive();
+        RoomSeat memory from = room.getSeat(fromTid, fromSeat);
+        if (from.player == address(0) || t.busted[from.player]) revert NotBusted();
+        RoomSeat memory to = room.getSeat(toTid, toSeat);
+        if (to.player != address(0)) revert BadParams(); // target seat must be empty
+        room.removeSeat(fromTid, fromSeat);
+        room.seatPlayerWithChips(toTid, toSeat, from.player, from.stack);
+        emit PlayerMoved(id, from.player, fromTid, toTid);
     }
 
     /// @notice Cancel a tournament that never started; refunds buy-ins + sponsor.
@@ -286,9 +496,16 @@ contract PokerTournament is Ownable, ReentrancyGuard {
         payable(to).sendValue(amount);
     }
 
+    function _hostCut(T storage t) internal view returns (uint128) {
+        return uint128((uint256(t.pool) * t.hostBps) / 10000);
+    }
+
+    /// @dev Prizes are computed from the pool NET of the host reward, so the
+    ///      payout split still describes 100% of what the players compete for.
     function _prize(T storage t, uint8 place) internal view returns (uint128) {
         if (place == 0 || place > t.payoutBps.length) return 0;
-        return uint128((uint256(t.pool) * t.payoutBps[place - 1]) / 10000);
+        uint256 distributable = uint256(t.pool) - _hostCut(t);
+        return uint128((distributable * t.payoutBps[place - 1]) / 10000);
     }
 
     function _pay(T storage t, uint256 id, address player, uint8 place) internal {
@@ -322,28 +539,58 @@ contract PokerTournament is Ownable, ReentrancyGuard {
             uint8 status,
             uint8 remaining,
             uint256 tableId,
-            uint16[] memory payoutBps
+            uint16[] memory payoutBps,
+            bool approvalRequired,
+            uint8 pendingCount
         )
     {
         T storage t = _t[id];
-        return (t.creator, t.buyIn, t.fee, t.startStack, t.pool, t.maxPlayers, uint8(t.players.length), t.status, t.remaining, t.tableId, t.payoutBps);
+        uint8 pc = 0;
+        for (uint256 i = 0; i < t.applicants.length; i++) {
+            if (t.pending[t.applicants[i]]) pc++;
+        }
+        return (t.creator, t.buyIn, t.fee, t.startStack, t.pool, t.maxPlayers, uint8(t.players.length), t.status, t.remaining, t.tableId, t.payoutBps, t.approvalRequired, pc);
+    }
+
+    /// @notice Applicants still awaiting the creator's decision.
+    function pendingEntries(uint256 id) external view returns (address[] memory out) {
+        T storage t = _t[id];
+        uint256 n = 0;
+        for (uint256 i = 0; i < t.applicants.length; i++) if (t.pending[t.applicants[i]]) n++;
+        out = new address[](n);
+        uint256 j = 0;
+        for (uint256 i = 0; i < t.applicants.length; i++) if (t.pending[t.applicants[i]]) out[j++] = t.applicants[i];
+    }
+
+    function isPending(uint256 id, address p) external view returns (bool) {
+        return _t[id].pending[p];
     }
 
     function playersOf(uint256 id) external view returns (address[] memory) {
         return _t[id].players;
     }
 
+    /// @notice The controlled tables this tournament runs on (1 for SNG, several for MTT).
+    function tablesOf(uint256 id) external view returns (uint256[] memory) {
+        return _t[id].tables;
+    }
+
     /// @notice Level clock for the off-chain driver (compute "level-up due" locally).
     function clock(uint256 id)
         external
         view
-        returns (uint64 startedAt, uint8 level, uint64 levelDur, uint128 sbStart, uint128 bbStart)
+        returns (uint64 startedAt, uint8 level, uint64 levelDur, uint128 curSb, uint128 curBb, uint128 curAnte, uint64 startTime)
     {
         T storage t = _t[id];
-        return (t.startedAt, t.level, t.levelDur, t.sbStart, t.bbStart);
+        return (t.startedAt, t.level, t.levelDur, t.curSb, t.curBb, t.curAnte, t.startTime);
     }
 
     function isRegistered(uint256 id, address p) external view returns (bool) {
         return _t[id].registered[p];
+    }
+
+    /// @notice Creator's host-reward cut of the pool in bps (0 = none).
+    function hostBpsOf(uint256 id) external view returns (uint16) {
+        return _t[id].hostBps;
     }
 }

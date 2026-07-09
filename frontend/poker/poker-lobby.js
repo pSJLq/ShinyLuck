@@ -67,7 +67,7 @@ async function boot() {
       el("td", {}, `NLHE ${cfg.maxSeats}-max`),
       el("td", {}, [seatsDots(filled, cfg.maxSeats), el("span", { class: "sub" }, ` ${filled}/${cfg.maxSeats}`)]),
       el("td", { class: "mono" }, hand.inProgress ? `${fmt(hand.pot)}` : "—"),
-      el("td", {}, el("a", { class: "btn btn-primary", href: `table.html?t=${t}` }, filled >= cfg.maxSeats ? "Observe" : "Join →")),
+      el("td", {}, el("a", { class: "btn btn-primary", href: `table?t=${t}` }, filled >= cfg.maxSeats ? "Observe" : "Join →")),
     ]));
   }
 }

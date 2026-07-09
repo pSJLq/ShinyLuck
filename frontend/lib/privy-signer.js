@@ -175,8 +175,8 @@ export class PrivySigner extends ethers.AbstractSigner {
             maxPriorityFeePerGas: populated.maxPriorityFeePerGas,
           }),
           new Promise((_, rej) => setTimeout(
-            () => rej(new Error("iframe sign timeout (6s)")),
-            6_000,
+            () => rej(new Error("iframe sign timeout (14s)")),
+            14_000,
           )),
         ]);
         stamp(`iframe sign OK (${signed.slice(0, 12)}…)`);
@@ -187,6 +187,13 @@ export class PrivySigner extends ethers.AbstractSigner {
         // a broadcast - without this the next populate keeps incrementing
         // local nonce and the gap grows.
         this._lastChainSyncAt = 0;
+        // A REVERT (bad params, buy-in out of range, insufficient balance) will
+        // fail on the legacy path too — surface the REAL reason now instead of
+        // masking it as a 10s "timeout". Only genuine sign/network hiccups fall through.
+        const m = (e && (e.shortMessage || e.message)) || "";
+        if (e && (e.code === "CALL_EXCEPTION" || e.action === "estimateGas" || /revert|out ?of ?range|insufficient/i.test(m))) {
+          throw e;
+        }
       }
     }
 
@@ -217,8 +224,8 @@ export class PrivySigner extends ethers.AbstractSigner {
         chainId: tx.chainId != null ? Number(tx.chainId) : undefined,
       }),
       new Promise((_, rej) => setTimeout(
-        () => rej(new Error("Privy sendTransaction timeout (10s)")),
-        10_000,
+        () => rej(new Error("Privy sendTransaction timeout (30s)")),
+        30_000,
       )),
     ]);
     stamp(`legacy sendTransaction OK (hash=${result?.hash?.slice(0, 12)}…)`);

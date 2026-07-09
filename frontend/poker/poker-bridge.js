@@ -37,9 +37,38 @@ function handName(cards) {
   return RNAME[hi] + " high";
 }
 
+// Numeric strength of the same best hand: category 0 (high card) … 8 (straight
+// flush / royal) plus packed tiebreak kickers. The UI tiers the combo badge by
+// `cat` and picks the showdown winner by comparing `score`.
+function handEval(cards) {
+  const cs = (cards || []).filter((c) => c != null && c !== 255);
+  if (cs.length < 2) return null;
+  const rc = new Array(13).fill(0), bySuit = [[], [], [], []];
+  let mask = 0;
+  for (const c of cs) { const r = Math.floor(c / 4), s = c % 4; rc[r]++; bySuit[s].push(r); mask |= 1 << r; }
+  const straightHigh = (m) => {
+    for (let top = 12; top >= 4; top--) { let ok = true; for (let d = 0; d < 5; d++) if (!(m & (1 << (top - d)))) { ok = false; break; } if (ok) return top; }
+    const wheel = (1 << 12) | 1 | 2 | 4 | 8; return (m & wheel) === wheel ? 3 : -1;
+  };
+  const kick = (n, skip) => { const out = []; for (let r = 12; r >= 0 && out.length < n; r--) if ((mask & (1 << r)) && skip.indexOf(r) < 0) out.push(r); return out; };
+  const S = (cat, ks) => { let v = cat; for (let i = 0; i < 5; i++) v = v * 16 + (ks[i] != null ? ks[i] + 1 : 0); return v; };
+  let flushSuit = -1; for (let s = 0; s < 4; s++) if (bySuit[s].length >= 5) flushSuit = s;
+  if (flushSuit >= 0) { let sm = 0; for (const r of bySuit[flushSuit]) sm |= 1 << r; const sf = straightHigh(sm); if (sf >= 0) return { cat: 8, score: S(8, [sf]) }; }
+  let quad = -1; const trips = [], pairs = [];
+  for (let r = 12; r >= 0; r--) { if (rc[r] === 4) quad = r; else if (rc[r] === 3) trips.push(r); else if (rc[r] === 2) pairs.push(r); }
+  if (quad >= 0) return { cat: 7, score: S(7, [quad].concat(kick(1, [quad]))) };
+  if (trips.length >= 1 && (pairs.length >= 1 || trips.length >= 2)) { const t = trips[0]; const p = trips.length >= 2 ? Math.max(trips[1], pairs.length ? pairs[0] : -1) : pairs[0]; return { cat: 6, score: S(6, [t, p]) }; }
+  if (flushSuit >= 0) { const top5 = bySuit[flushSuit].slice().sort((a, b) => b - a).slice(0, 5); return { cat: 5, score: S(5, top5) }; }
+  const sh = straightHigh(mask); if (sh >= 0) return { cat: 4, score: S(4, [sh]) };
+  if (trips.length >= 1) return { cat: 3, score: S(3, [trips[0]].concat(kick(2, [trips[0]]))) };
+  if (pairs.length >= 2) return { cat: 2, score: S(2, [pairs[0], pairs[1]].concat(kick(1, [pairs[0], pairs[1]]))) };
+  if (pairs.length === 1) return { cat: 1, score: S(1, [pairs[0]].concat(kick(3, [pairs[0]]))) };
+  return { cat: 0, score: S(0, kick(5, [])) };
+}
+
 window.SP = {
   sdk: new ShinyPoker(),
-  ACTION, STREET, STREET_NAME, TRN_STATUS, fmt, intToCardStr, handName, NETWORK, POKER_CONFIG,
+  ACTION, STREET, STREET_NAME, TRN_STATUS, fmt, intToCardStr, handName, handEval, NETWORK, POKER_CONFIG,
   parseEther: (v) => ethers.parseEther(String(v)),
   tableId: Number(new URLSearchParams(location.search).get("t") || 0),
 };
