@@ -18,19 +18,30 @@ import {ZkVerify} from "./ZkVerify.sol";
 ///
 ///         Per-hand flow (coordinator drives, players' browsers do the crypto):
 ///           1. prepareDeal  — register each seat's pubkey (Schnorr-verified),
-///                             aggregate the table key, store the shuffled deck.
-///           2. room.startHand → startHand() binds the pre-prepared deal.
+///                             aggregate the table key, commit the shuffled deck
+///                             (keccak per in-play ciphertext — cheaper than
+///                             storing points; reveals re-supply them and are
+///                             checked against the commitment).
+///           2. room.startHand → startHand() binds the pre-prepared deal after
+///                             verifying the seat set ELEMENT-WISE.
 ///           3. revealBoardCard — as each street closes, the board card is
 ///                             decrypted by ALL players' shares (public), verified.
 ///           4. revealHoleCards — at showdown each live seat's two cards are
 ///                             decrypted (all shares now public), verified; the
 ///                             room then ranks them exactly as with v1.
+///
+///         A per-deal bitmask rejects the same card value being revealed twice
+///         (a malicious shuffle that duplicated an in-play card is caught the
+///         moment the second copy shows; the hand cancels instead of settling
+///         wrong). Full zk shuffle arguments remain the R2 upgrade.
 contract ZkTableDealer is IPokerDealer {
     using ZkVerify for ZkVerify.G1Point;
 
     address public owner;
     address public room; // PokerRoom (only it calls startHand)
-    address public coordinator; // dealer bot (posts prepareDeal + reveals)
+    // Coordinator worker keys (the dealer bot posts with several signers so hot
+    // tables don't share one nonce queue). Any of them may drive any deal.
+    mapping(address => bool) public isCoordinator;
 
     struct Deal {
         bool exists;
@@ -42,19 +53,22 @@ contract ZkTableDealer is IPokerDealer {
         uint8 boardCount;
         bool showdownReady;
         uint8[5] board;
+        uint64 revealedMask; // bit per card value 0..51 — dupe guard
     }
 
     // dealId => deal
     mapping(uint256 => Deal) private _deal;
     mapping(uint256 => uint8[]) private _seats;
     mapping(uint256 => ZkVerify.G1Point[]) private _pubkey; // participant i's pubkey
-    mapping(uint256 => ZkVerify.G1Point[]) private _deckA; // 52 ciphertext A
-    mapping(uint256 => ZkVerify.G1Point[]) private _deckB; // 52 ciphertext B
+    // keccak256(A.x, A.y, B.x, B.y) per in-play ciphertext (2k hole + 5 board).
+    // 1 slot instead of 4 per card; reveals pass the points in calldata.
+    mapping(uint256 => bytes32[]) private _ctHash;
     mapping(uint256 => mapping(uint8 => uint8[2])) private _hole; // seat => [c0,c1]
     mapping(uint256 => mapping(uint8 => bool)) private _holeSet;
     // (tableId,handId) => dealId, so the room's startHand finds the prepared deal
     mapping(uint256 => mapping(uint64 => uint256)) private _byHand;
 
+    event CoordinatorSet(address indexed coordinator, bool enabled);
     event DealPrepared(uint256 indexed dealId, uint256 indexed tableId, uint8 players);
     event HandBound(uint256 indexed dealId, uint256 indexed tableId, uint64 handId);
     event BoardRevealed(uint256 indexed dealId, uint8 count);
@@ -69,19 +83,28 @@ contract ZkTableDealer is IPokerDealer {
     error AlreadyBound();
     error BadCard();
     error BadStreet();
+    error BadCiphertext();
+    error DupeCard();
+    error SeatMismatch();
 
     constructor(address room_, address coordinator_) {
         owner = msg.sender;
         room = room_;
-        coordinator = coordinator_;
+        isCoordinator[coordinator_] = true;
+        emit CoordinatorSet(coordinator_, true);
     }
 
     modifier onlyOwner() { if (msg.sender != owner) revert NotOwner(); _; }
     modifier onlyRoom() { if (msg.sender != room) revert NotRoom(); _; }
-    modifier onlyCoordinator() { if (msg.sender != coordinator) revert NotCoordinator(); _; }
+    modifier onlyCoordinator() { if (!isCoordinator[msg.sender]) revert NotCoordinator(); _; }
 
     function setRoom(address r) external onlyOwner { room = r; }
-    function setCoordinator(address c) external onlyOwner { coordinator = c; }
+
+    /// @notice Enable/disable a coordinator worker key.
+    function setCoordinator(address c, bool on) external onlyOwner {
+        isCoordinator[c] = on;
+        emit CoordinatorSet(c, on);
+    }
 
     // ---- canonical Fiat–Shamir domains (match zk-bn254.js) -----------------
     function _u(uint256 v) private pure returns (string memory) {
@@ -99,6 +122,10 @@ contract ZkTableDealer is IPokerDealer {
         return string.concat("SPZK:", _u(dealId), ":share:", _u(cardIdx), ":", _u(seat));
     }
 
+    function _hashCt(ZkVerify.G1Point calldata A, ZkVerify.G1Point calldata B) private pure returns (bytes32) {
+        return keccak256(abi.encodePacked(A.x, A.y, B.x, B.y));
+    }
+
     // ---- 1. prepare the deal (coordinator, before room.startHand) -----------
     function prepareDeal(
         uint256 dealId,
@@ -114,13 +141,15 @@ contract ZkTableDealer is IPokerDealer {
         if (_deal[dealId].exists) revert AlreadyBound();
         uint256 k = pubkeys.length;
         if (k < 2 || k > 10 || seats.length != k || R.length != k || s.length != k) revert BadLength();
-        // Only the IN-PLAY ciphertexts are stored/revealed: 2k hole + 5 board.
+        // Only the IN-PLAY ciphertexts are committed/revealed: 2k hole + 5 board.
         // The rest of the 52-card deck is never decrypted (undealt cards stay
         // encrypted forever) — cheaper AND stronger (nothing extra is exposed).
         if (deckA.length != 2 * k + 5 || deckB.length != 2 * k + 5) revert BadLength();
 
         ZkVerify.G1Point memory agg = _verifyKeys(dealId, pubkeys, R, s);
-        _storeDeck(dealId, deckA, deckB);
+        for (uint256 i = 0; i < deckA.length; i++) {
+            _ctHash[dealId].push(keccak256(abi.encodePacked(deckA[i].x, deckA[i].y, deckB[i].x, deckB[i].y)));
+        }
         for (uint256 i = 0; i < k; i++) _seats[dealId].push(seats[i]);
 
         Deal storage d = _deal[dealId];
@@ -147,10 +176,6 @@ contract ZkTableDealer is IPokerDealer {
         }
     }
 
-    function _storeDeck(uint256 dealId, ZkVerify.G1Point[] calldata deckA, ZkVerify.G1Point[] calldata deckB) private {
-        for (uint256 i = 0; i < deckA.length; i++) { _deckA[dealId].push(deckA[i]); _deckB[dealId].push(deckB[i]); }
-    }
-
     // ---- 2. IPokerDealer.startHand: bind the prepared deal ------------------
     function startHand(uint256 tableId, uint64 handId, uint8 playerCount, uint8[] calldata seats)
         external
@@ -162,19 +187,30 @@ contract ZkTableDealer is IPokerDealer {
         if (!d.exists) revert NotPrepared();
         if (d.bound) revert AlreadyBound();
         if (d.playerCount != playerCount || _seats[dealId].length != seats.length) revert BadLength();
+        // Element-wise: a seat set that changed between prepareDeal and the
+        // room's deal (someone sat down/left in the gap) must NOT bind — the
+        // participant→seat mapping would be corrupted and reveals would credit
+        // the wrong seats. The coordinator just re-prepares with the fresh set.
+        uint8[] storage ps = _seats[dealId];
+        for (uint256 i = 0; i < seats.length; i++) {
+            if (ps[i] != seats[i]) revert SeatMismatch();
+        }
         d.bound = true;
         emit HandBound(dealId, tableId, handId);
     }
 
     // ---- 3/4. verified card reveal -----------------------------------------
-    /// Decrypt deck ciphertext #cardIdx with the supplied per-participant shares
-    /// and prove it equals `claimedCard`. Reverts unless every Chaum–Pedersen
-    /// share is valid AND B − Σshares == (claimedCard+1)·G. Returns nothing on
-    /// success (state set by callers below).
+    /// Decrypt ciphertext #cardIdx (supplied in calldata, checked against the
+    /// prepareDeal commitment) with the per-participant shares and prove it
+    /// equals `claimedCard`. Reverts unless the ciphertext matches the
+    /// commitment, every Chaum–Pedersen share is valid AND
+    /// B − Σshares == (claimedCard+1)·G.
     function _verifyDecrypt(
         uint256 dealId,
         uint16 cardIdx,
         uint8 claimedCard,
+        ZkVerify.G1Point calldata A,
+        ZkVerify.G1Point calldata B,
         ZkVerify.G1Point[] calldata d,
         ZkVerify.G1Point[] calldata R1,
         ZkVerify.G1Point[] calldata R2,
@@ -182,7 +218,7 @@ contract ZkTableDealer is IPokerDealer {
     ) private view {
         uint256 k = _pubkey[dealId].length;
         if (claimedCard >= 52 || d.length != k || R1.length != k || R2.length != k || s.length != k) revert BadLength();
-        ZkVerify.G1Point memory A = _deckA[dealId][cardIdx];
+        if (_hashCt(A, B) != _ctHash[dealId][cardIdx]) revert BadCiphertext();
         ZkVerify.G1Point memory acc = ZkVerify.G1Point(0, 0); // Σ shares
         for (uint256 i = 0; i < k; i++) {
             if (!ZkVerify.verifyChaumPedersen(shareDomain(dealId, cardIdx, i), A, _pubkey[dealId][i], d[i], R1[i], R2[i], s[i])) {
@@ -191,18 +227,26 @@ contract ZkTableDealer is IPokerDealer {
             acc = ZkVerify.add(acc, d[i]);
         }
         // M = B − Σshares ; a card j encodes point (j+1)·G
-        ZkVerify.G1Point memory M = ZkVerify.add(_deckB[dealId][cardIdx], ZkVerify.neg(acc));
+        ZkVerify.G1Point memory M = ZkVerify.add(B, ZkVerify.neg(acc));
         ZkVerify.G1Point memory expect = ZkVerify.mul(ZkVerify.gen(), uint256(claimedCard) + 1);
         if (!ZkVerify.eq(M, expect)) revert BadCard();
     }
 
-    /// Reveal one board card (all k players' shares → public card). `street`:
-    /// 1=flop(→3), 2=turn(→4), 3=river(→5). Board deck indices follow the deal
-    /// convention: 2*k + boardSlot.
+    /// @dev Reject a card value showing up twice in one deal — the cheap,
+    ///      always-on tripwire against a duplicated-card shuffle.
+    function _markRevealed(Deal storage deal, uint8 card) private {
+        uint64 bit = uint64(1) << card;
+        if (deal.revealedMask & bit != 0) revert DupeCard();
+        deal.revealedMask |= bit;
+    }
+
+    /// Reveal one board card (all k players' shares → public card). Board deck
+    /// indices follow the deal convention: 2*k + boardSlot. `ct` = [A, B].
     function revealBoardCard(
         uint256 dealId,
         uint8 boardSlot,
         uint8 claimedCard,
+        ZkVerify.G1Point[] calldata ct,
         ZkVerify.G1Point[] calldata d,
         ZkVerify.G1Point[] calldata R1,
         ZkVerify.G1Point[] calldata R2,
@@ -211,21 +255,24 @@ contract ZkTableDealer is IPokerDealer {
         Deal storage deal = _deal[dealId];
         if (!deal.exists) revert NotPrepared();
         if (boardSlot > 4 || boardSlot != deal.boardCount) revert BadStreet();
+        if (ct.length != 2) revert BadLength();
         uint16 cardIdx = uint16(2 * deal.playerCount + boardSlot);
-        _verifyDecrypt(dealId, cardIdx, claimedCard, d, R1, R2, s);
+        _verifyDecrypt(dealId, cardIdx, claimedCard, ct[0], ct[1], d, R1, R2, s);
+        _markRevealed(deal, claimedCard);
         deal.board[boardSlot] = claimedCard;
         deal.boardCount = boardSlot + 1;
         emit BoardRevealed(dealId, deal.boardCount);
     }
 
     /// Reveal a seat's two hole cards at showdown (now that seat's own share is
-    /// also public). deckIdx for seat's participant index p: 2*p and 2*p+1.
+    /// also public). deckIdx for participant p: 2*p and 2*p+1.
+    /// `cts` = [A0, B0, A1, B1]; proof arrays: [card0 shares..., card1 shares...].
     function revealHoleCards(
         uint256 dealId,
         uint8 participant,
         uint8 seatIndex,
         uint8[2] calldata cards,
-        // proofs for card0 then card1: arrays laid out [card0 shares..., card1 shares...]
+        ZkVerify.G1Point[] calldata cts,
         ZkVerify.G1Point[] calldata d,
         ZkVerify.G1Point[] calldata R1,
         ZkVerify.G1Point[] calldata R2,
@@ -234,17 +281,20 @@ contract ZkTableDealer is IPokerDealer {
         Deal storage deal = _deal[dealId];
         if (!deal.exists) revert NotPrepared();
         uint256 k = deal.playerCount;
-        if (d.length != 2 * k) revert BadLength();
+        if (cts.length != 4 || d.length != 2 * k) revert BadLength();
         // card 0 uses d[0..k), card 1 uses d[k..2k)
-        _verifyDecrypt(dealId, uint16(2 * participant), cards[0], d[0:k], R1[0:k], R2[0:k], s[0:k]);
-        _verifyDecrypt(dealId, uint16(2 * participant + 1), cards[1], d[k:2 * k], R1[k:2 * k], R2[k:2 * k], s[k:2 * k]);
+        _verifyDecrypt(dealId, uint16(2 * participant), cards[0], cts[0], cts[1], d[0:k], R1[0:k], R2[0:k], s[0:k]);
+        _verifyDecrypt(dealId, uint16(2 * participant + 1), cards[1], cts[2], cts[3], d[k:2 * k], R1[k:2 * k], R2[k:2 * k], s[k:2 * k]);
+        _markRevealed(deal, cards[0]);
+        _markRevealed(deal, cards[1]);
         _hole[dealId][seatIndex] = cards;
         _holeSet[dealId][seatIndex] = true;
         emit HoleRevealed(dealId, seatIndex);
     }
 
     /// Mark the hand ready to settle once the board is complete and every seat
-    /// the room needs has been revealed (coordinator asserts after posting all).
+    /// the room needs has been revealed (coordinator asserts after posting all;
+    /// the room independently re-checks every card it reads is 0..51).
     function markShowdownReady(uint256 dealId) external onlyCoordinator {
         _deal[dealId].showdownReady = true;
     }
@@ -273,9 +323,17 @@ contract ZkTableDealer is IPokerDealer {
     function pubkey(uint256 dealId, uint8 i) external view returns (ZkVerify.G1Point memory) {
         return _pubkey[dealId][i];
     }
-    function ciphertext(uint256 dealId, uint16 cardIdx)
-        external view returns (ZkVerify.G1Point memory A, ZkVerify.G1Point memory B)
+    /// @notice Commitment of in-play ciphertext #cardIdx — clients verify the
+    ///         relayed deck against these before providing any shares.
+    function ctHash(uint256 dealId, uint16 cardIdx) external view returns (bytes32) {
+        return _ctHash[dealId][cardIdx];
+    }
+    function dealInfo(uint256 dealId)
+        external
+        view
+        returns (bool exists, bool bound, uint8 playerCount, uint256 tableId, uint64 handId, uint8[] memory seats)
     {
-        return (_deckA[dealId][cardIdx], _deckB[dealId][cardIdx]);
+        Deal storage d = _deal[dealId];
+        return (d.exists, d.bound, d.playerCount, d.tableId, d.handId, _seats[dealId]);
     }
 }

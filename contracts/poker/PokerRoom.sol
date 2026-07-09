@@ -82,6 +82,7 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         bool occupied;
         bool sittingOut; // not dealt into new hands
         uint64 sitInHandId; // first handId this seat is eligible to be dealt
+        uint64 sitOutSince; // when sittingOut was set (0 = playing); parked-seat kick basis
     }
 
     /// @dev Transient per-seat state for the in-progress hand. Reset each hand.
@@ -147,6 +148,9 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
 
     IPokerDealer public dealer;
     address public dealerOperator; // off-chain dealer bot, may drive timeouts / advance streets
+    // Additional operator worker keys: the dealer bot runs several signers so
+    // hot tables don't queue behind one nonce. Same trust level as dealerOperator.
+    mapping(address => bool) public isOperator;
 
     // Session keys: a player authorizes a hot in-browser key to take betting
     // actions for them without a wallet popup. The key can ONLY call act() — it
@@ -175,6 +179,7 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
     event TableConfigUpdated(uint256 indexed tableId);
     event DealerUpdated(address indexed prev, address indexed next);
     event DealerOperatorUpdated(address indexed prev, address indexed next);
+    event OperatorSet(address indexed op, bool enabled);
     event SessionKeySet(address indexed player, address indexed key, uint256 funded);
     event SessionKeyRevoked(address indexed player, address indexed key);
     event TournamentFactoryUpdated(address indexed prev, address indexed next);
@@ -207,6 +212,7 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
     event ShowdownReached(uint256 indexed tableId, uint64 indexed handId, uint128 pot);
     event HandSettled(uint256 indexed tableId, uint64 indexed handId, uint8 winnerSeat, uint128 amountWon, uint128 rake);
     event HandCancelled(uint256 indexed tableId, uint64 indexed handId);
+    event HandCancelledPenalized(uint256 indexed tableId, uint64 indexed handId, uint8 offenderSeat, uint128 forfeited);
     event PotWinner(uint256 indexed tableId, uint64 indexed handId, uint8 potIndex, uint8 seat, uint128 amount);
     event ShowdownSettled(uint256 indexed tableId, uint64 indexed handId, uint128 rake);
 
@@ -260,7 +266,9 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
     }
 
     modifier onlyDealerOrOperator() {
-        if (msg.sender != address(dealer) && msg.sender != dealerOperator) revert NotDealerOrOperator();
+        if (msg.sender != address(dealer) && msg.sender != dealerOperator && !isOperator[msg.sender]) {
+            revert NotDealerOrOperator();
+        }
         _;
     }
 
@@ -276,6 +284,12 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
     function setDealerOperator(address op) external onlyOwner {
         emit DealerOperatorUpdated(dealerOperator, op);
         dealerOperator = op;
+    }
+
+    /// @notice Enable/disable an additional operator worker key.
+    function setOperator(address op, bool on) external onlyOwner {
+        isOperator[op] = on;
+        emit OperatorSet(op, on);
     }
 
     function pause() external onlyOwner {
@@ -369,12 +383,13 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         emit TournamentSeated(tableId, seat, player, chips);
     }
 
-    /// @notice Remove a (busted) seat. Not allowed for a live seat mid-hand.
+    /// @notice Remove a (busted) seat. Not allowed for a seat with chips in the
+    ///         live hand (deleting its SeatHand would orphan money in the pot).
     function removeSeat(uint256 tableId, uint8 seat) external onlyController(tableId) {
         Seat storage s = _seats[tableId][seat];
         address player = s.player;
         SeatHand storage sh = _seatHands[tableId][seat];
-        if (_hands[tableId].inProgress && sh.inHand && !sh.folded) revert InHand();
+        if (_hands[tableId].inProgress && (sh.inHand || sh.folded || sh.committedTotal > 0)) revert InHand();
         delete _seats[tableId][seat];
         delete _seatHands[tableId][seat];
         if (player != address(0)) _seatOf[tableId][player] = 0;
@@ -506,12 +521,29 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
     /// @notice Toggle sitting out (you keep your seat & stack but aren't dealt in).
     function setSitOut(uint256 tableId, bool sittingOut) external {
         uint8 seat = _mySeat(tableId);
-        _seats[tableId][seat].sittingOut = sittingOut;
+        Seat storage s = _seats[tableId][seat];
+        s.sittingOut = sittingOut;
+        s.sitOutSince = sittingOut ? uint64(block.timestamp) : 0;
         if (!sittingOut) {
-            // Re-entering: eligible from the next hand.
-            _seats[tableId][seat].sitInHandId = handCounter[tableId] + 1;
+            // Re-entering: eligible from the next hand, idle strikes forgiven.
+            s.sitInHandId = handCounter[tableId] + 1;
+            timeoutStreak[tableId][seat] = 0;
         }
         emit SitOutToggled(tableId, seat, msg.sender, sittingOut);
+    }
+
+    /// @notice Operator marks a seat idle: its owner is unresponsive to the card
+    ///         protocol (v2 hands need every player's live crypto), so sit them
+    ///         out — hands stop waiting on them — and count a strike toward
+    ///         {kickIdle}. The flag only affects FUTURE deals; it never touches
+    ///         the live hand's accounting.
+    function sitOutIdle(uint256 tableId, uint8 seat) external onlyDealerOrOperator {
+        Seat storage s = _seats[tableId][seat];
+        if (!s.occupied) revert NotSeated();
+        s.sittingOut = true;
+        if (s.sitOutSince == 0) s.sitOutSince = uint64(block.timestamp);
+        timeoutStreak[tableId][seat] += 1;
+        emit SitOutToggled(tableId, seat, s.player, true);
     }
 
     /// @notice Kick an AFK seat: after KICK_AFTER consecutive timeout-folds the
@@ -523,7 +555,12 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         if (tableController[tableId] != address(0)) revert ControlledTable();
         Seat storage s = _seats[tableId][seat];
         if (!s.occupied) revert NotSeated();
-        if (timeoutStreak[tableId][seat] < 3) revert NotIdle(); // 3 straight timeouts = AFK
+        // AFK = 3 straight timeouts/protocol strikes, OR parked sitting-out for
+        // 10+ minutes (a sat-out seat accrues no strikes — it isn't dealt in —
+        // so without the time basis it could squat a cash seat forever).
+        bool struck = timeoutStreak[tableId][seat] >= 3;
+        bool parked = s.sittingOut && s.sitOutSince != 0 && block.timestamp > uint256(s.sitOutSince) + 600;
+        if (!struck && !parked) revert NotIdle();
         SeatHand storage sh = _seatHands[tableId][seat];
         if (_hands[tableId].inProgress && (sh.inHand || sh.folded || sh.committedTotal > 0)) revert InHand();
 
@@ -667,6 +704,7 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         _lastButton[tableId] = button;
 
         if (cfg.ante > 0) _postAntes(tableId, elig, cfg.ante);
+        if (tableController[tableId] != address(0)) _postDeadBlinds(tableId, cfg);
         uint8 bbSeat = _postBlinds(tableId, elig, button, cfg);
 
         // First to act preflop is the next eligible actor left of the big blind.
@@ -913,6 +951,60 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         _clearHand(tableId);
     }
 
+    /// @notice Cancel the current hand but FORFEIT `offenderSeat`'s committed
+    ///         chips to the other committed seats (pro-rata), refunding everyone
+    ///         else in full. For a seat whose owner abandoned the v2 card
+    ///         protocol mid-hand (withheld decryption shares): the hand cannot
+    ///         complete without them, but walking away must never be cheaper
+    ///         than folding — otherwise closing the tab in a lost pot would be
+    ///         free insurance. The forfeit goes to PLAYERS only; the operator
+    ///         gains nothing. The offender is also sat out with a strike.
+    function cancelHandPenalized(uint256 tableId, uint8 offenderSeat) external onlyDealerOrOperator nonReentrant {
+        Hand storage h = _hands[tableId];
+        if (!h.inProgress) revert NoHandInProgress();
+        uint128 forfeit = _seatHands[tableId][offenderSeat].committedTotal;
+        if (forfeit == 0) revert NotIdle(); // nothing committed — use plain cancelHand
+        uint8 n = _tables[tableId].maxSeats;
+
+        // Refund every other committed seat + measure their combined stake.
+        uint128 othersTotal = 0;
+        for (uint8 i = 0; i < n; i++) {
+            if (i == offenderSeat) continue;
+            uint128 c = _seatHands[tableId][i].committedTotal;
+            if (c > 0) {
+                _seats[tableId][i].stack += c;
+                othersTotal += c;
+            }
+        }
+        // Distribute the forfeit pro-rata over those seats (dust to the last).
+        if (othersTotal > 0) {
+            uint128 left = forfeit;
+            uint8 last = 0;
+            for (uint8 i = 0; i < n; i++) {
+                if (i == offenderSeat) continue;
+                uint128 c = _seatHands[tableId][i].committedTotal;
+                if (c == 0) continue;
+                uint128 share = uint128((uint256(forfeit) * c) / othersTotal);
+                _seats[tableId][i].stack += share;
+                left -= share;
+                last = i;
+            }
+            _seats[tableId][last].stack += left;
+        } else {
+            _seats[tableId][offenderSeat].stack += forfeit; // no one to award — refund
+        }
+        for (uint8 i = 0; i < n; i++) delete _seatHands[tableId][i];
+
+        Seat storage off = _seats[tableId][offenderSeat];
+        if (off.occupied) {
+            off.sittingOut = true;
+            if (off.sitOutSince == 0) off.sitOutSince = uint64(block.timestamp);
+            timeoutStreak[tableId][offenderSeat] += 1;
+        }
+        emit HandCancelledPenalized(tableId, h.handId, offenderSeat, forfeit);
+        _clearHand(tableId);
+    }
+
     function _clearHand(uint256 tableId) internal {
         Hand storage h = _hands[tableId];
         h.inProgress = false;
@@ -1032,6 +1124,25 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         }
     }
 
+    /// @dev Tournament blind-off: a sitting-out seat can't be dealt in (a v2
+    ///      hand needs its owner's live crypto) but its stack must still pay to
+    ///      play — post a dead big blind straight into the pot each hand so an
+    ///      absent stack drains and busts instead of stalling the event forever.
+    ///      Routed through committedTotal so cancelHand refunds it correctly.
+    function _postDeadBlinds(uint256 tableId, TableConfig storage cfg) internal {
+        Hand storage h = _hands[tableId];
+        uint8 n = cfg.maxSeats;
+        for (uint8 i = 0; i < n; i++) {
+            Seat storage s = _seats[tableId][i];
+            if (!s.occupied || !s.sittingOut || s.stack == 0) continue;
+            uint128 amt = cfg.bigBlind <= s.stack ? cfg.bigBlind : s.stack;
+            s.stack -= amt;
+            _seatHands[tableId][i].committedTotal += amt;
+            h.pot += amt;
+            emit AntePosted(tableId, i, amt); // dead money, ante-equivalent
+        }
+    }
+
     function _postBlinds(uint256 tableId, uint8[] memory elig, uint8 button, TableConfig storage cfg)
         internal
         returns (uint8 bbSeat)
@@ -1094,7 +1205,10 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         uint8 n = cfg.maxSeats;
 
         // 1. Score each live seat's 7 cards; snapshot per-seat contributions.
+        //    Defense-in-depth vs a lying isShowdownReady: an unrevealed card
+        //    (255) must never reach the evaluator — it would misrank the seat.
         uint8[5] memory board = dealer.boardCards(h.dealId);
+        if (board[4] > 51) revert ShowdownNotReady();
         uint32[] memory scores = new uint32[](n);
         uint128[] memory contrib = new uint128[](n);
         bool[] memory live = new bool[](n);
@@ -1104,6 +1218,7 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
             if (sh.inHand) {
                 live[i] = true;
                 (uint8 c0, uint8 c1) = dealer.holeCards(h.dealId, i);
+                if (c0 > 51 || c1 > 51) revert ShowdownNotReady();
                 uint8[7] memory cs = [c0, c1, board[0], board[1], board[2], board[3], board[4]];
                 scores[i] = PokerHandEval.eval7(cs);
             }
