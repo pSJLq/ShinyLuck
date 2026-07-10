@@ -785,10 +785,18 @@ function startCardServer(room, state, zkCtx = {}) {
       }
     });
   }
-  server.listen(PORT, () => console.log(`[poker-bot] hole-card API on :${PORT}`));
+  const port = zkCtx.port || PORT;
+  server.listen(port, () => console.log(`[poker-bot] hole-card API on :${port}`));
+  return server;
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Exported so an E2E harness can mount the SAME relay/hole-card server in-process
+// (the live entrypoint still runs main() when executed directly).
+module.exports = { startCardServer, startSnapshotCache };
+
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
