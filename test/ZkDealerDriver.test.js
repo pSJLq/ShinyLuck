@@ -35,6 +35,9 @@ class SimClient {
       const X = zkDealer.parsePt(task.aggKey);
       const out = this.zk.shuffleRemask(deck, X);
       zkDealer.zkPostShuffle(state, t, this.addr, { dealId, deck: out.deck.map(zkDealer.serCt) });
+      // …followed by the Wikström proof of that shuffle (like zk-agent.js)
+      const prf = this.zk.proveShuffle(`SPZK:${dealId}:shuffle:${task.participant}`, deck, out.deck, X, out.secret);
+      zkDealer.zkPostShuffleProof(state, t, this.addr, { dealId, turn: task.participant, proof: this.zk.shuffleProofToWire(prf) });
       return;
     }
     if (task.do === "shares") {
@@ -273,6 +276,55 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     // no chips moved: both stacks intact minus their live commitments
     expect((await room.getSeat(0, 0)).stack).to.equal(E(98));
     expect((await room.getSeat(0, 1)).stack).to.equal(E(98));
+  });
+
+  it("shuffle proofs: the on-chain deal commits to the exact verified transcript", async function () {
+    const { room, zkd, state, tick, stepAll } = await setup();
+    await dealHand(tick, stepAll);
+    const sess = state.get(0);
+    expect(sess.transcriptHash).to.be.a("string");
+    const dealId = (await room.getHand(0)).dealId;
+    expect(await zkd.proofHash(dealId)).to.equal(sess.transcriptHash); // prepareDeal carried it
+    // and the served chain is complete for client-side verification
+    const chain = zkDealer.zkChain(state, 0);
+    expect(chain.decks).to.have.length(2);
+    expect(chain.proofs.filter(Boolean)).to.have.length(2);
+    expect(chain.transcriptHash).to.equal(sess.transcriptHash);
+  });
+
+  it("a cheating shuffler cannot get a substituted deck past the proof gate", async function () {
+    const { alice, bob, room, state, clients, tick } = await setup();
+    expect(await tick()).to.match(/^keys:0/);
+    clients.forEach((c) => c.step(state, 0));
+    expect(await tick()).to.match(/^shuffle:0/);
+    clients[0].step(state, 0); // alice shuffles honestly (deck + proof)
+
+    // bob shuffles honestly BUT substitutes a known card's ciphertext into
+    // slot 0 (his own future hole card) before posting
+    const task = zkDealer.zkTask(state, 0, clients[1].addr);
+    expect(task.do).to.equal("shuffle");
+    const deck = task.deck.map(zkDealer.parseCt);
+    const X = zkDealer.parsePt(task.aggKey);
+    const out = zk.shuffleRemask(deck, X);
+    const evil = out.deck.slice();
+    evil[0] = { A: bn254.G1.ProjectivePoint.ZERO, B: zk.deckPoints()[51] }; // naked ace
+    zkDealer.zkPostShuffle(state, 0, clients[1].addr, { dealId: task.dealId, deck: evil.map(zkDealer.serCt) });
+
+    // an honest proof of the HONEST shuffle can't cover the evil deck…
+    const prf = zk.proveShuffle(`SPZK:${task.dealId}:shuffle:1`, deck, out.deck, X, out.secret);
+    expect(() => zkDealer.zkPostShuffleProof(state, 0, clients[1].addr, {
+      dealId: task.dealId, turn: 1, proof: zk.shuffleProofToWire(prf),
+    })).to.throw(/shuffle proof failed verification/);
+    // …no proof ⇒ holeshares never open, nobody ever shares on the evil deck…
+    expect(state.get(0).phase).to.equal("shuffle");
+    expect(() => zkDealer.zkPostShares(state, 0, clients[0].addr, { dealId: task.dealId, items: [{ idx: 0 }] }))
+      .to.throw(/shuffle proofs pending/);
+    // …and the proof deadline strikes the cheater; the deal restarts without money moving
+    const tag = await tick({ now: () => Date.now() + 60_000 });
+    expect(tag).to.equal("strike:shuffle:seat1");
+    expect((await room.getSeat(0, 1)).sittingOut).to.equal(true);
+    expect((await room.getSeat(0, 0)).stack).to.equal(E(100));
+    expect((await room.getSeat(0, 1)).stack).to.equal(E(100));
   });
 
   it("pre-hand no-show: strike + sit-out, no money moves", async function () {

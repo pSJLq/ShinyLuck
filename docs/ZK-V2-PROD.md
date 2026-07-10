@@ -22,18 +22,38 @@ Phases between hands (happy path ~3–6s, overlaps the winner-banner pause):
    bot (sig-gated like /holes). Deadline 8s → unresponsive seat gets
    `sitOutIdle` (strike + sat out), phase restarts without them (needs ≥2).
 2. **SHUFFLE** — sequential relay: bot sends the current 52-ct deck to player
-   i, client shuffles+remasks (~200ms), returns. First shuffler sees plaintext
-   deck but each later shuffle destroys their knowledge; ≥1 honest shuffler ⇒
-   nobody knows the final order. Deadline 8s per player.
-3. **HOLE-SHARES pre-collect** — each client sends decryption shares for
-   *other players' hole cts only* (never board, never its own). Bot verifies
-   proofs, relays: each player ends with k−1 shares per own card → decrypts
-   locally, sees own cards instantly. Bot can't decrypt (owner's share
-   missing). Board shares are deliberately NOT pre-collected — otherwise the
-   bot would know the whole board at deal time.
+   i, client shuffles+remasks (~350ms), returns, then streams in a **Wikström
+   proof of shuffle** (~1s, pipelined behind the NEXT player's shuffle): a
+   zero-knowledge argument that the output deck is exactly a permutation +
+   re-encryption of the input deck (Haenni-Locher-Koenig-Dubuis FC'17
+   pseudo-code, Algorithms 4.3–4.6, on BN254 with NUMS Pedersen generators).
+   The bot verifies every proof before the deal proceeds, EVERY client
+   independently re-verifies the whole chain (see step 3), and the on-chain
+   deal commits to the transcript hash. Consequence: **the "≥1 honest
+   shuffler" assumption is no longer load-bearing for deck integrity** — even
+   the last shuffler, with every other shuffler colluding, cannot substitute,
+   duplicate or bias a single ciphertext; and since every honest player is
+   themselves one of the shufflers, the final ORDER is unpredictable to any
+   coalition that doesn't include… the victim themselves. Deadline 8s per
+   player + 15s for outstanding proofs; a missing/invalid proof = strike +
+   redeal without that seat (pre-money, free).
+3. **HOLE-SHARES pre-collect** — each client FIRST fetches the full shuffle
+   transcript (`/zk/chain`: every posted deck + every proof) and verifies all
+   k proofs itself — the coordinator's verification is not a trust point. It
+   also pins its OWN shuffle output inside the chain (a forked/equivocated
+   chain fails the pin). Only then does it send decryption shares for *other
+   players' hole cts only* (never board, never its own) — a share given on an
+   unproven deck could help decrypt a planted copy of one's own card. Bot
+   verifies proofs, relays: each player ends with k−1 shares per own card →
+   decrypts locally, sees own cards instantly. Bot can't decrypt (owner's
+   share missing). Board shares are deliberately NOT pre-collected — otherwise
+   the bot would know the whole board at deal time.
 4. **prepareDeal** on-chain (verifies k Schnorr PoKs, aggregates the table
-   key, commits the 2k+5 in-play cts) → `room.startHand` binds it. Betting
-   proceeds on the UNCHANGED engine (session keys etc.).
+   key, commits the 2k+5 in-play cts + the keccak of the full shuffle-proof
+   transcript — clients compare it against the hash of the chain THEY
+   verified; anyone holding the transcript can re-verify the shuffle forever)
+   → `room.startHand` binds it. Betting proceeds on the UNCHANGED engine
+   (session keys etc.).
 5. **BOARD per street** — when a betting round closes, the bot requests that
    street's board shares from ALL k clients (folded players' clients keep
    answering — automatic, background). Verify → `revealBoardCard` with all k
@@ -107,10 +127,12 @@ ZkTableDealer prod:
   deal (length-only today — a seat-set race would corrupt the participant
   mapping).
 - **Revealed-card dupe guard**: uint64 bitmask per deal; a second reveal of
-  the same card value reverts. Closes the visible half of the "malicious
-  shuffler duplicates a card" hole (a dupe among in-play cards is caught at
-  reveal; the hand cancels instead of settling wrong). Full shuffle arguments
-  (Groth16) remain R2.
+  the same card value reverts. (Now defense-in-depth behind the Wikström
+  shuffle arguments — a duplicated card can no longer even enter a deal;
+  this tripwire stays as the last on-chain line.)
+- **`proofHash`**: prepareDeal stores the keccak of the full shuffle-proof
+  transcript; `proofHash(dealId)` view for client cross-checks and public
+  post-hoc auditability.
 - Deck/pubkey storage: measure prepareDeal gas at k=6 in hardhat ×~10 Somnia
   factor; if prohibitive, switch to per-ct hash commitments + calldata reveal.
 

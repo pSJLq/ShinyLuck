@@ -90,6 +90,12 @@ function newSession(tableId, elig, nextHand, opts) {
     decks: [zk.initialDeck(zk.deckPoints())], // decks[i] = deck after i shuffles
     shuffleTurn: 0,
     deck: null, // final 52 cts once every participant shuffled
+    // Wikström shuffle proofs, one per shuffler — the deck is not trusted (and
+    // holeshares don't start) until EVERY stage is proven a correct
+    // permutation+re-encryption. proofs[i] = parsed, proofWires[i] = wire JSON.
+    proofs: new Array(elig.length).fill(null),
+    proofWires: new Array(elig.length).fill(null),
+    transcriptHash: null,
     shares: new Map(), // cardIdx -> Map(participant -> {d, R1, R2, s})  (verified)
     prepared: false,
     started: false,
@@ -141,6 +147,16 @@ function zkTask(state, tableId, addrLower) {
   if (sess.phase === "shuffle") {
     if (sess.shuffleTurn === part) {
       return { ...base, do: "shuffle", first: sess.shuffleTurn === 0, deck: sess.decks[sess.shuffleTurn].map(serCt), aggKey: serPt(sess.aggKey) };
+    }
+    // already shuffled but the proof hasn't landed: normally the client proves
+    // from its own local state right after posting the deck; this payload is
+    // the F5-recovery path (secret {perm,rho} survives in sessionStorage, the
+    // decks are re-served here).
+    if (part < sess.shuffleTurn && !sess.proofs[part]) {
+      return {
+        ...base, do: "shuffleproof", turn: part, domain: shufDomain(sess.dealId, part),
+        inDeck: sess.decks[part].map(serCt), outDeck: sess.decks[part + 1].map(serCt), aggKey: serPt(sess.aggKey),
+      };
     }
     return base;
   }
@@ -215,7 +231,9 @@ function zkPostKey(state, tableId, addrLower, body) {
   return { ok: true };
 }
 
-/// Client returns the deck it just shuffled+remasked (its turn only).
+/// Client returns the deck it just shuffled+remasked (its turn only). The next
+/// shuffler proceeds IMMEDIATELY — the proof of this shuffle streams in behind
+/// it (zkPostShuffleProof) so proving pipelines with the next player's shuffle.
 function zkPostShuffle(state, tableId, addrLower, body) {
   const sess = state.get(tableId);
   if (!sess || sess.phase !== "shuffle") throw new Error("not shuffling");
@@ -228,12 +246,63 @@ function zkPostShuffle(state, tableId, addrLower, body) {
   sess.shuffleTurn += 1;
   sess.deadlineAt = Date.now() + 8_000;
   if (sess.shuffleTurn === sess.k) {
-    sess.deck = deck;
-    sess.phase = "holeshares";
-    sess.phaseAt = Date.now();
-    sess.deadlineAt = Date.now() + 10_000;
+    sess.deck = deck; // candidate final deck — NOT trusted until all proofs land
+    sess.deadlineAt = Date.now() + 15_000; // window for outstanding proofs
   }
   return { ok: true };
+}
+
+const shufDomain = (dealId, turn) => `SPZK:${dealId}:shuffle:${turn}`;
+
+/// Client posts the Wikström proof for the shuffle it performed at `turn`.
+/// Verified HERE against the exact input/output decks the coordinator relayed;
+/// every other client independently re-verifies the whole chain via zkChain
+/// before contributing any decryption share. An invalid proof is simply not
+/// accepted — the prover gets struck at the deadline like any no-show.
+function zkPostShuffleProof(state, tableId, addrLower, body) {
+  const sess = state.get(tableId);
+  if (!sess || sess.phase !== "shuffle") throw new Error("not in shuffle phase");
+  if (String(sess.dealId) !== String(body.dealId)) throw new Error("stale dealId");
+  const part = sess.part.get(addrLower);
+  if (part === undefined) throw new Error("not in this deal");
+  const turn = Number(body.turn);
+  if (turn !== part) throw new Error("can only prove your own shuffle");
+  if (turn >= sess.shuffleTurn) throw new Error("deck not posted yet");
+  if (sess.proofs[turn]) return { ok: true }; // idempotent
+  const prf = zk.shuffleProofFromWire(body.proof, parsePt);
+  if (!zk.verifyShuffle(shufDomain(sess.dealId, turn), sess.decks[turn], sess.decks[turn + 1], sess.aggKey, prf)) {
+    throw new Error("shuffle proof failed verification");
+  }
+  sess.proofs[turn] = prf;
+  sess.proofWires[turn] = body.proof;
+  if (sess.shuffleTurn === sess.k && sess.proofs.every(Boolean)) {
+    sess.transcriptHash = zk.shuffleTranscriptHash(
+      `SPZKSH:tr:${sess.dealId}`,
+      sess.proofs.map((p, i) => ({ deck: sess.decks[i + 1], proof: p })),
+    );
+    sess.phase = "holeshares";
+    sess.phaseAt = Date.now();
+    sess.deadlineAt = Date.now() + 15_000;
+  }
+  return { ok: true };
+}
+
+/// The public shuffle transcript: every posted deck + every proof. Clients
+/// fetch this ONCE per hand and independently verify the full chain before
+/// giving out any decryption share — the coordinator's own verification is
+/// thereby not a trust point. (The initial deck is canonical — derived
+/// locally, not served.)
+function zkChain(state, tableId) {
+  const sess = state.get(tableId);
+  if (!sess || !sess.aggKey) return { phase: sess ? sess.phase : "none" };
+  return {
+    dealId: String(sess.dealId),
+    k: sess.k,
+    aggKey: serPt(sess.aggKey),
+    decks: sess.decks.slice(1).map((d) => d.map(serCt)),
+    proofs: sess.proofWires,
+    transcriptHash: sess.transcriptHash,
+  };
 }
 
 /// Client posts decryption shares (+CP proofs) for a set of card indices.
@@ -242,6 +311,7 @@ function zkPostShuffle(state, tableId, addrLower, body) {
 function zkPostShares(state, tableId, addrLower, body) {
   const sess = state.get(tableId);
   if (!sess || !sess.deck) throw new Error("no deck yet");
+  if (sess.phase === "shuffle") throw new Error("shuffle proofs pending"); // deck not proven yet
   if (String(sess.dealId) !== String(body.dealId)) throw new Error("stale dealId");
   const part = sess.part.get(addrLower);
   if (part === undefined) throw new Error("not in this deal");
@@ -295,6 +365,13 @@ function persistSession(dir, sess) {
     fs.writeFileSync(persistPath(dir, sess.tableId), JSON.stringify({
       dealId: String(sess.dealId), forHand: sess.forHand, k: sess.k, seats: sess.seats, addrs: sess.addrs,
       pubkeys: sess.pubkeys.map((p) => serPt(p.X)), inPlay,
+      // full shuffle transcript: /zk/chain keeps serving across a bot restart
+      // (clients that hadn't verified yet would otherwise refuse to share),
+      // and it's the permanent audit artifact behind the on-chain proofHash
+      aggKey: sess.aggKey ? serPt(sess.aggKey) : null,
+      chainDecks: sess.decks.slice(1).map((d) => d.map(serCt)),
+      proofWires: sess.proofWires,
+      transcriptHash: sess.transcriptHash,
     }));
   } catch (_) {}
 }
@@ -316,7 +393,11 @@ async function recoverSession(zkd, dir, tableId, dealIdOnChain) {
     forHand: raw.forHand, phase: "live", k: raw.k, seats: raw.seats, addrs: raw.addrs,
     part: new Map(raw.addrs.map((a, i) => [a, i])),
     pubkeys: raw.pubkeys.map((p) => ({ X: parsePt(p) })),
-    decks: [], shuffleTurn: raw.k,
+    aggKey: raw.aggKey ? parsePt(raw.aggKey) : null,
+    decks: raw.chainDecks ? [zk.initialDeck(zk.deckPoints()), ...raw.chainDecks.map((d) => d.map(parseCt))] : [],
+    shuffleTurn: raw.k,
+    proofs: (raw.proofWires || []).map(Boolean), proofWires: raw.proofWires || [],
+    transcriptHash: raw.transcriptHash || null,
     deck: raw.inPlay.map(parseCt), // NOTE: only in-play indices are usable post-restart
     shares: new Map(), prepared: true, started: true,
     boardRevealed: Number(await zkd.boardRevealedCount(dealIdOnChain)),
@@ -376,7 +457,8 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
       if (sess.phase === "keys") {
         for (let i = 0; i < sess.k; i++) if (!sess.pubkeys[i]) missing.push(i);
       } else if (sess.phase === "shuffle") {
-        missing.push(sess.shuffleTurn);
+        if (sess.shuffleTurn < sess.k) missing.push(sess.shuffleTurn);
+        else for (let i = 0; i < sess.k; i++) if (!sess.proofs[i]) { missing.push(i); break; } // decks all in — a PROOF is overdue
       } else if (sess.phase === "holeshares") {
         for (let i = 0; i < sess.k; i++) {
           for (let j = 0; j < sess.k; j++) {
@@ -405,7 +487,10 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
       sess.deadlineAt = now + (opts.shuffleMs ?? 8_000);
       return "shuffle:0/" + sess.k;
     }
-    if (sess.phase === "shuffle") return `shuffle:${sess.shuffleTurn}/${sess.k}`;
+    if (sess.phase === "shuffle") {
+      if (sess.shuffleTurn < sess.k) return `shuffle:${sess.shuffleTurn}/${sess.k}`;
+      return `shufproofs:${sess.proofs.filter(Boolean).length}/${sess.k}`;
+    }
     if (sess.phase === "holeshares") {
       // need: every participant's shares for every OTHER participant's holes
       for (let j = 0; j < sess.k; j++) {
@@ -425,6 +510,7 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
             sess.dealId, tableId, sess.forHand, sess.seats,
             sess.pubkeys.map((p) => cPt(p.X)), sess.pubkeys.map((p) => cPt(p.pok.R)), sess.pubkeys.map((p) => p.pok.s),
             inPlay.map((c) => cPt(c.A)), inPlay.map((c) => cPt(c.B)),
+            sess.transcriptHash, // on-chain commitment to the shuffle-proof chain
           ));
           sess.prepared = true;
           persistSession(opts.persistDir, sess);
@@ -686,6 +772,6 @@ function zkSnapshot(state, tableId) {
 }
 
 module.exports = {
-  init, newZkState, tickZkTable, zkTask, zkPostKey, zkPostShuffle, zkPostShares, zkSnapshot,
-  eligibleSeats, keyDomain, shareDomain, serPt, parsePt, serCt, parseCt, cPt, STREET, boardCountForStreet, inPlayCount, holeIdxsOf, boardIdx,
+  init, newZkState, tickZkTable, zkTask, zkPostKey, zkPostShuffle, zkPostShuffleProof, zkChain, zkPostShares, zkSnapshot,
+  eligibleSeats, keyDomain, shareDomain, shufDomain, serPt, parsePt, serCt, parseCt, cPt, STREET, boardCountForStreet, inPlayCount, holeIdxsOf, boardIdx,
 };

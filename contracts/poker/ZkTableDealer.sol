@@ -54,6 +54,12 @@ contract ZkTableDealer is IPokerDealer {
         bool showdownReady;
         uint8[5] board;
         uint64 revealedMask; // bit per card value 0..51 — dupe guard
+        // keccak of the FULL Wikström shuffle-proof transcript (every stage's
+        // output deck + its proof of correct permutation+re-encryption). The
+        // deal permanently commits to the proof chain behind its deck: clients
+        // compare their independently computed hash against this, and anyone
+        // holding the transcript can re-verify the shuffle after the fact.
+        bytes32 proofHash;
     }
 
     // dealId => deal
@@ -136,7 +142,8 @@ contract ZkTableDealer is IPokerDealer {
         ZkVerify.G1Point[] calldata R,
         uint256[] calldata s,
         ZkVerify.G1Point[] calldata deckA,
-        ZkVerify.G1Point[] calldata deckB
+        ZkVerify.G1Point[] calldata deckB,
+        bytes32 shuffleProofHash
     ) external onlyCoordinator {
         if (_deal[dealId].exists) revert AlreadyBound();
         uint256 k = pubkeys.length;
@@ -158,6 +165,7 @@ contract ZkTableDealer is IPokerDealer {
         d.tableId = tableId;
         d.handId = handId;
         d.aggKey = agg;
+        d.proofHash = shuffleProofHash;
         _byHand[tableId][handId] = dealId;
         emit DealPrepared(dealId, tableId, uint8(k));
     }
@@ -443,6 +451,11 @@ contract ZkTableDealer is IPokerDealer {
     ///         relayed deck against these before providing any shares.
     function ctHash(uint256 dealId, uint16 cardIdx) external view returns (bytes32) {
         return _ctHash[dealId][cardIdx];
+    }
+    /// @notice Commitment to the deal's full shuffle-proof transcript — clients
+    ///         compare the hash they computed from the chain they verified.
+    function proofHash(uint256 dealId) external view returns (bytes32) {
+        return _deal[dealId].proofHash;
     }
     function dealInfo(uint256 dealId)
         external

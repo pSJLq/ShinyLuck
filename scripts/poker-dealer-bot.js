@@ -643,8 +643,10 @@ function startCardServer(room, state, zkCtx = {}) {
         let out;
         if (req.url.startsWith("/zk/task")) out = zkDrv.zkTask(zkCtx.zkState, t, addr);
         else if (req.url.startsWith("/zk/key")) out = zkDrv.zkPostKey(zkCtx.zkState, t, addr, body);
+        else if (req.url.startsWith("/zk/shuffleproof")) out = zkDrv.zkPostShuffleProof(zkCtx.zkState, t, addr, body); // before /zk/shuffle (prefix!)
         else if (req.url.startsWith("/zk/shuffle")) out = zkDrv.zkPostShuffle(zkCtx.zkState, t, addr, body);
         else if (req.url.startsWith("/zk/shares")) out = zkDrv.zkPostShares(zkCtx.zkState, t, addr, body);
+        else if (req.url.startsWith("/zk/chain")) out = zkDrv.zkChain(zkCtx.zkState, t); // full proof transcript for client-side chain verification
         else { res.writeHead(404).end(); return; }
         res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
         return res.end(JSON.stringify(out));

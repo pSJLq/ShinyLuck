@@ -34,6 +34,7 @@ describe("ZkTableDealer — live v2 card layer (IPokerDealer, cards from verifie
       dealId, tableId, handId, seats,
       players.map((p) => P(p.X)), players.map((p) => P(p.pok.R)), players.map((p) => p.pok.s),
       inPlay.map((c) => P(c.A)), inPlay.map((c) => P(c.B)),
+      ethers.keccak256(ethers.toUtf8Bytes("test-transcript")),
     );
     return { players, X, deck, k };
   }
@@ -151,6 +152,7 @@ describe("ZkTableDealer — live v2 card layer (IPokerDealer, cards from verifie
       dealId, tableId, handId, seats,
       players.map((p) => P(p.X)), players.map((p) => P(p.pok.R)), players.map((p) => p.pok.s),
       inPlay.map((c) => P(c.A)), inPlay.map((c) => P(c.B)),
+      ethers.keccak256(ethers.toUtf8Bytes("test-transcript")),
     );
     const a = sharesFor(deck, players, dealId, 2 * k);
     await dealer.connect(coord).revealBoardCard(dealId, 0, a.trueCard, ctPair(a.ct), a.d, a.R1, a.R2, a.s);
