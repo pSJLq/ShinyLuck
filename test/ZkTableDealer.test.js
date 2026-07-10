@@ -169,9 +169,13 @@ describe("ZkTableDealer — live v2 card layer (IPokerDealer, cards from verifie
     const PREFLOP = 0, FLOP = 1, TURN = 2, SHOWDOWN = 4;
 
     // seat 0 = participant 0 (holes 0,1); seat 3 = participant 1 (holes 2,3); board 4..8
-    // own holes: never before showdown, fine at showdown
+    // own holes: never before showdown, AND (crucially) not even at showdown
+    // until the WHOLE board is revealed — an all-in runout is on street 4 with
+    // the board not yet dealt, and a client only rescues own holes once the
+    // board is complete, so allowing it here would enable a theft of the
+    // all-in stack via a rescue the client (correctly) won't answer.
     expect(await dealer.accusationAllowed(dealId, 0, 0, FLOP, ...ct(0))).to.equal(false);
-    expect(await dealer.accusationAllowed(dealId, 0, 0, SHOWDOWN, ...ct(0))).to.equal(true);
+    expect(await dealer.accusationAllowed(dealId, 0, 0, SHOWDOWN, ...ct(0))).to.equal(false); // board not revealed yet
     // someone ELSE's holes: always demandable (their shares are pre-collected anyway)
     expect(await dealer.accusationAllowed(dealId, 0, 2, PREFLOP, ...ct(2))).to.equal(true);
     // board: only once its street closed — flop slot ok on FLOP, river slot not until RIVER
@@ -186,6 +190,23 @@ describe("ZkTableDealer — live v2 card layer (IPokerDealer, cards from verifie
     expect(await dealer.accusationAllowed(dealId, 0, 2 * k, FLOP, ...ct(2 * k + 1))).to.equal(false);
     // out-of-range card index
     expect(await dealer.accusationAllowed(dealId, 0, 2 * k + 5, SHOWDOWN, ...ct(0))).to.equal(false);
+  });
+
+  it("own-hole accusation is allowed at showdown ONLY once the full board is revealed", async () => {
+    const dealId = 43, tableId = 7, handId = 43, seats = [0, 1];
+    const { players, deck, k } = await setup(dealId, tableId, handId, seats);
+    const ct = (i) => ctPair(deck[i]);
+    const SHOWDOWN = 4;
+    // board incomplete → own hole accusation refused (the all-in-runout theft window)
+    expect(await dealer.accusationAllowed(dealId, 0, 0, SHOWDOWN, ...ct(0))).to.equal(false);
+    // reveal all five board cards
+    for (let slot = 0; slot < 5; slot++) {
+      const sh = sharesFor(deck, players, dealId, 2 * k + slot);
+      await dealer.connect(coord).revealBoardCard(dealId, slot, sh.trueCard, ctPair(sh.ct), sh.d, sh.R1, sh.R2, sh.s);
+    }
+    expect(await dealer.boardRevealedCount(dealId)).to.equal(5);
+    // now the own-hole share is legitimately demandable at showdown
+    expect(await dealer.accusationAllowed(dealId, 0, 0, SHOWDOWN, ...ct(0))).to.equal(true);
   });
 
   it("rescueShare verifies, records and serves the share; junk is refused", async () => {

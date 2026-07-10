@@ -29,6 +29,15 @@ client independently** (`/zk/chain`), and committed on-chain (`proofHash`).
   permutation. No coalition that excludes a given player can predict that
   player's cards — because **that player is themselves one of the shufflers**.
   The "≥1 honest shuffler" assumption is no longer load-bearing for integrity.
+- **Follow-up (2026-07-10 code-review pass): the "my shuffle is in the chain"
+  check must survive an F5.** The client pins the output deck of its own shuffle
+  and refuses to share unless the served `/zk/chain` contains it — otherwise a
+  fully-colluding table + coordinator could drop a player's shuffle and, having
+  authored every remaining permutation, know that player's cards. The pin was
+  in-memory only, so a mid-hand reload dropped it (and the check was skipped).
+  Now the pin (output hash + aggregate key) is persisted to `sessionStorage`
+  alongside the shuffle secret and reconstructed after a reload; a participant
+  that cannot confirm its own shuffle **refuses to share** rather than proceed.
 
 ## 2. Coordinator key substitution — can the house read your cards? **[FIXED]**
 
@@ -57,6 +66,18 @@ Fixed by a **client-side secrecy gate** (`mayReleaseShare`, mirrored on-chain in
 each board card only once its street opened, others' holes always (they decrypt
 nothing without the owner). A **folded** player additionally refuses its own-hole
 shares even at showdown (no harvesting folded hands). (`ZkShareGate.test.js`)
+
+**Follow-up (2026-07-10 code-review pass): own-hole accusation ⇒ board complete.**
+The client only rescues an own-hole accusation once the **full board** is revealed
+(its rescue gate). But `accusationAllowed` originally permitted an own-hole
+accusation on any `street == 4` — and an **all-in runout lands on street 4 before
+the board is dealt**. A malicious operator could therefore accuse an all-in
+player's own hole card during the runout, the client would (correctly) refuse to
+rescue a not-yet-due hole share, and `cancelHandPenalized` would **steal the
+all-in stack**. Closed by additionally requiring `deal.boardCount == 5` for
+own-hole accusations, so the on-chain rule matches the client's rescue policy
+exactly. (`ZkTableDealer.test.js` — "own-hole accusation … only once the full
+board is revealed")
 
 ## 4. Mid-hand abandonment / false forfeiture **[FIXED]**
 
@@ -159,9 +180,12 @@ it with a subresource-integrity hash (or an import-map integrity entry).
 
 The catastrophic vectors — deck rigging, the house reading hole cards, theft via
 false accusation, cross-deal replay — are **closed cryptographically and covered
-by tests** (225 passing). Residuals (§6–10) are bounded griefing / generic
+by tests** (226 passing). Residuals (§6–10) are bounded griefing / generic
 multi-accounting / low-severity timing, each with a documented operational
-mitigation and, where relevant, a sketched on-chain hardening.
+mitigation and, where relevant, a sketched on-chain hardening. A self-review
+`/code-review` pass (2026-07-10) surfaced two further theft/secrecy holes at the
+seams between the fixes above — the all-in own-hole forfeiture (§4 follow-up) and
+the F5-dropped shuffle pin (§1 follow-up) — both now closed and tested.
 
 **External review recommendation:** the shuffle argument (§1) is a from-scratch
 implementation of published production ZK crypto. It follows the reference

@@ -396,7 +396,13 @@ contract ZkTableDealer is IPokerDealer {
             return slot < due;
         }
         uint256 ownerP = cardIdx / 2;
-        if (ownerP == p) return street == 4; // own holes: showdown only
+        // own holes: only at showdown AND only once the whole board is already
+        // revealed. Without the boardCount==5 guard, an all-in runout (which
+        // lands the room on street 4 BEFORE the board is dealt out) would let a
+        // malicious operator accuse a seat's own hole card while its client —
+        // which only rescues own holes once the board is complete — refuses to
+        // answer, and steal the all-in stack via cancelHandPenalized.
+        if (ownerP == p) return street == 4 && deal.boardCount == 5;
         return true; // someone else's holes: pre-collected, nothing new leaks
     }
 

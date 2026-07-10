@@ -119,8 +119,27 @@ export function startZkAgent(sdk, getTableId) {
         console.error("[zk-agent] my own per-hand key is NOT in the aggregate — refusing");
         return cacheBad(dealId);
       }
-      // what I shuffled under must equal the real aggregate
-      const pin = myShuffle.get(dealId);
+      // what I shuffled under must equal the real aggregate. The pin is
+      // reconstructed from sessionStorage after an F5 (the in-memory Map is
+      // gone) so the "my shuffle is in the chain" check below is never skipped
+      // just because the tab reloaded.
+      let pin = myShuffle.get(dealId);
+      if (!pin) {
+        try {
+          const saved = JSON.parse(sessionStorage.getItem(shufKey(t, dealId)) || "null");
+          if (saved && saved.outHash && saved.aggKey) {
+            pin = { outHash: saved.outHash, aggKey: parsePt(saved.aggKey) };
+            myShuffle.set(dealId, pin);
+          }
+        } catch (_) {}
+      }
+      // I shuffled (I'm a participant reaching the share gate), so I MUST be
+      // able to confirm my own contribution — refuse to share blind if the pin
+      // is unrecoverable rather than risk sharing on a chain missing my shuffle.
+      if (myX && !pin) {
+        console.error("[zk-agent] cannot confirm my own shuffle is in the chain — refusing");
+        return cacheBad(dealId);
+      }
       if (pin && !pin.aggKey.equals(X)) {
         console.error("[zk-agent] aggregate key I shuffled under ≠ Σ posted pubkeys — refusing");
         return cacheBad(dealId);
@@ -294,13 +313,18 @@ export function startZkAgent(sdk, getTableId) {
       const X = parsePt(task.aggKey);
       const out = zk.shuffleRemask(deck, X);
       const wireDeck = out.deck.map(serCt);
-      // secret survives F5 so the proof can still be produced after a reload
+      const outHash = deckHashHex(wireDeck);
+      // secret + PIN survive F5 so that after a reload I can still (a) produce
+      // the proof and (b) verify the served chain actually contains MY shuffle —
+      // without the persisted pin, a fully-colluding table + coordinator could
+      // drop a refreshed player's shuffle and learn their cards.
       try {
         sessionStorage.setItem(shufKey(t, dealId), JSON.stringify({
           turn: task.participant, perm: out.secret.perm, rho: out.secret.rho.map((r) => hex(r)),
+          outHash, aggKey: serPt(X),
         }));
       } catch (_) {}
-      myShuffle.set(dealId, { outHash: deckHashHex(wireDeck), aggKey: X });
+      myShuffle.set(dealId, { outHash, aggKey: X });
       // deck goes out FIRST (the next shuffler proceeds immediately); the
       // Wikström proof of this shuffle is computed right after and streams in
       // behind it — proving pipelines with the next player's shuffle.
