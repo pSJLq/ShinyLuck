@@ -45,6 +45,7 @@ const ROOM_ZK_ABI = [
   "function seatOf(uint256 t, address player) view returns (uint8)",
   "function getSeat(uint256 t, uint8 seat) view returns ((address player, uint128 stack, bool occupied, bool sittingOut, uint64 sitInHandId, uint64 sitOutSince))",
   "function getHand(uint256 t) view returns ((uint64 handId, uint8 street, uint8 button, uint8 actingSeat, uint8 aggressorSeat, uint8 numInHand, uint128 currentBet, uint128 minRaise, uint128 pot, uint64 actingDeadline, uint256 dealId, bool inProgress))",
+  "function getSeatHand(uint256 t, uint8 seat) view returns ((bool inHand, bool folded, bool allIn, bool hasActed, uint128 committedStreet, uint128 committedTotal))",
   "function sessionKeyOf(address player) view returns (address)",
   "function proveResponsive(uint256 t, (uint256,uint256) d, (uint256,uint256) R1, (uint256,uint256) R2, uint256 s)",
 ];
@@ -339,8 +340,17 @@ export function startZkAgent(sdk, getTableId) {
       // read the hand street FROM CHAIN (never the bot) to gate share release
       const hand = await roomZk.getHand(t);
       const street = (hand.inProgress && String(hand.dealId) === String(dealId)) ? Number(hand.street) : -1;
+      // if I FOLDED, my hole cards are never shown — refuse own-hole shares even
+      // at showdown (a malicious bot must not harvest folded players' cards)
+      const wantsOwnHole = task.idxs.some((idx) => idx < 2 * task.k && Math.floor(idx / 2) === task.participant);
+      let amFolded = false;
+      if (wantsOwnHole && street === 4) {
+        try { amFolded = !(await roomZk.getSeatHand(t, task.mySeat)).inHand; } catch (_) { amFolded = true; }
+      }
       const items = [];
       for (const idx of task.idxs) {
+        const own = idx < 2 * task.k && Math.floor(idx / 2) === task.participant;
+        if (own && amFolded) { console.warn(`[zk-agent] refusing own-hole share idx ${idx} — I folded`); continue; }
         if (!mayRelease(idx, task.k, task.participant, street)) {
           console.warn(`[zk-agent] refusing to release share idx ${idx} at street ${street} (secrecy gate)`);
           continue; // the coordinator asked too early — never comply
