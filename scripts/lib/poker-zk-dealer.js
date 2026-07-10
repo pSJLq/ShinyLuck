@@ -87,6 +87,7 @@ function newSession(tableId, elig, nextHand, opts) {
     addrs: elig.map((e) => e.addr),
     part: new Map(elig.map((e, i) => [e.addr, i])),
     pubkeys: new Array(elig.length).fill(null), // {X, pok} noble points
+    keySigs: new Array(elig.length).fill(null), // seat-binding signature per participant
     decks: [zk.initialDeck(zk.deckPoints())], // decks[i] = deck after i shuffles
     shuffleTurn: 0,
     deck: null, // final 52 cts once every participant shuffled
@@ -228,6 +229,10 @@ function zkPostKey(state, tableId, addrLower, body) {
   const pok = { R: parsePt(body.pokR), s: BigInt(body.pokS) };
   if (!zk.verifyPok(keyDomain(sess.dealId, part), X, pok)) throw new Error("bad key proof");
   sess.pubkeys[part] = { X, pok };
+  // seat-binding signature: relayed verbatim to every client, which checks it
+  // against the seat's on-chain occupant before sharing (the bot is NOT the
+  // trust point — this is the anti-key-substitution guarantee). Stored as-is.
+  if (body.keySig) sess.keySigs[part] = String(body.keySig);
   return { ok: true };
 }
 
@@ -299,6 +304,12 @@ function zkChain(state, tableId) {
     dealId: String(sess.dealId),
     k: sess.k,
     aggKey: serPt(sess.aggKey),
+    seats: sess.seats,
+    // per-participant pubkey + its seat-binding signature: the client recomputes
+    // the aggregate from these, checks its OWN key is present, and verifies every
+    // binding against the seat's on-chain occupant before sharing.
+    pubkeys: sess.pubkeys.map((p) => (p ? serPt(p.X) : null)),
+    keySigs: sess.keySigs,
     decks: sess.decks.slice(1).map((d) => d.map(serCt)),
     proofs: sess.proofWires,
     transcriptHash: sess.transcriptHash,
@@ -369,6 +380,7 @@ function persistSession(dir, sess) {
       // (clients that hadn't verified yet would otherwise refuse to share),
       // and it's the permanent audit artifact behind the on-chain proofHash
       aggKey: sess.aggKey ? serPt(sess.aggKey) : null,
+      keySigs: sess.keySigs,
       chainDecks: sess.decks.slice(1).map((d) => d.map(serCt)),
       proofWires: sess.proofWires,
       transcriptHash: sess.transcriptHash,
@@ -393,6 +405,7 @@ async function recoverSession(zkd, dir, tableId, dealIdOnChain) {
     forHand: raw.forHand, phase: "live", k: raw.k, seats: raw.seats, addrs: raw.addrs,
     part: new Map(raw.addrs.map((a, i) => [a, i])),
     pubkeys: raw.pubkeys.map((p) => ({ X: parsePt(p) })),
+    keySigs: raw.keySigs || [],
     aggKey: raw.aggKey ? parsePt(raw.aggKey) : null,
     decks: raw.chainDecks ? [zk.initialDeck(zk.deckPoints()), ...raw.chainDecks.map((d) => d.map(parseCt))] : [],
     shuffleTurn: raw.k,

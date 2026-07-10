@@ -43,6 +43,8 @@ const ZKD_ABI = [
 const ROOM_ZK_ABI = [
   "function accusationOf(uint256 t) view returns (bool active, uint8 offenderSeat, uint16 cardIdx, uint64 handId, uint64 deadline, (uint256,uint256) ctA, (uint256,uint256) ctB)",
   "function seatOf(uint256 t, address player) view returns (uint8)",
+  "function getSeat(uint256 t, uint8 seat) view returns ((address player, uint128 stack, bool occupied, bool sittingOut, uint64 sitInHandId, uint64 sitOutSince))",
+  "function sessionKeyOf(address player) view returns (address)",
   "function proveResponsive(uint256 t, (uint256,uint256) d, (uint256,uint256) R1, (uint256,uint256) R2, uint256 s)",
 ];
 
@@ -68,33 +70,78 @@ export function startZkAgent(sdk, getTableId) {
   /// myself — the coordinator's word is not a trust point. Also pins my own
   /// shuffle: the chain must contain the exact deck I produced at my turn.
   /// Returns { ok, hash } and caches per deal.
-  async function verifyChain(t, dealId, signature, myTurn) {
+  async function verifyChain(t, dealId, signature, myTurn, myX) {
     if (chainVerdict.has(dealId)) return chainVerdict.get(dealId);
     const ch = await post("/zk/chain", { tableId: t, dealId, signature });
-    if (!ch || !Array.isArray(ch.decks) || !Array.isArray(ch.proofs) || ch.decks.length !== ch.k || ch.proofs.length !== ch.k) {
+    if (!ch || !Array.isArray(ch.decks) || !Array.isArray(ch.proofs) || ch.decks.length !== ch.k ||
+        ch.proofs.length !== ch.k || !Array.isArray(ch.pubkeys) || ch.pubkeys.length !== ch.k ||
+        !Array.isArray(ch.keySigs) || !Array.isArray(ch.seats) || ch.pubkeys.some((p) => !p) || ch.proofs.some((p) => !p)) {
       return { ok: false, hash: null }; // incomplete — retry next poll, no verdict cached
     }
-    const pin = myShuffle.get(dealId);
-    const X = pin ? pin.aggKey : parsePt(ch.aggKey);
-    const decks = [zk.initialDeck(zk.deckPoints()), ...ch.decks.map((d) => d.map(parseCt))];
-    const proofs = ch.proofs.map((w) => zk.shuffleProofFromWire(w, parsePt));
-    let ok = true;
-    if (pin && deckHashHex(ch.decks[myTurn]) !== pin.outHash) {
-      console.error("[zk-agent] chain does NOT contain my own shuffle output — refusing to participate");
-      ok = false;
-    }
-    for (let i = 0; ok && i < ch.k; i++) {
-      if (!zk.verifyShuffle(`SPZK:${dealId}:shuffle:${i}`, decks[i], decks[i + 1], X, proofs[i])) {
-        console.error(`[zk-agent] shuffle proof ${i} FAILED verification — refusing to participate`);
-        ok = false;
+    try {
+      // 1. KEY-SUBSTITUTION DEFENCE: recompute the aggregate from the posted
+      //    pubkeys and verify each pubkey is bound BY ITS SEAT'S OCCUPANT.
+      //    A coordinator that swaps in its own key for a seat can't forge that
+      //    seat's signature, so the swap is caught here and we never share —
+      //    which is what denies the coordinator the shares it would need to
+      //    decrypt that seat's cards. This is the "not even the house sees your
+      //    cards" guarantee, enforced client-side, not trusted from the bot.
+      const pubkeys = ch.pubkeys.map(parsePt);
+      let X = G1.ZERO;
+      for (const P of pubkeys) X = X.add(P);
+      // my own key must be present at my index (else my card isn't under my key)
+      if (myX && !pubkeys[myTurn].equals(myX)) {
+        console.error("[zk-agent] my own per-hand key is NOT in the aggregate — refusing");
+        return cacheBad(dealId);
       }
+      // what I shuffled under must equal the real aggregate
+      const pin = myShuffle.get(dealId);
+      if (pin && !pin.aggKey.equals(X)) {
+        console.error("[zk-agent] aggregate key I shuffled under ≠ Σ posted pubkeys — refusing");
+        return cacheBad(dealId);
+      }
+      for (let i = 0; i < ch.k; i++) {
+        const seat = Number(ch.seats[i]);
+        const a = zk.aff(pubkeys[i]);
+        const msg = `ShinyPoker:zk-key:${t}:${dealId}:${seat}:0x${a.x.toString(16)}:0x${a.y.toString(16)}`;
+        let recovered;
+        try { recovered = ethers.verifyMessage(msg, ch.keySigs[i]).toLowerCase(); }
+        catch (_) { console.error(`[zk-agent] key binding ${i}: unverifiable signature`); return cacheBad(dealId); }
+        const occ = await roomZk.getSeat(t, seat);
+        const player = occ.player.toLowerCase();
+        if (player === ethers.ZeroAddress) { console.error(`[zk-agent] key binding ${i}: empty seat`); return cacheBad(dealId); }
+        const sk = (await roomZk.sessionKeyOf(occ.player)).toLowerCase();
+        if (recovered !== player && recovered !== sk) {
+          console.error(`[zk-agent] key binding ${i}: pubkey NOT signed by seat ${seat}'s occupant — refusing`);
+          return cacheBad(dealId);
+        }
+      }
+
+      // 2. every shuffle in the chain is a proven permutation+re-encryption
+      //    under that SAME recomputed aggregate.
+      const decks = [zk.initialDeck(zk.deckPoints()), ...ch.decks.map((d) => d.map(parseCt))];
+      const proofs = ch.proofs.map((w) => zk.shuffleProofFromWire(w, parsePt));
+      if (pin && deckHashHex(ch.decks[myTurn]) !== pin.outHash) {
+        console.error("[zk-agent] chain does NOT contain my own shuffle output — refusing");
+        return cacheBad(dealId);
+      }
+      for (let i = 0; i < ch.k; i++) {
+        if (!zk.verifyShuffle(`SPZK:${dealId}:shuffle:${i}`, decks[i], decks[i + 1], X, proofs[i])) {
+          console.error(`[zk-agent] shuffle proof ${i} FAILED verification — refusing`);
+          return cacheBad(dealId);
+        }
+      }
+      const hash = zk.shuffleTranscriptHash(`SPZKSH:tr:${dealId}`, proofs.map((p, i) => ({ deck: decks[i + 1], proof: p })));
+      const verdict = { ok: true, hash };
+      chainVerdict.set(dealId, verdict);
+      console.log(`[zk-agent] chain verified: ${ch.k} bound keys + ${ch.k} shuffle proofs ok (deal ${dealId})`);
+      return verdict;
+    } catch (e) {
+      console.error("[zk-agent] chain verification error — refusing:", e.message || e);
+      return cacheBad(dealId);
     }
-    const hash = ok ? zk.shuffleTranscriptHash(`SPZKSH:tr:${dealId}`, proofs.map((p, i) => ({ deck: decks[i + 1], proof: p }))) : null;
-    const verdict = { ok, hash };
-    chainVerdict.set(dealId, verdict);
-    if (ok) console.log(`[zk-agent] shuffle chain verified: ${ch.k} proofs ok (deal ${dealId})`);
-    return verdict;
   }
+  const cacheBad = (dealId) => { const v = { ok: false, hash: null, bad: true }; chainVerdict.set(dealId, v); return v; };
 
   // If an on-chain accusation names MY seat, compute the demanded share from the
   // ciphertext embedded in the accusation and post proveResponsive — this both
@@ -202,7 +249,11 @@ export function startZkAgent(sdk, getTableId) {
         const s = (k + c * sec.x) % n;
         pok = { R, s };
       }
-      await post("/zk/key", { tableId: t, dealId, signature, X: serPt(sec.X), pokR: serPt(pok.R), pokS: hex(pok.s) });
+      // seat-binding signature: proves to every OTHER client that THIS pubkey
+      // belongs to my seat, so a coordinator can't substitute its own key here
+      const a = zk.aff(sec.X);
+      const keySig = await sdk.signZkKeyBinding(t, dealId, task.mySeat, a.x, a.y);
+      await post("/zk/key", { tableId: t, dealId, signature, X: serPt(sec.X), pokR: serPt(pok.R), pokS: hex(pok.s), keySig });
       return;
     }
 
@@ -257,9 +308,10 @@ export function startZkAgent(sdk, getTableId) {
       // player's slot — my share would then help decrypt MY card to them.
       // (an incomplete chain isn't cached → retried next poll; a verified-BAD
       // verdict is cached → this deal is dead to us permanently)
-      const verdict = await verifyChain(t, dealId, signature, task.participant);
+      const secForGate = secretFor(t, dealId, "");
+      const verdict = await verifyChain(t, dealId, signature, task.participant, secForGate.X);
       if (!verdict.ok) return;
-      const sec = secretFor(t, dealId, "");
+      const sec = secForGate;
       const items = task.idxs.map((idx) => {
         const ct = parseCt(task.cts[idx]);
         const sh = zk.decryptionShare(ct, sec.x, G1.BASE.multiply(sec.x), task.domains[idx]);

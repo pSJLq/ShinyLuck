@@ -856,6 +856,22 @@ export class ShinyPoker {
     return this.signer.signMessage(msg);
   }
 
+  /// Binds a per-hand pubkey to a seat: every OTHER client verifies this
+  /// signature against the seat's on-chain occupant before contributing a
+  /// decryption share, so a malicious coordinator cannot swap in its own key
+  /// for a seat and thereby decrypt that seat's hole cards. Signed by the
+  /// session key (recovered address == sessionKeyOf(player) on-chain).
+  zkKeyBindMessage(t, dealId, seat, xx, xy) {
+    return `ShinyPoker:zk-key:${t}:${dealId}:${seat}:0x${xx.toString(16)}:0x${xy.toString(16)}`;
+  }
+
+  async signZkKeyBinding(t, dealId, seat, xx, xy) {
+    const msg = this.zkKeyBindMessage(t, dealId, seat, xx, xy);
+    if (this.sessionActive && this.sessionWallet) return this.sessionWallet.signMessage(msg);
+    this.requireWallet();
+    return this.signer.signMessage(msg);
+  }
+
   /// This player's two hole cards. v2 (zk) tables: the cards were decrypted
   /// LOCALLY by zk-agent.js — the dealer never had them; we just read the
   /// agent's cache (the caller already retries until they land). v1 tables:
