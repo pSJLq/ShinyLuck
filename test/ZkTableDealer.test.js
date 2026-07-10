@@ -160,6 +160,60 @@ describe("ZkTableDealer — live v2 card layer (IPokerDealer, cards from verifie
       .to.be.revertedWithCustomError(dealer, "DupeCard"); // …and is rejected on-chain
   });
 
+  it("accusationAllowed: only shares the protocol legitimately needs right now", async () => {
+    const dealId = 41, tableId = 7, handId = 41, seats = [0, 3];
+    const { deck, k } = await setup(dealId, tableId, handId, seats);
+    const ct = (i) => ctPair(deck[i]);
+    const PREFLOP = 0, FLOP = 1, TURN = 2, SHOWDOWN = 4;
+
+    // seat 0 = participant 0 (holes 0,1); seat 3 = participant 1 (holes 2,3); board 4..8
+    // own holes: never before showdown, fine at showdown
+    expect(await dealer.accusationAllowed(dealId, 0, 0, FLOP, ...ct(0))).to.equal(false);
+    expect(await dealer.accusationAllowed(dealId, 0, 0, SHOWDOWN, ...ct(0))).to.equal(true);
+    // someone ELSE's holes: always demandable (their shares are pre-collected anyway)
+    expect(await dealer.accusationAllowed(dealId, 0, 2, PREFLOP, ...ct(2))).to.equal(true);
+    // board: only once its street closed — flop slot ok on FLOP, river slot not until RIVER
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k, FLOP, ...ct(2 * k))).to.equal(true);
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k + 4, TURN, ...ct(2 * k + 4))).to.equal(false);
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k + 4, SHOWDOWN, ...ct(2 * k + 4))).to.equal(true);
+    // no board share is due preflop at all
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k, PREFLOP, ...ct(2 * k))).to.equal(false);
+    // a seat that is NOT a participant of the deal owes nothing
+    expect(await dealer.accusationAllowed(dealId, 5, 2 * k, FLOP, ...ct(2 * k))).to.equal(false);
+    // the supplied ciphertext must be the committed one (accuser can't swap it)
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k, FLOP, ...ct(2 * k + 1))).to.equal(false);
+    // out-of-range card index
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k + 5, SHOWDOWN, ...ct(0))).to.equal(false);
+  });
+
+  it("rescueShare verifies, records and serves the share; junk is refused", async () => {
+    const dealId = 42, tableId = 7, handId = 42, seats = [0, 3];
+    const { players, deck, k } = await setup(dealId, tableId, handId, seats);
+    const idx = 2 * k; // first board card
+    const ct = deck[idx];
+    // participant 1 (seat 3) computes its genuine share
+    const sh = zk.decryptionShare(ct, players[1].x, players[1].X, shareDomain(dealId, idx, 1));
+    const args = [P(sh.d), P(sh.proof.R1), P(sh.proof.R2), sh.proof.s];
+
+    // rescueShare is room-only (the room's proveResponsive is the sole entry)
+    await expect(dealer.connect(coord).rescueShare(dealId, 3, idx, ...ctPair(ct), ...args))
+      .to.be.revertedWithCustomError(dealer, "NotRoom");
+
+    // a wrong ciphertext or a tampered proof is refused (returns false)
+    expect(await dealer.connect(room).rescueShare.staticCall(dealId, 3, idx, ...ctPair(deck[idx + 1]), ...args)).to.equal(false);
+    const bad = [P(sh.d), P(sh.proof.R1), P(sh.proof.R2), sh.proof.s + 1n];
+    expect(await dealer.connect(room).rescueShare.staticCall(dealId, 3, idx, ...ctPair(ct), ...bad)).to.equal(false);
+    // wrong seat (share verified against the WRONG participant's key) refused
+    expect(await dealer.connect(room).rescueShare.staticCall(dealId, 0, idx, ...ctPair(ct), ...args)).to.equal(false);
+
+    // the genuine share is recorded and served back for the coordinator
+    await dealer.connect(room).rescueShare(dealId, 3, idx, ...ctPair(ct), ...args);
+    const r = await dealer.rescuedShare(dealId, idx, 1);
+    expect(r.exists).to.equal(true);
+    expect(r.d.x).to.equal(zk.aff(sh.d).x);
+    expect(r.s).to.equal(sh.proof.s);
+  });
+
   it("only the room can bind a hand; only a coordinator can reveal; workers are addable", async () => {
     const dealId = 5, tableId = 7, handId = 5, seats = [0, 1];
     const { deck, players, k } = await setup(dealId, tableId, handId, seats);

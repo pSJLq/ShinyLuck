@@ -51,15 +51,34 @@ Phases between hands (happy path ~3–6s, overlaps the winner-banner pause):
 - Disconnect BEFORE money is in (keys/shuffle): strike + sit out + redeal
   without them. Free.
 - Disconnect MID-HAND (missing board/hole shares): after the share deadline
-  the bot calls **`cancelHandPenalized(tableId, offenderSeat)`** — everyone's
+  the bot opens an on-chain ACCUSATION — **`accuseAbandon(tableId, seat,
+  cardIdx, ctA, ctB)`** — naming the withheld share and embedding the committed
+  ciphertext (the dealer verifies it against the deal's commitment, so the
+  accusation itself carries everything the accused needs to defend). A
+  **self-rescue window** (`rescueWindow`, default 45s, owner-bounded 15–600s)
+  opens. The accused's client — watching the CHAIN, not the bot — answers with
+  **`proveResponsive(tableId, d, R1, R2, s)`**: the dealer CP-verifies the share
+  against the seat's own per-hand key, RECORDS it for the coordinator to
+  consume, and the accusation dismisses (the (seat, card) pair is vindicated
+  for the hand — it can't be re-accused). Only an EXPIRED, un-rescued
+  accusation lets **`cancelHandPenalized(tableId)`** finalize: everyone's
   committed chips are refunded EXCEPT the offender's, which are distributed
   pro-rata to the other committed seats. Closing your tab in a lost pot costs
   you exactly what folding would — the ragequit exploit is dead. Offender is
   sat out + struck (3 strikes on cash → kickIdle).
-- Trust surface: the operator could falsely blame a seat, but the forfeited
-  chips go to the OTHER PLAYERS, never to the operator — abuse requires
-  operator+player collusion and is visible on-chain. Strictly better than v1
-  (where the bot knew every card). Documented on the provably-fair page.
+- Trust surface: a compromised worker key can no longer confiscate a live
+  player's chips by false accusation — the contract only forfeits after a
+  self-rescue window the accused failed to use, and the dealer rejects
+  accusations for shares the protocol doesn't legitimately need right now
+  (a seat's own holes before showdown, future board cards, non-participants) —
+  so accusations can't be weaponized to force early card disclosure either.
+  A rescue also DELIVERS the withheld share on-chain, so "rescue then keep
+  stalling" just walks the griefer through handing over every share. What a
+  malicious operator can still do is bounded griefing: stall hands (players
+  can always exit via the permissionless paths / plain cancel refunds), or
+  penalize a player whose client is genuinely dead — the same outcome that
+  player would get from any honest timeout. Forfeits go to the OTHER PLAYERS,
+  never to the operator. Documented on the provably-fair page.
 - Tournaments: an AFK/keyless seat is sat out; sitting-out seats on controlled
   tables auto-post a dead big blind each hand (**blind-off**, new in room v3,
   swept into the pot like antes) → stack drains → `reportBust` fires →
@@ -74,7 +93,10 @@ PokerRoom v3 (fresh deploy, engine byte-identical):
 - `sitOutIdle(tableId, seat)` — onlyDealerOrOperator, not mid-hand for a
   committed seat; sets sittingOut + increments timeoutStreak. `setSitOut(false)`
   resets the streak (player came back).
-- `cancelHandPenalized(tableId, offenderSeat)` — as above.
+- `accuseAbandon` / `proveResponsive` / `cancelHandPenalized(tableId)` — the
+  accuse → self-rescue → forfeit pipeline above (`accusationOf` view for
+  clients; `ZkTableDealer.accusationAllowed` legitimacy check +
+  `rescueShare`/`rescuedShare` recording).
 - Blind-off: in `startHand`, on CONTROLLED tables, occupied+sittingOut seats
   with stack>0 post min(bb, stack) dead into the pot via committedTotal (so
   plain `cancelHand` still refunds them correctly).

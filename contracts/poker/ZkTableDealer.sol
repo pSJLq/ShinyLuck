@@ -316,6 +316,122 @@ contract ZkTableDealer is IPokerDealer {
         return (h[0], h[1]);
     }
 
+    // ---- abandonment accusations: legitimacy check + on-chain self-rescue ---
+    // PokerRoom's accuse→rescue→penalize flow leans on the dealer for the two
+    // things only the dealer knows: (a) whether the accused share is one the
+    // protocol LEGITIMATELY needs right now — otherwise a malicious operator
+    // could weaponize accusations to force early on-chain disclosure of shares
+    // (own hole cards pre-showdown, future board cards) — and (b) whether a
+    // posted rescue share is genuine. A verified rescue share is STORED so the
+    // coordinator can consume it: self-rescue doesn't just clear the accused,
+    // it delivers the withheld share, so a "rescue then keep stalling" griefer
+    // is simply forced to hand over the shares one accusation at a time.
+
+    struct RescuedShare {
+        bool exists;
+        ZkVerify.G1Point d;
+        ZkVerify.G1Point R1;
+        ZkVerify.G1Point R2;
+        uint256 s;
+    }
+    // dealId => cardIdx => participant => rescued share
+    mapping(uint256 => mapping(uint16 => mapping(uint8 => RescuedShare))) private _rescued;
+
+    event ShareRescued(uint256 indexed dealId, uint16 indexed cardIdx, uint8 participant);
+
+    /// @dev The deal's participant index for a room seat, or NOT_FOUND.
+    uint256 private constant NOT_FOUND = type(uint256).max;
+    function _participantOf(uint256 dealId, uint8 seat) private view returns (uint256) {
+        uint8[] storage seats = _seats[dealId];
+        for (uint256 i = 0; i < seats.length; i++) {
+            if (seats[i] == seat) return i;
+        }
+        return NOT_FOUND;
+    }
+
+    /// @notice Is accusing `seat` of withholding the share for `cardIdx` a
+    ///         legitimate protocol demand at `street` (room's STREET_* value)?
+    ///         - the accuser must supply the REAL ciphertext (A,B) matching the
+    ///           deal's on-chain commitment — the accusation itself then carries
+    ///           everything the accused needs to compute the share and
+    ///           self-rescue (an accuser can never make rescue impossible by
+    ///           withholding the ciphertext);
+    ///         - the seat must be a participant of the deal (a dead-blind seat
+    ///           that was never dealt in owes no shares);
+    ///         - a seat's OWN hole ciphertexts may only be demanded at showdown
+    ///           (street 4) — earlier, forcing them on-chain would expose the
+    ///           player's live cards to everyone;
+    ///         - a board ciphertext may only be demanded once its street closed
+    ///           (slot < dueCount(street)) — otherwise sequential accusations
+    ///           across all seats would decrypt future board cards early;
+    ///         - other players' hole ciphertexts are always fair game (those
+    ///           shares are pre-collected before the hand even starts).
+    function accusationAllowed(
+        uint256 dealId,
+        uint8 seat,
+        uint16 cardIdx,
+        uint8 street,
+        ZkVerify.G1Point calldata A,
+        ZkVerify.G1Point calldata B
+    ) external view returns (bool) {
+        Deal storage deal = _deal[dealId];
+        if (!deal.exists) return false;
+        uint256 k = deal.playerCount;
+        if (cardIdx >= 2 * k + 5) return false;
+        if (_hashCt(A, B) != _ctHash[dealId][cardIdx]) return false;
+        uint256 p = _participantOf(dealId, seat);
+        if (p == NOT_FOUND) return false;
+        if (cardIdx >= 2 * k) {
+            // board slot: due once its street's betting round has closed
+            uint16 slot = cardIdx - uint16(2 * k);
+            uint16 due = street == 1 ? 3 : street == 2 ? 4 : street >= 3 ? 5 : 0;
+            return slot < due;
+        }
+        uint256 ownerP = cardIdx / 2;
+        if (ownerP == p) return street == 4; // own holes: showdown only
+        return true; // someone else's holes: pre-collected, nothing new leaks
+    }
+
+    /// @notice Verify and RECORD `seat`'s decryption share for `cardIdx` — the
+    ///         self-rescue path, called by the room's {proveResponsive}. Returns
+    ///         true iff (A,B) matches the deal's ciphertext commitment AND the
+    ///         Chaum–Pedersen proof verifies against the seat's per-hand pubkey.
+    function rescueShare(
+        uint256 dealId,
+        uint8 seat,
+        uint16 cardIdx,
+        ZkVerify.G1Point calldata A,
+        ZkVerify.G1Point calldata B,
+        ZkVerify.G1Point calldata d,
+        ZkVerify.G1Point calldata R1,
+        ZkVerify.G1Point calldata R2,
+        uint256 s
+    ) external onlyRoom returns (bool) {
+        Deal storage deal = _deal[dealId];
+        if (!deal.exists) return false;
+        if (cardIdx >= _ctHash[dealId].length) return false;
+        uint256 p = _participantOf(dealId, seat);
+        if (p == NOT_FOUND) return false;
+        if (_hashCt(A, B) != _ctHash[dealId][cardIdx]) return false;
+        if (!ZkVerify.verifyChaumPedersen(shareDomain(dealId, cardIdx, p), A, _pubkey[dealId][p], d, R1, R2, s)) {
+            return false;
+        }
+        _rescued[dealId][cardIdx][uint8(p)] = RescuedShare(true, d, R1, R2, s);
+        emit ShareRescued(dealId, cardIdx, uint8(p));
+        return true;
+    }
+
+    /// @notice A share posted via self-rescue, for the coordinator to consume
+    ///         (verified on-chain at rescue time).
+    function rescuedShare(uint256 dealId, uint16 cardIdx, uint8 participant)
+        external
+        view
+        returns (bool exists, ZkVerify.G1Point memory d, ZkVerify.G1Point memory R1, ZkVerify.G1Point memory R2, uint256 s)
+    {
+        RescuedShare storage r = _rescued[dealId][cardIdx][participant];
+        return (r.exists, r.d, r.R1, r.R2, r.s);
+    }
+
     // extra views for the coordinator/clients
     function dealIdForHand(uint256 tableId, uint64 handId) external view returns (uint256) {
         return _byHand[tableId][handId];

@@ -7,6 +7,35 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {IPokerDealer} from "./IPokerDealer.sol";
 import {PokerHandEval} from "./PokerHandEval.sol";
+import {ZkVerify} from "./ZkVerify.sol";
+
+/// @dev Minimal interface into the v2 zkShuffle card layer used only by the
+///      abandonment accuse/self-rescue path. {ZkTableDealer} implements this.
+///      Rooms holding real funds must never bind a dealer that doesn't (the
+///      accused could not self-rescue); the engine-only test path (dealer = 0)
+///      is tolerated via code-length checks below.
+interface IDealerResponsive {
+    function accusationAllowed(
+        uint256 dealId,
+        uint8 seat,
+        uint16 cardIdx,
+        uint8 street,
+        ZkVerify.G1Point calldata A,
+        ZkVerify.G1Point calldata B
+    ) external view returns (bool);
+
+    function rescueShare(
+        uint256 dealId,
+        uint8 seat,
+        uint16 cardIdx,
+        ZkVerify.G1Point calldata A,
+        ZkVerify.G1Point calldata B,
+        ZkVerify.G1Point calldata d,
+        ZkVerify.G1Point calldata R1,
+        ZkVerify.G1Point calldata R2,
+        uint256 s
+    ) external returns (bool);
+}
 
 /// @title PokerRoom
 /// @notice Maximally on-chain No-Limit Texas Hold'em for ShinyPoker on Somnia.
@@ -137,6 +166,46 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
     mapping(uint256 => mapping(uint8 => uint16)) public timeoutStreak;
 
     // ---------------------------------------------------------------------
+    // Storage — abandonment accusation (v2 self-rescue window)
+    // ---------------------------------------------------------------------
+
+    /// @dev A pending accusation that a seat abandoned the v2 card protocol
+    ///      mid-hand by withholding a decryption share. The forfeiture in
+    ///      {cancelHandPenalized} can ONLY fire against an accusation that has
+    ///      passed its deadline WITHOUT the accused self-rescuing — so a single
+    ///      compromised worker key can never instantly confiscate an innocent,
+    ///      responsive player's chips. The accused clears it permissionlessly by
+    ///      posting a valid decryption share for the named card ({proveResponsive}).
+    struct Accusation {
+        bool active;
+        uint8 offenderSeat;
+        uint16 cardIdx; // the in-play ciphertext index whose share was withheld
+        uint64 handId; // the hand this accusation belongs to (staleness guard)
+        uint64 deadline; // block.timestamp after which forfeiture may finalize
+        // The ciphertext in question, dealer-verified against the deal's
+        // commitment at accuse time. Stored ON the accusation so the accused
+        // client can always compute its share from public chain state alone —
+        // the accuser can never make self-rescue impossible by withholding data.
+        ZkVerify.G1Point ctA;
+        ZkVerify.G1Point ctB;
+    }
+
+    mapping(uint256 => Accusation) internal _accusation; // tableId => current accusation
+    // A (seat, cardIdx) pair that self-rescued can't be re-accused this hand:
+    // every rescue DELIVERS the withheld share on-chain, so re-accusing the same
+    // share is pure griefing, while accusing a different genuinely-missing share
+    // stays possible — a "rescue once, stall forever" griefer just gets marched
+    // through the remaining shares one accusation at a time.
+    // key: tableId => handId => (seat << 16 | cardIdx) => vindicated
+    mapping(uint256 => mapping(uint64 => mapping(uint32 => bool))) internal _vindicated;
+
+    // Seconds the accused has to self-rescue before a penalized cancel may finalize.
+    // Owner-settable within [MIN_RESCUE_WINDOW, MAX_RESCUE_WINDOW].
+    uint32 public rescueWindow = 45;
+    uint32 internal constant MIN_RESCUE_WINDOW = 15;
+    uint32 internal constant MAX_RESCUE_WINDOW = 600;
+
+    // ---------------------------------------------------------------------
     // Storage — collected rake
     // ---------------------------------------------------------------------
 
@@ -213,6 +282,9 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
     event HandSettled(uint256 indexed tableId, uint64 indexed handId, uint8 winnerSeat, uint128 amountWon, uint128 rake);
     event HandCancelled(uint256 indexed tableId, uint64 indexed handId);
     event HandCancelledPenalized(uint256 indexed tableId, uint64 indexed handId, uint8 offenderSeat, uint128 forfeited);
+    event AbandonmentAccused(uint256 indexed tableId, uint64 indexed handId, uint8 offenderSeat, uint16 cardIdx, uint64 deadline);
+    event AccusationCleared(uint256 indexed tableId, uint64 indexed handId, uint8 offenderSeat, bool rescued);
+    event RescueWindowUpdated(uint32 window);
     event PotWinner(uint256 indexed tableId, uint64 indexed handId, uint8 potIndex, uint8 seat, uint128 amount);
     event ShowdownSettled(uint256 indexed tableId, uint64 indexed handId, uint128 rake);
 
@@ -249,6 +321,12 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
     error NotFactory();
     error NotController();
     error ControlledTable();
+    error NoAccusation();
+    error AccusationActive();
+    error RescueWindowNotElapsed();
+    error AlreadyVindicated();
+    error NotResponsive();
+    error BadRescueWindow();
 
     // ---------------------------------------------------------------------
     // Constructor
@@ -290,6 +368,15 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
     function setOperator(address op, bool on) external onlyOwner {
         isOperator[op] = on;
         emit OperatorSet(op, on);
+    }
+
+    /// @notice Set how long an accused seat has to self-rescue before a penalized
+    ///         cancel may finalize. Bounded so an operator can neither make it
+    ///         punitively short (no real chance to defend) nor stall hands forever.
+    function setRescueWindow(uint32 window) external onlyOwner {
+        if (window < MIN_RESCUE_WINDOW || window > MAX_RESCUE_WINDOW) revert BadRescueWindow();
+        rescueWindow = window;
+        emit RescueWindowUpdated(window);
     }
 
     function pause() external onlyOwner {
@@ -631,6 +718,26 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         return s == 0 ? NO_SEAT : s - 1;
     }
 
+    /// @notice The current abandonment accusation for a table (if any). Clients
+    ///         poll this so a wrongly-accused seat can self-rescue in time; the
+    ///         embedded ciphertext is everything needed to compute the share.
+    function accusationOf(uint256 tableId)
+        external
+        view
+        returns (
+            bool active,
+            uint8 offenderSeat,
+            uint16 cardIdx,
+            uint64 handId,
+            uint64 deadline,
+            ZkVerify.G1Point memory ctA,
+            ZkVerify.G1Point memory ctB
+        )
+    {
+        Accusation storage a = _accusation[tableId];
+        return (a.active, a.offenderSeat, a.cardIdx, a.handId, a.deadline, a.ctA, a.ctB);
+    }
+
     // ---------------------------------------------------------------------
     // Internal helpers
     // ---------------------------------------------------------------------
@@ -951,17 +1058,103 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         _clearHand(tableId);
     }
 
-    /// @notice Cancel the current hand but FORFEIT `offenderSeat`'s committed
-    ///         chips to the other committed seats (pro-rata), refunding everyone
-    ///         else in full. For a seat whose owner abandoned the v2 card
-    ///         protocol mid-hand (withheld decryption shares): the hand cannot
-    ///         complete without them, but walking away must never be cheaper
-    ///         than folding — otherwise closing the tab in a lost pot would be
-    ///         free insurance. The forfeit goes to PLAYERS only; the operator
-    ///         gains nothing. The offender is also sat out with a strike.
-    function cancelHandPenalized(uint256 tableId, uint8 offenderSeat) external onlyDealerOrOperator nonReentrant {
+    // ---------------------------------------------------------------------
+    // Abandonment: accuse → self-rescue window → penalized cancel
+    // ---------------------------------------------------------------------
+
+    /// @notice Accuse `offenderSeat` of abandoning the v2 card protocol by
+    ///         withholding a decryption share for in-play card `cardIdx`. This
+    ///         does NOT move any chips — it only opens a self-rescue window. If
+    ///         the accused is actually responsive, its client posts the share via
+    ///         {proveResponsive} and the accusation is dismissed; only an
+    ///         un-rescued, expired accusation can be finalized into a forfeiture.
+    ///         This is the safeguard that stops a single compromised worker key
+    ///         from instantly confiscating an innocent player's committed chips.
+    function accuseAbandon(
+        uint256 tableId,
+        uint8 offenderSeat,
+        uint16 cardIdx,
+        ZkVerify.G1Point calldata ctA,
+        ZkVerify.G1Point calldata ctB
+    ) external onlyDealerOrOperator {
         Hand storage h = _hands[tableId];
         if (!h.inProgress) revert NoHandInProgress();
+        if (_seatHands[tableId][offenderSeat].committedTotal == 0) revert NotIdle(); // nothing at stake — use plain cancelHand
+        if (_vindicated[tableId][h.handId][_vinKey(offenderSeat, cardIdx)]) revert AlreadyVindicated();
+        Accusation storage a = _accusation[tableId];
+        // A live accusation blocks a second one; a stale one (older hand) is replaceable.
+        if (a.active && a.handId == h.handId) revert AccusationActive();
+        // The dealer confirms (1) the supplied ciphertext is the committed one —
+        // so the accusation itself hands the accused everything needed to
+        // self-rescue — and (2) this share is one the protocol legitimately
+        // needs RIGHT NOW; otherwise accusations could be weaponized to force
+        // early on-chain disclosure (own holes pre-showdown, future board cards).
+        if (address(dealer).code.length > 0) {
+            if (!IDealerResponsive(address(dealer)).accusationAllowed(h.dealId, offenderSeat, cardIdx, h.street, ctA, ctB)) {
+                revert IllegalAction();
+            }
+        }
+        uint64 deadline = uint64(block.timestamp) + rescueWindow;
+        a.active = true;
+        a.offenderSeat = offenderSeat;
+        a.cardIdx = cardIdx;
+        a.handId = h.handId;
+        a.deadline = deadline;
+        a.ctA = ctA;
+        a.ctB = ctB;
+        emit AbandonmentAccused(tableId, h.handId, offenderSeat, cardIdx, deadline);
+    }
+
+    /// @dev Vindication key: one bit per (seat, cardIdx) pair per hand.
+    function _vinKey(uint8 seat, uint16 cardIdx) internal pure returns (uint32) {
+        return (uint32(seat) << 16) | cardIdx;
+    }
+
+    /// @notice Self-rescue: the accused seat clears itself by posting the very
+    ///         decryption share it was accused of withholding. The v2 dealer
+    ///         verifies it against that seat's own per-hand key AND records it
+    ///         for the coordinator to consume — so a rescue doesn't merely prove
+    ///         responsiveness, it actually delivers the share the hand was
+    ///         waiting for. Permissionless: only a caller able to produce the
+    ///         seat's real share (that player's live client) can pass. The
+    ///         (seat, card) pair is vindicated for this hand — it cannot be
+    ///         re-accused for the same share again.
+    function proveResponsive(
+        uint256 tableId,
+        ZkVerify.G1Point calldata d,
+        ZkVerify.G1Point calldata R1,
+        ZkVerify.G1Point calldata R2,
+        uint256 s
+    ) external nonReentrant {
+        Hand storage h = _hands[tableId];
+        if (!h.inProgress) revert NoHandInProgress();
+        Accusation storage a = _accusation[tableId];
+        if (!a.active || a.handId != h.handId) revert NoAccusation();
+        // The ciphertext comes from the accusation itself (dealer-verified at
+        // accuse time) — the rescuer supplies only its share + CP proof.
+        bool ok = IDealerResponsive(address(dealer)).rescueShare(
+            h.dealId, a.offenderSeat, a.cardIdx, a.ctA, a.ctB, d, R1, R2, s
+        );
+        if (!ok) revert NotResponsive();
+        uint8 seat = a.offenderSeat;
+        _vindicated[tableId][h.handId][_vinKey(seat, a.cardIdx)] = true;
+        delete _accusation[tableId];
+        emit AccusationCleared(tableId, h.handId, seat, true);
+    }
+
+    /// @notice Finalize a penalized cancel against a seat whose accusation has
+    ///         expired un-rescued: cancel the hand and FORFEIT that seat's
+    ///         committed chips to the other committed seats (pro-rata), refunding
+    ///         everyone else in full. Walking away from a lost pot must never be
+    ///         cheaper than folding; the forfeit goes to PLAYERS only — the
+    ///         operator gains nothing. The offender is sat out with a strike.
+    function cancelHandPenalized(uint256 tableId) external onlyDealerOrOperator nonReentrant {
+        Hand storage h = _hands[tableId];
+        if (!h.inProgress) revert NoHandInProgress();
+        Accusation storage a = _accusation[tableId];
+        if (!a.active || a.handId != h.handId) revert NoAccusation();
+        if (block.timestamp <= a.deadline) revert RescueWindowNotElapsed();
+        uint8 offenderSeat = a.offenderSeat;
         uint128 forfeit = _seatHands[tableId][offenderSeat].committedTotal;
         if (forfeit == 0) revert NotIdle(); // nothing committed — use plain cancelHand
         uint8 n = _tables[tableId].maxSeats;
@@ -1013,6 +1206,8 @@ contract PokerRoom is Ownable, ReentrancyGuard, Pausable {
         h.actingDeadline = 0;
         h.currentBet = 0;
         h.pot = 0;
+        // Any pending accusation dies with the hand it belonged to.
+        if (_accusation[tableId].active) delete _accusation[tableId];
     }
 
     // =====================================================================

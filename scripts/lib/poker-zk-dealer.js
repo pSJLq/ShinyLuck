@@ -490,7 +490,8 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
       sess.boardDeadline = 0;
       return `board:${slot + 1}`;
     }
-    if (now > sess.boardDeadline) return await _sharesTimeout(room, state, tableId, sess, [idx], send, opts);
+    if (sess.accused && (await _tryIngestRescue(room, zkd, sess, now, opts))) return "rescued";
+    if (now > sess.boardDeadline) return await _sharesTimeout(room, zkd, state, tableId, sess, [idx], send, opts);
     return "board-wait";
   }
   sess.boardNeeded = [];
@@ -540,10 +541,11 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
       await send(() => room.resolveShowdown(tableId));
       return "settled";
     }
+    if (sess.accused && (await _tryIngestRescue(room, zkd, sess, now, opts))) return "rescued";
     if (now > sess.showdownDeadline) {
       const missing = liveParts.filter((p) => !sess.holesRevealed.has(p) && !(haveAllShares(sess, holeIdxsOf(p, sess.k)[0]) && haveAllShares(sess, holeIdxsOf(p, sess.k)[1])));
       const idxs = missing.length ? holeIdxsOf(missing[0], sess.k) : [];
-      return await _sharesTimeout(room, state, tableId, sess, idxs, send, opts);
+      return await _sharesTimeout(room, zkd, state, tableId, sess, idxs, send, opts);
     }
     return "showdown-collect";
   }
@@ -564,32 +566,106 @@ async function _revealFailed(room, state, tableId, sess, e, send, opts) {
   return "cancelled:reveal-refused";
 }
 
-/// Mid-hand share deadline breached: find the participant(s) whose shares are
-/// missing, penalize the first (their committed chips go to the others), or
-/// plain-cancel when the offender has nothing committed.
-async function _sharesTimeout(room, state, tableId, sess, idxs, send, opts) {
-  let offender = -1;
+/// Push both share deadlines (whichever is armed) out to `until` — used when an
+/// accusation opens/clears so the timeout logic re-fires AFTER the rescue window.
+function _bumpShareDeadlines(sess, until) {
+  if (sess.boardDeadline) sess.boardDeadline = Math.max(sess.boardDeadline, until);
+  if (sess.showdownDeadline) sess.showdownDeadline = Math.max(sess.showdownDeadline, until);
+}
+
+/// If our accusation is no longer active on-chain, pull the (verified, recorded)
+/// rescue share from the dealer contract into the session — a self-rescue
+/// doesn't just clear the accused, it DELIVERS the share the hand was stuck on.
+/// Returns true when a share was ingested.
+async function _tryIngestRescue(room, zkd, sess, now, opts) {
+  if (!sess.accused) return false;
+  const acc = await room.accusationOf(sess.tableId);
+  if (acc.active) return false; // window still open — keep waiting
+  const { idx, part } = sess.accused;
+  sess.accused = null;
+  _bumpShareDeadlines(sess, now + (opts.postRescueMs ?? 9_000)); // fresh window for whatever is still missing
+  const r = await zkd.rescuedShare(sess.dealId, idx, part);
+  if (!r.exists) return false;
+  const P = (o) => G1.fromAffine({ x: BigInt(o.x), y: BigInt(o.y) });
+  const share = { d: P(r.d), proof: { R1: P(r.R1), R2: P(r.R2), s: BigInt(r.s) } };
+  // defensive re-verify (the chain already did) before trusting our own parse
+  if (!zk.verifyShare(sess.deck[idx], sess.pubkeys[part].X, share, shareDomain(sess.dealId, idx, part))) return false;
+  let m = sess.shares.get(idx);
+  if (!m) { m = new Map(); sess.shares.set(idx, m); }
+  m.set(part, { d: share.d, R1: share.proof.R1, R2: share.proof.R2, s: share.proof.s });
+  return true;
+}
+
+/// Mid-hand share deadline breached. The penalty is no longer a one-shot
+/// operator call — the contract only forfeits after an ACCUSATION the accused
+/// failed to self-rescue from within the on-chain rescue window:
+///   1. name the first participant with a missing share, accuseAbandon(seat, idx)
+///   2. the accused's client can proveResponsive on-chain (posting the share) —
+///      we ingest it and the hand continues
+///   3. only an expired, un-rescued accusation finalizes cancelHandPenalized
+/// A seat with nothing committed is handled the cheap old way (cancel + strike).
+async function _sharesTimeout(room, zkd, state, tableId, sess, idxs, send, opts) {
+  const now = opts.now ? opts.now() : Date.now();
+  let offender = -1, missIdx = -1;
   for (const idx of idxs) {
     const m = sess.shares.get(idx) || new Map();
     for (let i = 0; i < sess.k; i++) {
-      if (!m.has(i)) { offender = i; break; }
+      if (!m.has(i)) { offender = i; missIdx = idx; break; }
     }
     if (offender >= 0) break;
   }
-  const seat = offender >= 0 ? sess.seats[offender] : 255;
-  try {
-    if (seat !== 255) {
-      await send(() => room.cancelHandPenalized(tableId, seat));
-      state.delete(tableId);
-      dropPersisted(opts.persistDir, tableId);
-      return `cancelled:penalized:seat${seat}`;
+  if (offender < 0) {
+    // nothing identifiably missing (defensive) — refund everyone
+    await send(() => room.cancelHand(tableId));
+    state.delete(tableId);
+    dropPersisted(opts.persistDir, tableId);
+    return "cancelled:shares:seat255";
+  }
+  const seat = sess.seats[offender];
+
+  const acc = await room.accusationOf(tableId);
+  if (acc.active) {
+    // adopt the on-chain accusation (covers bot restarts mid-dispute)
+    const accSeat = Number(acc.offenderSeat);
+    sess.accused = { seat: accSeat, idx: Number(acc.cardIdx), part: sess.seats.indexOf(accSeat), deadline: Number(acc.deadline) * 1000 };
+    if (now > sess.accused.deadline + (opts.penalizeGraceMs ?? 1500)) {
+      try {
+        await send(() => room.cancelHandPenalized(tableId));
+        state.delete(tableId);
+        dropPersisted(opts.persistDir, tableId);
+        return `cancelled:penalized:seat${accSeat}`;
+      } catch (_) {
+        return "penalize-wait"; // chain clock behind, or raced a last-second rescue
+      }
     }
-  } catch (_) { /* offender had nothing committed → fall through */ }
-  await send(() => room.cancelHand(tableId));
-  if (seat !== 255) { try { await send(() => room.sitOutIdle(tableId, seat)); } catch (_) {} }
-  state.delete(tableId);
-  dropPersisted(opts.persistDir, tableId);
-  return `cancelled:shares:seat${seat}`;
+    _bumpShareDeadlines(sess, sess.accused.deadline + (opts.penalizeGraceMs ?? 1500) + 1_000);
+    return "accusation-wait";
+  }
+
+  // an accusation we made is gone → it was rescued; ingest the delivered share
+  if (sess.accused) {
+    const got = await _tryIngestRescue(room, zkd, sess, now, opts);
+    return got ? "rescued" : "rescue-reset";
+  }
+
+  // nothing committed → penalty impossible; strike + full-refund cancel (as before)
+  const sh = await room.getSeatHand(tableId, seat);
+  if (sh.committedTotal === 0n) {
+    await send(() => room.cancelHand(tableId));
+    try { await send(() => room.sitOutIdle(tableId, seat)); } catch (_) {}
+    state.delete(tableId);
+    dropPersisted(opts.persistDir, tableId);
+    return `cancelled:shares:seat${seat}`;
+  }
+
+  // open the accusation (carrying the committed ciphertext so the accused can
+  // always self-rescue); forfeiture can only finalize after the rescue window
+  const ct = sess.deck[missIdx];
+  await send(() => room.accuseAbandon(tableId, seat, missIdx, cPt(ct.A), cPt(ct.B)));
+  if (!sess.rescueWinMs) sess.rescueWinMs = Number(await room.rescueWindow()) * 1000;
+  sess.accused = { seat, idx: missIdx, part: offender, deadline: now + sess.rescueWinMs };
+  _bumpShareDeadlines(sess, now + sess.rescueWinMs + (opts.penalizeGraceMs ?? 1500) + 1_000);
+  return `accused:seat${seat}:idx${missIdx}`;
 }
 
 /// Public snapshot fragment for the table snapshot cache (observer-safe: no

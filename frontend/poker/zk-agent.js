@@ -31,15 +31,69 @@ const cardStr = (c) => RANKS[Math.floor(c / 4)] + ["c", "d", "h", "s"][c % 4];
 // SDK reads decrypted cards from here (same shape the v1 /holes endpoint had)
 window.__SPZK = window.__SPZK || { holes: {}, status: {} };
 
-const ZKD_ABI = ["function ctHash(uint256 dealId, uint16 cardIdx) view returns (bytes32)"];
+const ZKD_ABI = [
+  "function ctHash(uint256 dealId, uint16 cardIdx) view returns (bytes32)",
+  "function dealIdForHand(uint256 tableId, uint64 handId) view returns (uint256)",
+  "function dealInfo(uint256 dealId) view returns (bool exists, bool bound, uint8 playerCount, uint256 tableId, uint64 handId, uint8[] seats)",
+  "function boardRevealedCount(uint256 dealId) view returns (uint8)",
+];
+// Self-rescue path: read the accusation straight from the chain (NOT via the
+// bot — a malicious coordinator is exactly the threat model here) and answer it.
+const ROOM_ZK_ABI = [
+  "function accusationOf(uint256 t) view returns (bool active, uint8 offenderSeat, uint16 cardIdx, uint64 handId, uint64 deadline, (uint256,uint256) ctA, (uint256,uint256) ctB)",
+  "function seatOf(uint256 t, address player) view returns (uint8)",
+  "function proveResponsive(uint256 t, (uint256,uint256) d, (uint256,uint256) R1, (uint256,uint256) R2, uint256 s)",
+];
 
 export function startZkAgent(sdk, getTableId) {
   const api = sdk.cfg.dealerApiUrl;
   const zkd = new ethers.Contract(sdk.cfg.zkTableDealer, ZKD_ABI, sdk.read);
+  const roomZk = new ethers.Contract(sdk.cfg.pokerRoom, ROOM_ZK_ABI, sdk.read);
   const sigCache = new Map(); // dealId -> signature
   const secKey = (t, dealId) => `spzk:${sdk.cfg.pokerRoom.slice(2, 10)}:${t}:${dealId}`;
   let running = false;
   let stopped = false;
+  let ticks = 0;
+  let rescueBusy = false;
+
+  // If an on-chain accusation names MY seat, compute the demanded share from the
+  // ciphertext embedded in the accusation and post proveResponsive — this both
+  // clears the (false or late) accusation and delivers the share, so an honest
+  // player can never be penalized while their client is alive. Own-hole shares
+  // are only ever surrendered once the board is complete (showdown/runout);
+  // the contract enforces that too — this is defense in depth.
+  async function selfRescue(t) {
+    if (rescueBusy) return;
+    const acc = await roomZk.accusationOf(t);
+    if (!acc.active) return;
+    const mySeat = Number(await roomZk.seatOf(t, sdk.address));
+    if (mySeat === 255 || Number(acc.offenderSeat) !== mySeat) return;
+    const dealId = String(await zkd.dealIdForHand(t, acc.handId));
+    if (dealId === "0") return;
+    // my per-hand secret must actually exist (a fresh keygen here would just
+    // produce a share for the wrong key and waste gas)
+    if (!sessionStorage.getItem(secKey(t, dealId))) return;
+    const info = await zkd.dealInfo(dealId);
+    const p = info.seats.map(Number).indexOf(mySeat);
+    if (p < 0) return;
+    const idx = Number(acc.cardIdx);
+    if ((idx === 2 * p || idx === 2 * p + 1) && Number(await zkd.boardRevealedCount(dealId)) < 5) return;
+    const sec = secretFor(t, dealId, "");
+    const ct = {
+      A: parsePt({ x: acc.ctA[0], y: acc.ctA[1] }),
+      B: parsePt({ x: acc.ctB[0], y: acc.ctB[1] }),
+    };
+    const sh = zk.decryptionShare(ct, sec.x, G1.BASE.multiply(sec.x), `SPZK:${dealId}:share:${idx}:${p}`);
+    const signer = sdk.sessionWallet || sdk.signer;
+    if (!signer) return;
+    rescueBusy = true;
+    try {
+      const c = (P) => { const a = zk.aff(P); return [a.x, a.y]; };
+      const tx = await roomZk.connect(signer).proveResponsive(t, c(sh.d), c(sh.proof.R1), c(sh.proof.R2), sh.proof.s);
+      await tx.wait();
+      console.warn("[zk-agent] self-rescued: posted the demanded share on-chain (card idx " + idx + ")");
+    } finally { rescueBusy = false; }
+  }
 
   async function sign(t, dealId) {
     const k = `${t}:${dealId}`;
@@ -180,6 +234,12 @@ export function startZkAgent(sdk, getTableId) {
     try { await iteration(); } catch (e) {
       if (!/stale dealId|not collecting|not your|snapshot/i.test(e.message || "")) console.warn("[zk-agent]", e.message || e);
     } finally { running = false; }
+    // Accusation watch runs on the CHAIN, not the bot relay, every ~3.5s — the
+    // 45s rescue window leaves plenty of margin even with a couple of misses.
+    if (++ticks % 5 === 0 && sdk.address) {
+      const t = Number(getTableId());
+      if (Number.isFinite(t)) selfRescue(t).catch((e) => console.warn("[zk-agent] rescue check:", e.message || e));
+    }
   }, 700);
 
   return { stop() { stopped = true; clearInterval(timer); } };

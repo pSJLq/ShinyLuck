@@ -187,7 +187,8 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     expect(await tick()).to.equal("hand-ended");
   });
 
-  it("mid-hand deserter: penalized cancel forfeits their committed chips to the others", async function () {
+  it("mid-hand deserter: accusation → un-rescued window → penalized cancel forfeits to the others", async function () {
+    const { time } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
     const { alice, bob, room, state, clients, tick, stepAll } = await setup();
     await dealHand(tick, stepAll);
     await room.connect(alice).act(0, CALL, 0);
@@ -195,9 +196,29 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
 
     expect(await tick()).to.equal("board-wait");
     clients[0].step(state, 0); // alice answers the board request…
-    // …bob's tab is closed. Deadline passes → bob is the offender.
-    const tag = await tick({ now: () => Date.now() + 60_000 });
-    expect(tag).to.equal("cancelled:penalized:seat1");
+    // (bot clock in these ticks tracks CHAIN time — in prod they're the same
+    // clock; in the full suite the chain has drifted ahead of Date.now())
+    const botNow = async (s) => Math.max(Date.now(), (await time.latest()) * 1000) + s * 1000;
+    // …bob's tab is closed. Deadline passes → bob is ACCUSED (no chips move yet).
+    let base = await botNow(60);
+    expect(await tick({ now: () => base })).to.match(/^accused:seat1/);
+    const acc = await room.accusationOf(0);
+    expect(acc.active).to.equal(true);
+    expect(Number(acc.offenderSeat)).to.equal(1);
+    expect((await room.getSeat(0, 1)).stack).to.equal(E(98)); // committed, not forfeited
+
+    // window still open → even an IMPATIENT bot can't finalize: the CONTRACT
+    // refuses (RescueWindowNotElapsed) — that's the actual guarantee
+    base = await botNow(200);
+    expect(await tick({ now: () => base })).to.equal("penalize-wait");
+    expect((await room.getHand(0)).inProgress).to.equal(true);
+    expect((await room.getSeat(0, 1)).stack).to.equal(E(98)); // still nothing forfeited
+
+    // window expires with no rescue → penalty finalizes
+    await time.increase(Number(await room.rescueWindow()) + 2);
+    base = await botNow(200);
+    const done = await tick({ now: () => base });
+    expect(done).to.equal("cancelled:penalized:seat1");
 
     // bob's committed 2 went to alice; alice fully refunded
     expect((await room.getSeat(0, 0)).stack).to.equal(E(102));
@@ -205,6 +226,53 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     expect((await room.getSeat(0, 1)).sittingOut).to.equal(true); // struck + sat out
     expect(Number(await room.timeoutStreak(0, 1))).to.equal(1);
     expect((await room.getHand(0)).inProgress).to.equal(false);
+  });
+
+  it("false accusation: the accused self-rescues on-chain, the share is ingested, the hand completes", async function () {
+    const { coordinator, alice, bob, room, zkd, state, clients, tick, stepAll } = await setup();
+    await dealHand(tick, stepAll);
+    stepAll(); // clients decrypt their holes
+    await room.connect(alice).act(0, CALL, 0);
+    await room.connect(bob).act(0, CHECK, 0); // flop
+
+    expect(await tick()).to.equal("board-wait");
+    clients[0].step(state, 0); // alice answers over HTTP…
+    // …bob's HTTP path to the bot is down (but his chain access works). The bot
+    // (or a compromised worker key) accuses bob.
+    expect(await tick({ now: () => Date.now() + 60_000 })).to.match(/^accused:seat1/);
+
+    // bob's client sees the accusation ON-CHAIN and self-rescues: it computes
+    // the demanded share from the ciphertext EMBEDDED in the accusation —
+    // exactly what frontend/poker/zk-agent.js selfRescue() does.
+    const acc = await room.accusationOf(0);
+    const idx = Number(acc.cardIdx);
+    const sec = clients[1].byDeal.get(String(await zkd.dealIdForHand(0, acc.handId)));
+    const ct = { A: zkDealer.parsePt({ x: acc.ctA[0], y: acc.ctA[1] }), B: zkDealer.parsePt({ x: acc.ctB[0], y: acc.ctB[1] }) };
+    const dealIdStr = String(await zkd.dealIdForHand(0, acc.handId));
+    const sh = zk.decryptionShare(ct, sec.x, sec.X, `SPZK:${dealIdStr}:share:${idx}:1`);
+    const c = (P) => { const a = zk.aff(P); return [a.x, a.y]; };
+    await room.connect(bob).proveResponsive(0, c(sh.d), c(sh.proof.R1), c(sh.proof.R2), sh.proof.s);
+
+    // accusation cleared, (seat,card) vindicated — the same share can't be re-accused
+    expect((await room.accusationOf(0)).active).to.equal(false);
+    const ctA = { x: zk.aff(ct.A).x, y: zk.aff(ct.A).y };
+    const ctB = { x: zk.aff(ct.B).x, y: zk.aff(ct.B).y };
+    await expect(room.connect(coordinator).accuseAbandon(0, 1, idx, ctA, ctB))
+      .to.be.revertedWithCustomError(room, "AlreadyVindicated");
+
+    // the bot ingests the rescued share from the chain; the ACCUSED card reveals
+    expect(await tick({ now: () => Date.now() + 60_000 })).to.equal("rescued");
+    expect(await tick()).to.equal("board:1");
+    // (the rescue covers exactly the accused share — for the remaining flop
+    // cards bob's HTTP path comes back and the hand proceeds normally)
+    clients[1].step(state, 0);
+    expect(await tick()).to.equal("board:2");
+    expect(await tick()).to.equal("board:3");
+    expect((await room.getHand(0)).inProgress).to.equal(true); // nobody was punished
+
+    // no chips moved: both stacks intact minus their live commitments
+    expect((await room.getSeat(0, 0)).stack).to.equal(E(98));
+    expect((await room.getSeat(0, 1)).stack).to.equal(E(98));
   });
 
   it("pre-hand no-show: strike + sit-out, no money moves", async function () {
