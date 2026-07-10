@@ -25,6 +25,7 @@ const { ethers } = require("ethers");
 const { tickTable, newState } = require("./lib/poker-dealer");
 const { tickTournaments } = require("./lib/poker-tournament-driver");
 const { cardStr } = require("./lib/poker-deck");
+const zkDrv = require("./lib/poker-zk-dealer");
 
 require("dotenv").config();
 
@@ -47,12 +48,15 @@ function loadAbi(name) {
 }
 
 function loadAddresses() {
-  const fromEnv = { room: process.env.POKER_ROOM, dealer: process.env.POKER_DEALER, tournament: process.env.POKER_TOURNAMENT };
-  if (fromEnv.room && fromEnv.dealer) return fromEnv;
+  const fromEnv = { room: process.env.POKER_ROOM, dealer: process.env.POKER_DEALER, tournament: process.env.POKER_TOURNAMENT, zk: process.env.POKER_ZK_DEALER };
+  if (fromEnv.room && (fromEnv.dealer || fromEnv.zk)) return fromEnv;
   const f = path.join(__dirname, "..", "deployments", `poker-${NET}.json`);
   if (fs.existsSync(f)) {
     const m = JSON.parse(fs.readFileSync(f, "utf8"));
-    return { room: m.addresses.pokerRoom, dealer: m.addresses.commitRevealDealer, tournament: m.addresses.pokerTournament, deployBlock: m.deploymentBlock || 0 };
+    return {
+      room: m.addresses.pokerRoom, dealer: m.addresses.commitRevealDealer, tournament: m.addresses.pokerTournament,
+      zk: m.addresses.zkTableDealer, deployBlock: m.deploymentBlock || 0,
+    };
   }
   throw new Error("set POKER_ROOM + POKER_DEALER or deploy first (deployments/poker-*.json)");
 }
@@ -200,7 +204,7 @@ async function controllerOf(room, t) {
   return CTL.get(t);
 }
 
-function startSnapshotCache(provider, room, dealerC, trn) {
+function startSnapshotCache(provider, room, dealerC, trn, zkCtx = {}) {
   async function buildTable(t) {
     const [cfg, hand, ctl] = await Promise.all([room.getTable(t), room.getHand(t), controllerOf(room, t)]);
     const n = Number(cfg.maxSeats);
@@ -208,6 +212,7 @@ function startSnapshotCache(provider, room, dealerC, trn) {
       const [seat, sh] = await Promise.all([room.getSeat(t, s), room.getSeatHand(t, s)]);
       return {
         index: s, player: seat.player, occupied: seat.occupied, sittingOut: seat.sittingOut,
+        sitOutSince: Number(seat.sitOutSince ?? 0),
         stack: seat.stack, inHand: sh.inHand, folded: sh.folded, allIn: sh.allIn, committedStreet: sh.committedStreet,
       };
     }));
@@ -218,6 +223,7 @@ function startSnapshotCache(provider, room, dealerC, trn) {
     }
     return {
       ts: Date.now(), tableId: t, controller: ctl,
+      zk: zkCtx.ZK_MODE ? require("./lib/poker-zk-dealer").zkSnapshot(zkCtx.zkState, t) : null,
       cfg: {
         maxSeats: n, smallBlind: cfg.smallBlind, bigBlind: cfg.bigBlind, ante: cfg.ante,
         minBuyIn: cfg.minBuyIn, maxBuyIn: cfg.maxBuyIn, rakeBps: Number(cfg.rakeBps),
@@ -310,10 +316,12 @@ async function kickIdlers(room, t, send = (fn) => fn().then((r) => r.wait())) {
   const snap = SNAPS.get(t);
   const n = snap ? snap.cfg.maxSeats : Number((await room.getTable(t)).maxSeats);
   for (let s = 0; s < n; s++) {
-    const streak = Number(await room.timeoutStreak(t, s));
-    if (streak < 3) continue;
     const seat = await room.getSeat(t, s);
     if (!seat.occupied) continue;
+    const streak = Number(await room.timeoutStreak(t, s));
+    // kick basis: 3 strikes, or parked sitting-out for 10+ min (contract-enforced)
+    const parked = seat.sittingOut && Number(seat.sitOutSince ?? 0) > 0 && Date.now() / 1000 > Number(seat.sitOutSince) + 605;
+    if (streak < 3 && !parked) continue;
     try {
       await send(() => room.kickIdle(t, s));
       console.log(`[poker-bot] table ${t}: KICKED idle seat ${s} (${seat.player.slice(0, 8)}…, ${streak} straight timeouts)`);
@@ -362,7 +370,7 @@ async function maybeSpawnTables(room) {
 async function main() {
   must(KEY, "missing DEALER_KEY / PRIVATE_KEY");
   must(MASTER && /^0x[0-9a-fA-F]{64}$/.test(MASTER), "missing/invalid POKER_SEED_MASTER_KEY (need 32-byte hex)");
-  const { room: roomAddr, dealer: dealerAddr, tournament: trnAddr, deployBlock } = loadAddresses();
+  const { room: roomAddr, dealer: dealerAddr, tournament: trnAddr, zk: zkAddr, deployBlock } = loadAddresses();
 
   const provider = new ethers.JsonRpcProvider(RPC_URL);
   // ethers v6 defaults pollingInterval to 4000ms → every tx.wait() waits up to
@@ -381,20 +389,56 @@ async function main() {
     return done;
   };
   const room = new ethers.Contract(roomAddr, loadAbi("PokerRoom"), wallet);
-  const dealer = new ethers.Contract(dealerAddr, loadAbi("CommitRevealDealer"), wallet);
+  const dealer = dealerAddr ? new ethers.Contract(dealerAddr, loadAbi("CommitRevealDealer"), wallet) : null;
   const trn = trnAddr ? new ethers.Contract(trnAddr, loadAbi("PokerTournament"), wallet) : null;
   const state = newState();
   // Tables held between hands while a tournament level-up drains them to idle
   // (see the driver's freeze logic) — the bot won't start new hands on these.
   const freeze = new Set();
 
-  console.log(`[poker-bot] net=${NET} room=${roomAddr} dealer=${dealerAddr} tournament=${trnAddr || "(none)"} wallet=${wallet.address}`);
+  // ---- zkShuffle v2 mode: manifest carries a ZkTableDealer → the mental-poker
+  // coordinator replaces the v1 seed dealer. Several WORKER keys (each a room
+  // operator + dealer coordinator, funded at deploy) advance tables in
+  // parallel — independent nonce spaces, no shared serial queue.
+  const ZK_MODE = !!zkAddr;
+  const zkState = zkDrv.newZkState();
+  const PERSIST_DIR = path.join(__dirname, "..", "deployments", "zk-active");
+  const WORKERS = [];
+  if (ZK_MODE) {
+    const zkModule = await import("../frontend/poker/zk-bn254.js");
+    const { bn254 } = await import("@noble/curves/bn254");
+    const nodeCrypto = require("node:crypto");
+    zkModule.init({ bn254, keccak256: ethers.keccak256, randomBytes: (n) => nodeCrypto.randomBytes(n) });
+    zkDrv.init({ zkModule, bn254 });
+    const W = Math.max(1, parseInt(process.env.ZK_WORKERS || "3", 10));
+    for (let i = 0; i < W; i++) {
+      const w = new ethers.Wallet(ethers.keccak256(ethers.solidityPacked(["bytes32", "string"], [MASTER, `zk-worker-${i}`])), provider);
+      let chain = Promise.resolve();
+      const run = (fn) => {
+        const done = chain.then(() => fn().then((r) => r.wait()));
+        chain = done.then(() => {}, () => {});
+        return done;
+      };
+      WORKERS.push({
+        wallet: w, runTx: run,
+        room: new ethers.Contract(roomAddr, loadAbi("PokerRoom"), w),
+        zkd: new ethers.Contract(zkAddr, loadAbi("ZkTableDealer"), w),
+      });
+    }
+    console.log(`[poker-bot] zk mode ON: dealer=${zkAddr} workers=${WORKERS.map((w) => w.wallet.address.slice(0, 8)).join(",")}`);
+  }
+
+  console.log(`[poker-bot] net=${NET} room=${roomAddr} dealer=${dealerAddr || "(v2)"} tournament=${trnAddr || "(none)"} wallet=${wallet.address}`);
 
   // --- hole-card API: a player proves wallet ownership, gets only their cards.
-  startCardServer(room, state);
+  //     In zk mode the same server also relays the mental-poker protocol.
+  startCardServer(room, state, { zkState, ZK_MODE });
 
-  // --- snapshot cache: one chain read per table serves every watcher over HTTP
-  startSnapshotCache(provider, room, dealer, trn);
+  // --- snapshot cache: one chain read per table serves every watcher over HTTP.
+  //     Card views (board etc.) come from whichever dealer the room runs on —
+  //     the IPokerDealer interface is identical for v1 and v2.
+  const cardView = ZK_MODE ? new ethers.Contract(zkAddr, loadAbi("ZkTableDealer"), provider) : dealer;
+  startSnapshotCache(provider, room, cardView, trn, { zkState, ZK_MODE });
 
   // --- hand-history indexer (backfills in the background, then stays current)
   startHistoryIndexer(provider, room, deployBlock || 0).catch((e) => console.error("[poker-bot] indexer:", e.message));
@@ -450,6 +494,19 @@ async function main() {
           console.error(`[poker-bot] LOW GAS: operator ${wallet.address} has ${ethers.formatEther(balWei)} STT — top up or dealing will stall`);
           lastGasWarnAt = Date.now();
         }
+        // zk worker keys refuel from the main wallet (which self-refuels from
+        // the rake above) — each worker pays prepare/reveal gas on its tables.
+        if (ZK_MODE) {
+          for (const w of WORKERS) {
+            try {
+              const wb = await provider.getBalance(w.wallet.address);
+              if (wb < 1000000000000000000n && balWei > 4000000000000000000n) { // worker <1 STT, main >4
+                await (await wallet.sendTransaction({ to: w.wallet.address, value: 2000000000000000000n })).wait();
+                console.log(`[poker-bot] worker refuel: 2 STT → ${w.wallet.address.slice(0, 10)}…`);
+              }
+            } catch (e) { console.error("[poker-bot] worker refuel:", e.shortMessage || e.message); }
+          }
+        }
       }
     } catch (_) {}
 
@@ -479,8 +536,13 @@ async function main() {
           foreignTable.set(t, foreign);
           if (foreign) { console.log(`[poker-bot] table ${t}: controlled by foreign/orphaned ${ctl} — skipping permanently`); return; }
         }
-        const tag = await tickTable(room, dealer, MASTER, state, t, { tx: runTx, noNewHands: freeze.has(t) });
-        if (tag && tag !== "idle" && tag !== "wait") console.log(`[poker-bot] table ${t}: ${tag}`);
+        const worker = ZK_MODE ? WORKERS[t % WORKERS.length] : null;
+        const tag = ZK_MODE
+          ? await zkDrv.tickZkTable(worker.room, worker.zkd, zkState, t, { tx: worker.runTx, noNewHands: freeze.has(t), persistDir: PERSIST_DIR })
+          : await tickTable(room, dealer, MASTER, state, t, { tx: runTx, noNewHands: freeze.has(t) });
+        if (tag && tag !== "idle" && tag !== "wait" && !/^(keys:|shuffle:|holeshares|board-wait|showdown-collect|showdown-wait|prep|inter-hand|hold)/.test(tag)) {
+          console.log(`[poker-bot] table ${t}: ${tag}`);
+        }
         if (tag === "timeout") {
           const n = (timeoutStreak.get(t) || 0) + 1;
           timeoutStreak.set(t, n);
@@ -494,11 +556,13 @@ async function main() {
         if (tag === "settled" || tag === "hand-ended" || tag === "timeout") {
           try { await kickIdlers(room, t, runTx); } catch (e) { console.error(`[poker-bot] kick t${t}:`, e.shortMessage || e.message); }
         }
-        if (tag === "started") pushChat(t, "dealer", "New hand — deck commitment sealed on-chain.", true);
-        else if (tag === "showdown-reveal") pushChat(t, "dealer", "Showdown — deck revealed & verified on-chain.", true);
+        if (tag === "started") pushChat(t, "dealer", ZK_MODE ? "New hand — deck mentally shuffled by the players, verified on-chain." : "New hand — deck commitment sealed on-chain.", true);
+        else if (tag === "showdown-reveal" || tag === "showdown-ready") pushChat(t, "dealer", "Showdown — cards revealed & proven on-chain.", true);
         else if (tag === "settled") pushChat(t, "dealer", "Pot settled on-chain.", true);
         else if (tag === "timeout") pushChat(t, "dealer", "Player timed out — auto-folded.", true);
+        else if (tag && tag.startsWith("cancelled:penalized")) pushChat(t, "dealer", "Hand cancelled — a player abandoned the deal; their chips in the pot were forfeited to the table.", true);
         else if (tag && tag.startsWith("cancelled")) pushChat(t, "dealer", "Hand cancelled — all contributions refunded.", true);
+        else if (tag && tag.startsWith("strike:")) pushChat(t, "dealer", "A seat didn't respond to the deal and was sat out.", true);
       } catch (e) {
         console.error(`[poker-bot] table ${t} error:`, e.shortMessage || e.message);
         tableBackoffUntil.set(t, Date.now() + 30_000); // don't spam a failing table every tick
@@ -548,9 +612,51 @@ async function main() {
 // Hole-card delivery. Pre-showdown the deck seed is secret, so a player learns
 // only their own two cards, and only after proving they own the seat. (The full
 // deck becomes public + verifiable at showdown via the seed reveal.)
+// In zk mode the same server relays the v2 protocol: /zk/task (poll: what
+// should my browser compute now + the shares I need to decrypt MY cards),
+// /zk/key, /zk/shuffle, /zk/shares. All sig-gated to the seat owner.
 // ---------------------------------------------------------------------------
-function startCardServer(room, state) {
-  const server = http.createServer((req, res) => {
+function startCardServer(room, state, zkCtx = {}) {
+  // signature → effective player address (session keys resolve to their owner)
+  async function resolveSigner(message, signature) {
+    const signer = ethers.verifyMessage(message, signature);
+    let effective = signer;
+    try {
+      const owner = await room.sessionOwnerOf(signer);
+      if (owner && owner !== "0x0000000000000000000000000000000000000000") effective = owner;
+    } catch (_) {}
+    return effective.toLowerCase();
+  }
+  const readBody = (req) => new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (c) => { body += c; if (body.length > 1_500_000) { reject(new Error("body too large")); req.destroy(); } });
+    req.on("end", () => resolve(body));
+  });
+
+  const server = http.createServer(async (req, res) => {
+    // ---- zkShuffle v2 protocol relay --------------------------------------
+    if (zkCtx.ZK_MODE && req.method === "POST" && req.url.startsWith("/zk/")) {
+      try {
+        const body = JSON.parse((await readBody(req)) || "{}");
+        const t = Number(body.tableId);
+        const addr = await resolveSigner(`ShinyPoker:zk:${t}:${body.dealId}`, body.signature);
+        let out;
+        if (req.url.startsWith("/zk/task")) out = zkDrv.zkTask(zkCtx.zkState, t, addr);
+        else if (req.url.startsWith("/zk/key")) out = zkDrv.zkPostKey(zkCtx.zkState, t, addr, body);
+        else if (req.url.startsWith("/zk/shuffle")) out = zkDrv.zkPostShuffle(zkCtx.zkState, t, addr, body);
+        else if (req.url.startsWith("/zk/shares")) out = zkDrv.zkPostShares(zkCtx.zkState, t, addr, body);
+        else { res.writeHead(404).end(); return; }
+        res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+        return res.end(JSON.stringify(out));
+      } catch (e) {
+        res.writeHead(400, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+        return res.end(JSON.stringify({ error: e.message }));
+      }
+    }
+    handleV1(req, res);
+  });
+
+  function handleV1(req, res) {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
@@ -678,7 +784,7 @@ function startCardServer(room, state) {
         res.end(JSON.stringify({ error: e.message }));
       }
     });
-  });
+  }
   server.listen(PORT, () => console.log(`[poker-bot] hole-card API on :${PORT}`));
 }
 

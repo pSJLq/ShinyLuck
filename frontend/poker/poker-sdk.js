@@ -108,7 +108,14 @@ export class ShinyPoker {
     this.read = new ethers.JsonRpcProvider(net.rpcUrls[0]);
     // Guard against pre-deploy empty addresses (would throw in ethers.Contract).
     this.roomRead = cfg.pokerRoom ? new ethers.Contract(cfg.pokerRoom, ROOM_ABI, this.read) : null;
-    this.dealerRead = cfg.commitRevealDealer ? new ethers.Contract(cfg.commitRevealDealer, DEALER_ABI, this.read) : null;
+    // zkShuffle v2 rooms read their cards from ZkTableDealer — same IPokerDealer
+    // views, so the whole table UI works unchanged. cardLayer is written by the
+    // deploy script; a config with a zk address but cardLayer!=="zk" is a v1
+    // room with the experimental verifier alongside (the zk-lab page).
+    this.zkLayer = cfg.cardLayer === "zk" && !!cfg.zkTableDealer;
+    this.dealerRead = this.zkLayer
+      ? new ethers.Contract(cfg.zkTableDealer, DEALER_ABI, this.read)
+      : cfg.commitRevealDealer ? new ethers.Contract(cfg.commitRevealDealer, DEALER_ABI, this.read) : null;
     this.trnRead = cfg.pokerTournament ? new ethers.Contract(cfg.pokerTournament, TRN_ABI, this.read) : null;
     this.ppRead = cfg.playerProfile ? new ethers.Contract(cfg.playerProfile, PP_ABI, this.read) : null;
     this.avRead = cfg.avatarStore ? new ethers.Contract(cfg.avatarStore, AV_ABI, this.read) : null;
@@ -723,8 +730,14 @@ export class ShinyPoker {
   }
 
   /// Current deal's provably-fair metadata (seed commitment, reveal state).
+  /// v2 deals have no seed — every card is individually proven on-chain, so the
+  /// widget gets a zk-flavored object instead.
   async dealCommit(dealId) {
     if (!this.dealerRead || !dealId || dealId === 0n) return null;
+    if (this.zkLayer) {
+      const revealed = await this.dealerRead.isShowdownReady(dealId).catch(() => false);
+      return { zk: true, dealId: String(dealId), revealed };
+    }
     const d = await this.dealerRead.dealInfo(dealId);
     return { seedHash: d.seedHash, revealed: d.revealed, serverSeed: d.serverSeed, commitBlock: Number(d.commitBlock) };
   }
@@ -833,8 +846,26 @@ export class ShinyPoker {
     return this.signer.signMessage(msg);
   }
 
-  /// Ask the off-chain dealer for THIS player's two hole cards (signature-gated).
+  /// Message the zk agent signs once per deal to authenticate protocol calls.
+  zkMessage(t, dealId) { return `ShinyPoker:zk:${t}:${dealId}`; }
+
+  async signZk(t, dealId) {
+    const msg = this.zkMessage(t, dealId);
+    if (this.sessionActive && this.sessionWallet) return this.sessionWallet.signMessage(msg);
+    this.requireWallet();
+    return this.signer.signMessage(msg);
+  }
+
+  /// This player's two hole cards. v2 (zk) tables: the cards were decrypted
+  /// LOCALLY by zk-agent.js — the dealer never had them; we just read the
+  /// agent's cache (the caller already retries until they land). v1 tables:
+  /// ask the off-chain dealer (signature-gated).
   async myHoleCards(t, dealId, signature) {
+    if (this.zkLayer) {
+      const h = (typeof window !== "undefined" && window.__SPZK && window.__SPZK.holes) ? window.__SPZK.holes[String(dealId)] : null;
+      if (h) return h;
+      throw new Error("decrypting your cards…");
+    }
     if (!signature) signature = await this.signHoles(t, dealId);
     const res = await fetch(`${this.cfg.dealerApiUrl}/holes`, {
       method: "POST", headers: { "Content-Type": "application/json" },

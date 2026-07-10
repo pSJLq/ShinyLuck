@@ -73,7 +73,15 @@ window.SP = {
   tableId: Number(new URLSearchParams(location.search).get("t") || 0),
 };
 // Globals the design's SideRail expects (live feeds can replace these later).
-window.CHAT = [{ dealer: true, t: "Welcome — this table is live on Somnia testnet. Provably-fair commit-reveal dealing." }];
+window.CHAT = [{ dealer: true, t: window.SP.sdk.zkLayer
+  ? "Welcome — this table runs zkShuffle v2: the deck is shuffled by the players' own browsers and every card is proven on-chain. Nobody, not even our dealer bot, can see your hole cards."
+  : "Welcome — this table is live on Somnia testnet. Provably-fair commit-reveal dealing." }];
 window.HISTORY = [];
+
+// zkShuffle v2: start the background protocol agent (keygen/shuffle/decryption
+// shares run silently in this tab; your cards are decrypted locally, only by you).
+if (window.SP.sdk.zkLayer) {
+  import("./zk-agent.js").then((m) => m.autoStart(window.SP)).catch((e) => console.error("[zk-agent] load:", e));
+}
 
 window.dispatchEvent(new Event("sp:ready"));
