@@ -75,8 +75,16 @@ async function eligibleSeats(room, tableId, maxSeats) {
   return { nextHand, elig: out };
 }
 
+// A strictly-monotonic, process-global counter so no two sessions can EVER
+// share a dealId (the old scheme relied on time+random not colliding; a
+// collision would let a proof from one deal be replayed into another, since the
+// Fiat–Shamir domains are keyed by dealId). dealId = ms · 4096 + seq(12 bits):
+// unique within a process as long as < 4096 deals start per millisecond (always
+// true), monotonic across time, and still < 2^53 so the Number code paths hold.
+// The contract's `_deal[dealId].exists` guard remains the on-chain backstop.
+let _dealSeq = 0;
 function newSession(tableId, elig, nextHand, opts) {
-  const dealId = Date.now() * 1000 + (tableId % 997) + Math.floor(Math.random() * 997) * 1_000_000_000_000;
+  const dealId = Date.now() * 4096 + ((_dealSeq++) & 0xfff);
   const sess = {
     tableId,
     dealId,
@@ -111,6 +119,25 @@ function newSession(tableId, elig, nextHand, opts) {
 }
 
 const inPlayCount = (k) => 2 * k + 5;
+
+/// Canonical share-release policy — the client's secrecy gate (mirrored inline
+/// in frontend/poker/zk-agent.js `mayRelease`, and matching the on-chain
+/// ZkTableDealer.accusationAllowed). Given the deal's k, the caller's
+/// participant index and the ON-CHAIN hand street (-1 when this deal is not the
+/// live hand yet), returns whether releasing a decryption share for in-play
+/// index `idx` is safe. Own holes: showdown only. Board: only once its street
+/// opened. Others' holes: always (k−1 shares decrypt nothing without the owner).
+function mayReleaseShare(idx, k, participant, street) {
+  if (idx < 0 || idx >= inPlayCount(k)) return false;
+  if (idx < 2 * k) {
+    const owner = Math.floor(idx / 2);
+    if (owner === participant) return street === 4; // own holes: showdown/all-in runout
+    return true;
+  }
+  const slot = idx - 2 * k;
+  const boardDue = street >= 3 ? 5 : street === 2 ? 4 : street === 1 ? 3 : 0;
+  return slot < boardDue;
+}
 function holeIdxsOf(part, k) { return [2 * part, 2 * part + 1]; }
 function boardIdx(k, slot) { return 2 * k + slot; }
 
@@ -786,5 +813,5 @@ function zkSnapshot(state, tableId) {
 
 module.exports = {
   init, newZkState, tickZkTable, zkTask, zkPostKey, zkPostShuffle, zkPostShuffleProof, zkChain, zkPostShares, zkSnapshot,
-  eligibleSeats, keyDomain, shareDomain, shufDomain, serPt, parsePt, serCt, parseCt, cPt, STREET, boardCountForStreet, inPlayCount, holeIdxsOf, boardIdx,
+  eligibleSeats, keyDomain, shareDomain, shufDomain, serPt, parsePt, serCt, parseCt, cPt, STREET, boardCountForStreet, inPlayCount, holeIdxsOf, boardIdx, mayReleaseShare,
 };

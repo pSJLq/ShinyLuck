@@ -44,6 +44,7 @@ const ROOM_ZK_ABI = [
   "function accusationOf(uint256 t) view returns (bool active, uint8 offenderSeat, uint16 cardIdx, uint64 handId, uint64 deadline, (uint256,uint256) ctA, (uint256,uint256) ctB)",
   "function seatOf(uint256 t, address player) view returns (uint8)",
   "function getSeat(uint256 t, uint8 seat) view returns ((address player, uint128 stack, bool occupied, bool sittingOut, uint64 sitInHandId, uint64 sitOutSince))",
+  "function getHand(uint256 t) view returns ((uint64 handId, uint8 street, uint8 button, uint8 actingSeat, uint8 aggressorSeat, uint8 numInHand, uint128 currentBet, uint128 minRaise, uint128 pot, uint64 actingDeadline, uint256 dealId, bool inProgress))",
   "function sessionKeyOf(address player) view returns (address)",
   "function proveResponsive(uint256 t, (uint256,uint256) d, (uint256,uint256) R1, (uint256,uint256) R2, uint256 s)",
 ];
@@ -65,6 +66,29 @@ export function startZkAgent(sdk, getTableId) {
   let rescueBusy = false;
 
   const deckHashHex = (wireDeck) => ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(wireDeck)));
+
+  // SECRECY GATE: may I release a decryption share for in-play index `idx`,
+  // given my participant index, the deal's k, and the ON-CHAIN hand street
+  // (street = -1 when this deal isn't the live hand yet — pre-collect phase)?
+  //   - another player's hole card: always safe — the coordinator still lacks
+  //     the OWNER's own share, so k−1 shares decrypt nothing;
+  //   - my OWN hole cards: only at showdown (street 4; all-in runout also lands
+  //     the engine on street 4) — earlier would hand the coordinator the last
+  //     share it needs to read my hand;
+  //   - a board card: only once its street has opened on-chain — otherwise a
+  //     malicious coordinator could ask for the whole board during preflop.
+  // This never trusts task.idxs. Canonical copy: poker-zk-dealer.mayReleaseShare
+  // (kept in sync); also mirrors on-chain ZkTableDealer.accusationAllowed.
+  function mayRelease(idx, k, participant, street) {
+    if (idx < 2 * k) {
+      const owner = Math.floor(idx / 2);
+      if (owner === participant) return street === 4; // own holes: showdown only
+      return true;                                    // someone else's holes
+    }
+    const slot = idx - 2 * k;
+    const boardDue = street >= 3 ? 5 : street === 2 ? 4 : street === 1 ? 3 : 0; // river(3)/showdown(4)→all
+    return slot < boardDue;
+  }
 
   /// Fetch the full shuffle transcript and verify EVERY stage's Wikström proof
   /// myself — the coordinator's word is not a trust point. Also pins my own
@@ -312,12 +336,20 @@ export function startZkAgent(sdk, getTableId) {
       const verdict = await verifyChain(t, dealId, signature, task.participant, secForGate.X);
       if (!verdict.ok) return;
       const sec = secForGate;
-      const items = task.idxs.map((idx) => {
+      // read the hand street FROM CHAIN (never the bot) to gate share release
+      const hand = await roomZk.getHand(t);
+      const street = (hand.inProgress && String(hand.dealId) === String(dealId)) ? Number(hand.street) : -1;
+      const items = [];
+      for (const idx of task.idxs) {
+        if (!mayRelease(idx, task.k, task.participant, street)) {
+          console.warn(`[zk-agent] refusing to release share idx ${idx} at street ${street} (secrecy gate)`);
+          continue; // the coordinator asked too early — never comply
+        }
         const ct = parseCt(task.cts[idx]);
         const sh = zk.decryptionShare(ct, sec.x, G1.BASE.multiply(sec.x), task.domains[idx]);
-        return { idx, d: serPt(sh.d), R1: serPt(sh.proof.R1), R2: serPt(sh.proof.R2), s: hex(sh.proof.s) };
-      });
-      await post("/zk/shares", { tableId: t, dealId, signature, items });
+        items.push({ idx, d: serPt(sh.d), R1: serPt(sh.proof.R1), R2: serPt(sh.proof.R2), s: hex(sh.proof.s) });
+      }
+      if (items.length) await post("/zk/shares", { tableId: t, dealId, signature, items });
     }
 
     // my own hole cards: verify everything, then decrypt locally
