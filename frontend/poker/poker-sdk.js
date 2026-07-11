@@ -264,7 +264,11 @@ export class ShinyPoker {
     try {
       this._bindSession(priv);
       const onchain = await this.roomRead.sessionKeyOf(this.address);
-      if (onchain.toLowerCase() === this.sessionWallet.address.toLowerCase()) { this.sessionActive = true; return true; }
+      if (onchain.toLowerCase() === this.sessionWallet.address.toLowerCase()) {
+        this.sessionActive = true;
+        try { await this._primeSession(); } catch (_) {} // cache nonce/fee for a fast first action
+        return true;
+      }
     } catch {}
     return false;
   }
@@ -278,6 +282,8 @@ export class ShinyPoker {
     await (await this.roomWrite.setSessionKey(key.address, { value: ethers.parseEther(String(gasEth)) })).wait();
     this._bindSession(key.privateKey);
     this.sessionActive = true;
+    this._sessNonce = 0; // fresh key starts at nonce 0 — no round-trip needed
+    try { const fee = await this.read.getFeeData(); this._sessGasPrice = fee.gasPrice ?? ethers.parseUnits("6", "gwei"); } catch (_) {}
     return key.address;
   }
 
@@ -285,7 +291,7 @@ export class ShinyPoker {
     this.requireWallet();
     try { await (await this.roomWrite.revokeSessionKey()).wait(); } catch {}
     if (typeof localStorage !== "undefined") localStorage.removeItem(this._sessKey());
-    this.sessionWallet = null; this.roomSession = null; this.sessionActive = false;
+    this.sessionWallet = null; this.roomSession = null; this.sessionActive = false; this._sessNonce = null;
   }
 
   async signOut() {
@@ -913,9 +919,71 @@ export class ShinyPoker {
     const amt = action === ACTION.BET || action === ACTION.RAISE
       ? (chips ? BigInt(Math.round(Number(amount))) : ethers.parseEther(String(amount)))
       : 0;
-    // Route through the session key when active → no wallet popup per action.
-    const room = this.sessionActive && this.roomSession ? this.roomSession : this.roomWrite;
-    return (await room.act(t, action, amt)).wait();
+    // Session key active → FAST PATH: locally-managed nonce + cached fee + fixed
+    // gas + a single eth_sendRawTransaction. This is the ~650ms per-action path
+    // (measured on Somnia: ~135ms send + ~510ms inclusion). ethers' default
+    // contract-call path costs ~3 extra round-trips (getTransactionCount +
+    // getFeeData + estimateGas ≈ +850ms) — the reason a naive action felt ~1.7s.
+    if (this.sessionActive && this.sessionWallet) {
+      try { return await this._fastAct(t, action, amt); }
+      catch (e) {
+        // Only fall back when the tx NEVER hit the chain (pre-broadcast failure)
+        // — otherwise the action is already in flight and re-sending would
+        // double-submit. A post-broadcast issue (e.g. receipt timeout) rethrows.
+        if (e && e._preBroadcast) {
+          console.warn("[poker] fast act pre-broadcast fail, falling back:", e.shortMessage || e.message || e);
+          return (await this.roomSession.act(t, action, amt)).wait();
+        }
+        throw e;
+      }
+    }
+    return (await this.roomWrite.act(t, action, amt)).wait();
+  }
+
+  /// Prime the session's cached nonce + gas price (one round-trip each, done
+  /// once per session and re-synced on a nonce error), so each action is a
+  /// single raw send.
+  async _primeSession() {
+    const [n, fee] = await Promise.all([
+      this.read.getTransactionCount(this.sessionWallet.address, "latest"),
+      this.read.getFeeData(),
+    ]);
+    this._sessNonce = n;
+    this._sessGasPrice = fee.gasPrice ?? ethers.parseUnits("6", "gwei");
+  }
+
+  async _awaitReceipt(hash, timeoutMs = 15000) {
+    const start = Date.now();
+    for (;;) {
+      const rc = await this.read.getTransactionReceipt(hash);
+      if (rc) return rc;
+      if (Date.now() - start > timeoutMs) throw new Error("act receipt timeout " + hash);
+      await new Promise((r) => setTimeout(r, 60));
+    }
+  }
+
+  async _fastAct(t, action, amt) {
+    if (this._sessNonce == null) await this._primeSession();
+    const nonce = this._sessNonce++;
+    let hash;
+    try {
+      const data = this.roomSession.interface.encodeFunctionData("act", [t, action, amt]);
+      const signed = await this.sessionWallet.signTransaction({
+        to: this.cfg.pokerRoom, data, value: 0, nonce,
+        gasLimit: 800000n, // generous: the heaviest inline act() path (fold-win payout) is well under; settlement is a separate tx
+        gasPrice: this._sessGasPrice, chainId: BigInt(this.net.chainId),
+      });
+      hash = await this.read.send("eth_sendRawTransaction", [signed]);
+    } catch (e) {
+      // nothing reached the chain → recycle the nonce and mark for a safe fallback
+      if (this._sessNonce === nonce + 1) this._sessNonce = nonce;
+      const m = (e.shortMessage || e.message || "").toLowerCase();
+      if (/nonce|already known|replacement/.test(m)) this._sessNonce = null; // resync next call
+      e._preBroadcast = true;
+      throw e;
+    }
+    // broadcast succeeded — the action IS in flight; await it, never re-send
+    return await this._awaitReceipt(hash);
   }
 
   // ---- live polling ----
