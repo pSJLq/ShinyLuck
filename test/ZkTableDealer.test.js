@@ -193,8 +193,12 @@ describe("ZkTableDealer — live v2 card layer (IPokerDealer, cards from verifie
   });
 
   it("own-hole accusation is allowed at showdown ONLY once the full board is revealed", async () => {
+    // wire a real room-seat view so the folded-seat gate can consult it (seat live)
+    const mockRoom = await (await ethers.getContractFactory("MockRoomSeats")).deploy();
+    dealer = await (await ethers.getContractFactory("ZkTableDealer")).deploy(await mockRoom.getAddress(), coord.address);
     const dealId = 43, tableId = 7, handId = 43, seats = [0, 1];
     const { players, deck, k } = await setup(dealId, tableId, handId, seats);
+    await mockRoom.setInHand(tableId, 0, true); // seat 0 ran the hand down (not folded)
     const ct = (i) => ctPair(deck[i]);
     const SHOWDOWN = 4;
     // board incomplete → own hole accusation refused (the all-in-runout theft window)
@@ -205,8 +209,38 @@ describe("ZkTableDealer — live v2 card layer (IPokerDealer, cards from verifie
       await dealer.connect(coord).revealBoardCard(dealId, slot, sh.trueCard, ctPair(sh.ct), sh.d, sh.R1, sh.R2, sh.s);
     }
     expect(await dealer.boardRevealedCount(dealId)).to.equal(5);
-    // now the own-hole share is legitimately demandable at showdown
+    // now the own-hole share is legitimately demandable at showdown (seat live)
     expect(await dealer.accusationAllowed(dealId, 0, 0, SHOWDOWN, ...ct(0))).to.equal(true);
+  });
+
+  it("a FOLDED seat's own hole cards stay hidden even at showdown+full board (no accuse→rescue harvest)", async () => {
+    // the accuse→self-rescue leak: seat 0 folds, seats 1 runs to showdown, the
+    // board completes for the LIVE seat — a malicious operator must still not be
+    // able to open an own-hole accusation on the folded seat (which, combined with
+    // the k-1 shares it pre-collected, would decrypt the folded hand).
+    const mockRoom = await (await ethers.getContractFactory("MockRoomSeats")).deploy();
+    dealer = await (await ethers.getContractFactory("ZkTableDealer")).deploy(await mockRoom.getAddress(), coord.address);
+    const dealId = 44, tableId = 7, handId = 44, seats = [0, 1];
+    const { players, deck, k } = await setup(dealId, tableId, handId, seats);
+    const ct = (i) => ctPair(deck[i]);
+    const SHOWDOWN = 4;
+    for (let slot = 0; slot < 5; slot++) {
+      const sh = sharesFor(deck, players, dealId, 2 * k + slot);
+      await dealer.connect(coord).revealBoardCard(dealId, slot, sh.trueCard, ctPair(sh.ct), sh.d, sh.R1, sh.R2, sh.s);
+    }
+    await mockRoom.setInHand(tableId, 0, false); // seat 0 FOLDED
+    await mockRoom.setInHand(tableId, 1, true);  // seat 1 ran it down
+
+    // folded seat's OWN holes (idx 0,1): refused even at showdown with full board
+    expect(await dealer.accusationAllowed(dealId, 0, 0, SHOWDOWN, ...ct(0))).to.equal(false);
+    expect(await dealer.accusationAllowed(dealId, 0, 1, SHOWDOWN, ...ct(1))).to.equal(false);
+    // the LIVE seat's own hole (idx 2) is still legitimately demandable
+    expect(await dealer.accusationAllowed(dealId, 1, 2, SHOWDOWN, ...ct(2))).to.equal(true);
+    // the gate is scoped to OWN holes only: a folded seat still owes shares for
+    // OTHERS' holes and for the board (those are pre-collected / public — nothing
+    // of the folded seat leaks), so those accusations remain allowed
+    expect(await dealer.accusationAllowed(dealId, 0, 2, SHOWDOWN, ...ct(2))).to.equal(true);       // participant 1's hole
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k, SHOWDOWN, ...ct(2 * k))).to.equal(true); // a board card
   });
 
   it("rescueShare verifies, records and serves the share; junk is refused", async () => {

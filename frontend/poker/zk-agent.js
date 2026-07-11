@@ -176,7 +176,13 @@ export function startZkAgent(sdk, getTableId) {
         }
       }
       const hash = zk.shuffleTranscriptHash(`SPZKSH:tr:${dealId}`, proofs.map((p, i) => ({ deck: decks[i + 1], proof: p })));
-      const verdict = { ok: true, hash };
+      // expose the VERIFIED participant count and seat map so the share gate can
+      // use them instead of the coordinator-supplied task.k / task.mySeat: both k
+      // (anchored to the seat-binding sig count above) and each seat are proven
+      // here, so trusting the task's copies would let a malicious bot mis-classify
+      // ciphertexts (inflated k → board reads as "someone else's hole") or point
+      // the fold check at the wrong seat (harvesting a folded hand at showdown).
+      const verdict = { ok: true, hash, k: ch.k, seats: ch.seats.map(Number) };
       chainVerdict.set(dealId, verdict);
       console.log(`[zk-agent] chain verified: ${ch.k} bound keys + ${ch.k} shuffle proofs ok (deal ${dealId})`);
       return verdict;
@@ -209,6 +215,17 @@ export function startZkAgent(sdk, getTableId) {
     if (p < 0) return;
     const idx = Number(acc.cardIdx);
     if ((idx === 2 * p || idx === 2 * p + 1) && Number(await zkd.boardRevealedCount(dealId)) < 5) return;
+    // if this accusation names ONE OF MY OWN hole cards and I FOLDED, my cards
+    // stay hidden even at showdown — refuse to rescue (mirrors the shares-path
+    // fold gate). The coordinator holds k-1 of my hole shares from the pre-hand
+    // collect; delivering the last one here would hand it my folded hand. Letting
+    // the accusation expire → cancelHandPenalized against my seat is the correct
+    // outcome: a folded seat's cards must never surface.
+    if (idx === 2 * p || idx === 2 * p + 1) {
+      let inHand;
+      try { inHand = (await roomZk.getSeatHand(t, mySeat)).inHand; } catch (_) { return; }
+      if (!inHand) { console.warn("[zk-agent] refusing own-hole rescue — I folded"); return; }
+    }
     const sec = secretFor(t, dealId, "");
     const ct = {
       A: parsePt({ x: acc.ctA[0], y: acc.ctA[1] }),
@@ -365,17 +382,24 @@ export function startZkAgent(sdk, getTableId) {
       const hand = await roomZk.getHand(t);
       const street = (hand.inProgress && String(hand.dealId) === String(dealId)) ? Number(hand.street) : -1;
       // if I FOLDED, my hole cards are never shown — refuse own-hole shares even
-      // at showdown (a malicious bot must not harvest folded players' cards)
-      const wantsOwnHole = task.idxs.some((idx) => idx < 2 * task.k && Math.floor(idx / 2) === task.participant);
+      // at showdown (a malicious bot must not harvest folded players' cards).
+      // k and my seat come from the VERIFIED chain (verdict), never from the task:
+      // an inflated task.k would reclassify a board ciphertext as "someone else's
+      // hole" (unconditionally releasable), and a task.mySeat pointed at a still-
+      // live seat would defeat the fold gate below. task.participant is safe — it
+      // was pinned to my own key inside verifyChain.
+      const k = verdict.k;
+      const mySeat = verdict.seats[task.participant];
+      const wantsOwnHole = task.idxs.some((idx) => idx < 2 * k && Math.floor(idx / 2) === task.participant);
       let amFolded = false;
       if (wantsOwnHole && street === 4) {
-        try { amFolded = !(await roomZk.getSeatHand(t, task.mySeat)).inHand; } catch (_) { amFolded = true; }
+        try { amFolded = !(await roomZk.getSeatHand(t, mySeat)).inHand; } catch (_) { amFolded = true; }
       }
       const items = [];
       for (const idx of task.idxs) {
-        const own = idx < 2 * task.k && Math.floor(idx / 2) === task.participant;
+        const own = idx < 2 * k && Math.floor(idx / 2) === task.participant;
         if (own && amFolded) { console.warn(`[zk-agent] refusing own-hole share idx ${idx} — I folded`); continue; }
-        if (!mayRelease(idx, task.k, task.participant, street)) {
+        if (!mayRelease(idx, k, task.participant, street)) {
           console.warn(`[zk-agent] refusing to release share idx ${idx} at street ${street} (secrecy gate)`);
           continue; // the coordinator asked too early — never comply
         }

@@ -4,6 +4,23 @@ pragma solidity ^0.8.24;
 import {IPokerDealer} from "./IPokerDealer.sol";
 import {ZkVerify} from "./ZkVerify.sol";
 
+/// @dev Minimal view into PokerRoom's per-hand seat state. The dealer reads a
+///      seat's `inHand` flag so a FOLDED player's own hole cards stay hidden even
+///      at showdown (see {ZkTableDealer.accusationAllowed}). `inHand` is cleared
+///      on fold but stays true for all-in seats, so all-in showdowns are untouched.
+interface IPokerRoomSeatView {
+    struct SeatHand {
+        bool inHand;
+        bool folded;
+        bool allIn;
+        bool hasActed;
+        uint128 committedStreet;
+        uint128 committedTotal;
+    }
+
+    function getSeatHand(uint256 tableId, uint8 seat) external view returns (SeatHand memory);
+}
+
 /// @title ZkTableDealer — the LIVE zkShuffle v2 card layer (IPokerDealer).
 /// @notice A drop-in dealer for PokerRoom where cards are NOT derived from a
 ///         seed a dealer knows (v1) but decrypted from a mentally-shuffled,
@@ -402,7 +419,17 @@ contract ZkTableDealer is IPokerDealer {
         // malicious operator accuse a seat's own hole card while its client —
         // which only rescues own holes once the board is complete — refuses to
         // answer, and steal the all-in stack via cancelHandPenalized.
-        if (ownerP == p) return street == 4 && deal.boardCount == 5;
+        if (ownerP == p) {
+            if (street != 4 || deal.boardCount != 5) return false;
+            // A FOLDED seat's own hole cards must stay hidden even at showdown:
+            // never open an accusation against them. Otherwise a coordinator that
+            // already holds k-1 of that seat's hole shares (pre-collected before
+            // the hand) can coax the seat's client into rescuing the last one and
+            // harvest the folded hand — or force a can't-win cancel on a fold.
+            // `inHand` is cleared on fold but stays true for all-in seats, so a
+            // legitimate all-in showdown is unaffected.
+            return IPokerRoomSeatView(room).getSeatHand(deal.tableId, seat).inHand;
+        }
         return true; // someone else's holes: pre-collected, nothing new leaks
     }
 
