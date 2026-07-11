@@ -413,12 +413,33 @@ async function main() {
     const W = Math.max(1, parseInt(process.env.ZK_WORKERS || "3", 10));
     for (let i = 0; i < W; i++) {
       const w = new ethers.Wallet(ethers.keccak256(ethers.solidityPacked(["bytes32", "string"], [MASTER, `zk-worker-${i}`])), provider);
-      let chain = Promise.resolve();
-      const run = (fn) => {
-        const done = chain.then(() => fn().then((r) => r.wait()));
-        chain = done.then(() => {}, () => {});
-        return done;
+      // PIPELINED dispatch — the 200-online throughput fix. The old queue awaited
+      // each tx's CONFIRMATION (~1.5-1.7s on Somnia) before broadcasting the next,
+      // capping a worker at ~0.6 tx/s. Somnia confirms txns in PARALLEL (measured:
+      // 80 senders → 1 tx's latency; one wallet pipelines ~7.5 tx/s), so instead
+      // we serialize only the BROADCAST (keeping nonces strictly contiguous, ~tens
+      // of ms each) and let CONFIRMATIONS overlap. One worker jumps to ~7-14 tx/s;
+      // ~4-6 workers carry 200 concurrent players. Nonce safety: advance only after
+      // a successful broadcast (a reverted tx still consumes its nonce → no gap);
+      // gas-estimation reverts throw before this runs (no nonce touched); a
+      // broadcast failure resyncs the counter from chain (safe — allocation is
+      // serialized, so nothing higher is in flight).
+      let nextNonce = null, syncing = null;
+      const rawSend = w.sendTransaction.bind(w);
+      w.sendTransaction = async (tx) => {
+        if (nextNonce === null) { syncing = syncing || w.getNonce("latest").then((n) => { nextNonce = n; syncing = null; }); await syncing; }
+        const nonce = nextNonce++; // atomic allocation (nextNonce++ can't yield) → broadcasts run CONCURRENTLY
+        for (let a = 0; ; a++) {
+          try { return await rawSend({ ...tx, nonce }); }
+          catch (e) {
+            const m = (e.shortMessage || e.message || "").toLowerCase();
+            if (/nonce too low|already known|already imported|replacement/.test(m)) throw e; // already in mempool/mined — not a gap
+            if (a >= 4) throw e; // give up (rare) — the loop re-drives the table next tick
+            await new Promise((r) => setTimeout(r, 120 * (a + 1))); // transient RPC hiccup → retry the SAME nonce so no gap forms
+          }
+        }
       };
+      const run = (fn) => fn().then((r) => r.wait()); // concurrent broadcast → parallel confirm
       WORKERS.push({
         wallet: w, runTx: run,
         room: new ethers.Contract(roomAddr, loadAbi("PokerRoom"), w),

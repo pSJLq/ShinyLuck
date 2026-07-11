@@ -29,7 +29,9 @@ const CHECK = 1, CALL = 2;
 const E = (n) => ethers.parseEther(String(n));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ACTION_FLOOR_MS = Number(process.env.ST_FLOOR || 1700); // measured Somnia per-tx confirm
-const BLOCK_MS = Number(process.env.ST_BLOCK || 1700);        // modeled dealer tx latency
+const BLOCK_MS = Number(process.env.ST_BLOCK || 1700);        // modeled dealer tx confirmation latency (parallel)
+const SEND_MS = Number(process.env.ST_SEND || 70);            // modeled per-tx BROADCAST cost (serialized per worker)
+const PIPELINE = process.env.ST_PIPELINE !== "0";             // pipelined dispatch on by default
 const WORKERS = Number(process.env.ST_WORKERS || 3);
 const DURATION_MS = Number(process.env.ST_DURATION || 30000);
 const SWEEP = (process.env.ST_SWEEP || "6,12,24,48").split(",").map(Number);
@@ -75,8 +77,19 @@ async function scenario(M, W, zk, owner, funder) {
     const w = ethers.Wallet.createRandom().connect(ethers.provider);
     await funder.sendTransaction({ to: w.address, value: E(50) });
     await room.setOperator(w.address, true); await zkd.setCoordinator(w.address, true);
-    let chain = Promise.resolve();
-    const runTx = (fn) => { const d = chain.then(async () => { const r = await fn(); await sleep(BLOCK_MS); return r.wait(); }); chain = d.then(() => {}, () => {}); return d; };
+    let sendChain = Promise.resolve();
+    // PIPELINED dispatch (the fix): serialize only the BROADCAST (keeps nonces
+    // contiguous, ~SEND_MS each), then confirm IN PARALLEL (BLOCK_MS overlaps
+    // across in-flight txns) — exactly what measurement [B]/[C] proved the chain
+    // supports. vs the old model that awaited each confirmation before the next
+    // send (1 tx / BLOCK_MS per worker). Set ST_PIPELINE=0 to A/B the old way.
+    const runTx = PIPELINE
+      ? (fn) => {
+          const sent = sendChain.then(async () => { const r = await fn(); await sleep(SEND_MS); return r; });
+          sendChain = sent.then(() => {}, () => {});
+          return sent.then(async (r) => { await sleep(BLOCK_MS); return r.wait(); });
+        }
+      : (fn) => { const d = sendChain.then(async () => { const r = await fn(); await sleep(BLOCK_MS); return r.wait(); }); sendChain = d.then(() => {}, () => {}); return d; };
     workers.push({ runTx, room: room.connect(w), zkd: zkd.connect(w) });
   }
 
@@ -87,9 +100,9 @@ async function scenario(M, W, zk, owner, funder) {
     const tc = [];
     for (let s = 0; s < 2; s++) {
       const pl = ethers.Wallet.createRandom().connect(ethers.provider);
-      await funder.sendTransaction({ to: pl.address, value: E(101) }); // 100 buy-in + gas
-      await room.connect(pl).deposit({ value: E(100) });
-      await room.connect(pl).sitDown(t, s, E(100));
+      await funder.sendTransaction({ to: pl.address, value: E(41) }); // 40 min buy-in + gas (fits 200 players / funder)
+      await room.connect(pl).deposit({ value: E(40) });
+      await room.connect(pl).sitDown(t, s, E(40));
       tc.push(pl);
     }
     clients.push(tc.map((pl) => ({ wallet: pl, sim: new SimClient(zk, pl.address) })));
@@ -139,7 +152,7 @@ async function main() {
 
   const signers = await ethers.getSigners();
   const owner = signers[0];
-  console.log(`[stress] W=${WORKERS} workers, real per-tx latency=${BLOCK_MS}ms, per-action floor=${ACTION_FLOOR_MS}ms`);
+  console.log(`[stress] W=${WORKERS} workers, dispatch=${PIPELINE ? "PIPELINED" : "serial"}, confirm=${BLOCK_MS}ms(parallel) broadcast=${SEND_MS}ms, per-action floor=${ACTION_FLOOR_MS}ms`);
   console.log(`[stress] sweeping tables: ${SWEEP.join(", ")} (players = tables×2)\n`);
   const rows = [];
   for (let i = 0; i < SWEEP.length; i++) {
