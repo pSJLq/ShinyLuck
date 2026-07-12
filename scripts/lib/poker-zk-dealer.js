@@ -14,6 +14,14 @@
 //               shares street by street, own-hole shares at showdown, posts the
 //               verified reveals, and settles.
 //
+// Pre-deal: while a hand is at SHOWDOWN, the NEXT hand's setup runs in a
+// speculative second session (`next:` slot) — keys/shuffle/holeshares overlap
+// the reveals, prepareDeal rides the winner-display pause, and at settle the
+// session is promoted iff the fresh eligibility check still matches its seat
+// set. Any mismatch/stall just falls back to the normal path (no strikes for
+// a speculative deal); a client must complete BOTH deals' tasks, and its own
+// NEXT-hand cards are never relayed while the deal is speculative.
+//
 // Liveness: a seat that misses a phase deadline BEFORE money is in gets a
 // sitOutIdle strike and the deal restarts without it. A seat that withholds
 // shares MID-hand triggers cancelHandPenalized — its committed chips are
@@ -59,7 +67,23 @@ const keyDomain = (d, s) => `SPZK:${d}:key:${s}`;
 const shareDomain = (d, c, s) => `SPZK:${d}:share:${c}:${s}`;
 
 function newZkState() {
-  return new Map(); // tableId -> session
+  return new Map(); // tableId -> session (+ `next:` / `ended:` / `nextskip:` aux keys)
+}
+
+// Pre-deal: while hand N is at showdown, the NEXT hand's setup (keys → shuffle
+// → holeshares → prepareDeal) runs in a second session under `next:` so the
+// visible between-hands gap shrinks to roughly startHand's confirmation.
+const nextKey = (t) => `next:${t}`;
+
+/// Route a client post to the session its dealId names — the live deal or the
+/// pre-deal. Unknown dealIds fall back to the main session so the existing
+/// "stale dealId" errors (and old clients) behave exactly as before.
+function _sessFor(state, tableId, dealId) {
+  const main = state.get(tableId);
+  if (main && String(main.dealId) === String(dealId)) return main;
+  const nx = state.get(nextKey(tableId));
+  if (nx && String(nx.dealId) === String(dealId)) return nx;
+  return main;
 }
 
 // ---- eligibility (must MATCH PokerRoom._eligibleSeats exactly) ------------
@@ -160,9 +184,10 @@ function haveOthersShares(sess, idx, ownerPart) {
 // ---------------------------------------------------------------------------
 
 /// What should this client do right now? Also carries the relayed shares the
-/// client needs to decrypt its OWN hole cards.
-function zkTask(state, tableId, addrLower) {
-  const sess = state.get(tableId);
+/// client needs to decrypt its OWN hole cards. `dealId` (optional) selects the
+/// pre-deal session when the client polls for the NEXT hand's setup.
+function zkTask(state, tableId, addrLower, dealId) {
+  const sess = dealId !== undefined ? _sessFor(state, tableId, dealId) : state.get(tableId);
   if (!sess) return { phase: "none" };
   const part = sess.part.get(addrLower);
   if (part === undefined) return { phase: sess.phase, dealId: String(sess.dealId), observer: true };
@@ -222,8 +247,11 @@ function zkTask(state, tableId, addrLower) {
     }
     // relay: the OTHERS' shares for my own two cards, so I can decrypt locally.
     // Full CP proofs ride along — the client re-verifies each share against its
-    // sender's key instead of trusting this relay.
-    if (sess.deck) {
+    // sender's key instead of trusting this relay. NOT served while this deal
+    // is still a speculative pre-deal: a player must never see their NEXT
+    // hand's cards before that hand exists (they could dodge blinds on bad
+    // holes with perfect information).
+    if (sess.deck && !sess.predeal) {
       const mine = {};
       let complete = true;
       for (const idx of holeIdxsOf(part, sess.k)) {
@@ -246,7 +274,7 @@ function zkTask(state, tableId, addrLower) {
 
 /// Client posts its per-hand pubkey + Schnorr PoK.
 function zkPostKey(state, tableId, addrLower, body) {
-  const sess = state.get(tableId);
+  const sess = _sessFor(state, tableId, body.dealId);
   if (!sess || sess.phase !== "keys") throw new Error("not collecting keys");
   if (String(sess.dealId) !== String(body.dealId)) throw new Error("stale dealId");
   const part = sess.part.get(addrLower);
@@ -267,7 +295,7 @@ function zkPostKey(state, tableId, addrLower, body) {
 /// shuffler proceeds IMMEDIATELY — the proof of this shuffle streams in behind
 /// it (zkPostShuffleProof) so proving pipelines with the next player's shuffle.
 function zkPostShuffle(state, tableId, addrLower, body) {
-  const sess = state.get(tableId);
+  const sess = _sessFor(state, tableId, body.dealId);
   if (!sess || sess.phase !== "shuffle") throw new Error("not shuffling");
   if (String(sess.dealId) !== String(body.dealId)) throw new Error("stale dealId");
   const part = sess.part.get(addrLower);
@@ -292,7 +320,7 @@ const shufDomain = (dealId, turn) => `SPZK:${dealId}:shuffle:${turn}`;
 /// before contributing any decryption share. An invalid proof is simply not
 /// accepted — the prover gets struck at the deadline like any no-show.
 function zkPostShuffleProof(state, tableId, addrLower, body) {
-  const sess = state.get(tableId);
+  const sess = _sessFor(state, tableId, body.dealId);
   if (!sess || sess.phase !== "shuffle") throw new Error("not in shuffle phase");
   if (String(sess.dealId) !== String(body.dealId)) throw new Error("stale dealId");
   const part = sess.part.get(addrLower);
@@ -324,8 +352,8 @@ function zkPostShuffleProof(state, tableId, addrLower, body) {
 /// giving out any decryption share — the coordinator's own verification is
 /// thereby not a trust point. (The initial deck is canonical — derived
 /// locally, not served.)
-function zkChain(state, tableId) {
-  const sess = state.get(tableId);
+function zkChain(state, tableId, dealId) {
+  const sess = dealId !== undefined ? _sessFor(state, tableId, dealId) : state.get(tableId);
   if (!sess || !sess.aggKey) return { phase: sess ? sess.phase : "none" };
   return {
     dealId: String(sess.dealId),
@@ -347,7 +375,7 @@ function zkChain(state, tableId) {
 /// Accepted for: others' holes (pre-collect), requested board slots, own holes
 /// at showdown. Every proof is verified against the sender's pubkey.
 function zkPostShares(state, tableId, addrLower, body) {
-  const sess = state.get(tableId);
+  const sess = _sessFor(state, tableId, body.dealId);
   if (!sess || !sess.deck) throw new Error("no deck yet");
   if (sess.phase === "shuffle") throw new Error("shuffle proofs pending"); // deck not proven yet
   if (String(sess.dealId) !== String(body.dealId)) throw new Error("stale dealId");
@@ -455,6 +483,90 @@ async function recoverSession(zkd, dir, tableId, dealIdOnChain) {
   return sess;
 }
 
+/// Pop the table's pre-deal session. Promoted when the EXPENSIVE work is done
+/// (keys+shuffles proven → phase "holeshares" or "prepare"); the holeshares
+/// case gets a fresh full deadline so nobody is struck off a stale speculative
+/// clock — every participant already proved liveness by shuffling this deal.
+/// A session still in keys/shuffle is dropped and the normal path rebuilds
+/// from scratch (the graceful path for old cached clients that never answer
+/// pre-deal tasks). Either way the `next:` slot is cleared.
+function _takeNext(state, tableId, now, opts) {
+  const nx = state.get(nextKey(tableId));
+  if (!nx) return null;
+  state.delete(nextKey(tableId));
+  if (nx.phase !== "prepare" && nx.phase !== "holeshares") return null;
+  if (nx.phase === "holeshares") nx.deadlineAt = now + (opts.holesharesMs ?? 15_000);
+  nx.predeal = false; // myHoles relay unlocks once this becomes the live deal
+  return nx;
+}
+
+/// Runs on every tick of a LIVE hand: opens the next hand's session (predicted
+/// from current eligibility) as soon as the hand starts, advances its phase
+/// transitions as client artifacts land, and — once complete — fires its
+/// prepareDeal on the first tick with no reveal pending (`busy` gates the tx
+/// so a pending board/hole reveal is never delayed by it). By settle time only
+/// startHand separates the players from hand N+1; a FOLD ending at any street
+/// benefits the same way. No strikes here — a pre-deal that stalls (old
+/// clients, closed tab) is silently dropped and the normal path takes over.
+async function _predealTick(room, zkd, state, tableId, maxSeats, liveSess, now, opts, send, busy) {
+  const key = nextKey(tableId);
+  let nx = state.get(key);
+  if (!nx) {
+    // one attempt per live hand: if it was dropped once, don't churn new
+    // sessions (and new client keygens) every tick for the rest of the hand
+    if (state.get(`nextskip:${tableId}`) === String(liveSess.dealId)) return;
+    const { nextHand, elig } = await eligibleSeats(room, tableId, maxSeats);
+    if (elig.length < 2) return;
+    nx = newSession(tableId, elig, nextHand, opts);
+    nx.predeal = true;
+    nx.deadlineAt = now + (opts.predealKeysMs ?? 20_000);
+    state.set(key, nx);
+    return;
+  }
+  // phase transitions (the HTTP handlers do the heavy lifting, same as the
+  // normal path — this mirrors the between-hands keys→shuffle / holeshares→
+  // prepare advancement, minus the strikes)
+  if (nx.phase === "keys" && nx.pubkeys.every(Boolean)) {
+    nx.aggKey = zk.aggregate(nx.pubkeys.map((p) => p.X));
+    nx.phase = "shuffle";
+    nx.phaseAt = now;
+    nx.deadlineAt = now + (opts.shuffleMs ?? 8_000) * 2;
+    return;
+  }
+  if (nx.phase === "holeshares") {
+    let complete = true;
+    for (let j = 0; j < nx.k && complete; j++) {
+      for (const idx of holeIdxsOf(j, nx.k)) {
+        if (!haveOthersShares(nx, idx, j)) { complete = false; break; }
+      }
+    }
+    if (complete) { nx.phase = "prepare"; nx.deadlineAt = 0; }
+  }
+  // complete → commit the deal on-chain in the background; a revert (raced
+  // duplicate, bad state) just drops the speculation — the normal path
+  // re-prepares from scratch with a fresh session
+  if (nx.phase === "prepare" && !nx.prepared && !busy) {
+    const inPlay = nx.deck.slice(0, inPlayCount(nx.k));
+    try {
+      await send(() => zkd.prepareDeal(
+        nx.dealId, tableId, nx.forHand, nx.seats,
+        nx.pubkeys.map((p) => cPt(p.X)), nx.pubkeys.map((p) => cPt(p.pok.R)), nx.pubkeys.map((p) => p.pok.s),
+        inPlay.map((c) => cPt(c.A)), inPlay.map((c) => cPt(c.B)),
+        nx.transcriptHash,
+      ));
+      nx.prepared = true;
+    } catch (_) {
+      state.delete(key);
+      state.set(`nextskip:${tableId}`, String(liveSess.dealId));
+    }
+    return;
+  }
+  if (nx.deadlineAt && now > nx.deadlineAt && nx.phase !== "prepare") {
+    state.delete(key);
+    state.set(`nextskip:${tableId}`, String(liveSess.dealId));
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The tick — advance one table by at most one on-chain action.
 // ---------------------------------------------------------------------------
@@ -479,13 +591,25 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
       // the live hand just ended (settle/fold-win/cancel) — clear + brief pause
       dropPersisted(opts.persistDir, tableId);
       state.delete(tableId);
+      state.delete(`nextskip:${tableId}`);
+      // promote a COMPLETE pre-deal into the main slot: the fresh eligibleSeats
+      // check below re-validates its seat set before anything on-chain happens,
+      // so a stale prediction (bust-out, sit-down, strike) is simply replaced.
+      const promoted = _takeNext(state, tableId, now, opts);
+      if (promoted) state.set(tableId, promoted);
       state.set(`ended:${tableId}`, now);
-      return "hand-ended";
+      return promoted ? "hand-ended:next-ready" : "hand-ended";
     }
     const endedAt = state.get(`ended:${tableId}`);
     if (endedAt && now - endedAt < (opts.interHandMs ?? 400)) return "inter-hand";
     state.delete(`ended:${tableId}`);
     if (opts.noNewHands) return "hold";
+    // stray pre-deal left by a cancelled hand (cancel paths clear the main
+    // session immediately) — adopt it as the candidate; validated just below
+    if (!sess) {
+      const stray = _takeNext(state, tableId, now, opts);
+      if (stray) { state.set(tableId, stray); sess = stray; }
+    }
 
     const { nextHand, elig } = await eligibleSeats(room, tableId, maxSeats);
     if (elig.length < 2) { state.delete(tableId); return "idle"; }
@@ -560,8 +684,10 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
             sess.transcriptHash, // on-chain commitment to the shuffle-proof chain
           ));
           sess.prepared = true;
-          persistSession(opts.persistDir, sess);
         }
+        // unconditional: a PROMOTED pre-deal arrives here already prepared and
+        // must still be persisted, or a bot restart mid-hand couldn't recover it
+        persistSession(opts.persistDir, sess);
         await send(() => room.startHand(tableId));
         sess.started = true;
         sess.phase = "live";
@@ -599,6 +725,14 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
     if (nowSec > Number(h.actingDeadline) + (opts.timeoutGrace ?? 2)) {
       try { await send(() => room.timeoutAct(tableId)); return "timeout"; } catch (_) {}
     }
+  }
+
+  // 1.5 pre-deal the NEXT hand in parallel with this one (speculative — the
+  // promotion path re-validates the seat set before anything binds). `busy`
+  // defers its prepareDeal tx off ticks that owe the table a reveal.
+  if (opts.predeal !== false) {
+    const busyNow = boardCountForStreet(street) > sess.boardRevealed || (street === STREET.SHOWDOWN && !sess.markedReady);
+    try { await _predealTick(room, zkd, state, tableId, maxSeats, sess, now, opts, send, busyNow); } catch (_) {}
   }
 
   // 2. board reveals in lockstep with the streets. Reveal EVERY due card that
@@ -850,6 +984,7 @@ async function _sharesTimeout(room, zkd, state, tableId, sess, idxs, send, opts)
 function zkSnapshot(state, tableId) {
   const sess = state.get(tableId);
   if (!sess) return null;
+  const nx = state.get(nextKey(tableId));
   return {
     phase: sess.phase,
     dealId: String(sess.dealId),
@@ -859,10 +994,13 @@ function zkSnapshot(state, tableId) {
     shuffleTurn: sess.shuffleTurn,
     boardRevealed: sess.boardRevealed,
     deadlineAt: sess.deadlineAt || sess.boardDeadline || sess.showdownDeadline || 0,
+    // pre-deal of the NEXT hand (clients poll a second task loop for it)
+    next: nx ? { dealId: String(nx.dealId), phase: nx.phase, keysIn: nx.pubkeys.filter(Boolean).length, shuffleTurn: nx.shuffleTurn } : null,
   };
 }
 
 module.exports = {
   init, newZkState, tickZkTable, zkTask, zkPostKey, zkPostShuffle, zkPostShuffleProof, zkChain, zkPostShares, zkSnapshot,
   eligibleSeats, keyDomain, shareDomain, shufDomain, serPt, parsePt, serCt, parseCt, cPt, STREET, boardCountForStreet, inPlayCount, holeIdxsOf, boardIdx, mayReleaseShare,
+  nextKey,
 };

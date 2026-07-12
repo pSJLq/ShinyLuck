@@ -342,8 +342,20 @@ export function startZkAgent(sdk, getTableId) {
     const zs = snap && snap.zk;
     window.__SPZK.status[t] = zs || null;
     if (!zs || !zs.dealId) return;
-    const dealId = zs.dealId;
+    await runDeal(t, zs.dealId);
+    // pre-deal: while the live hand shows down, the bot runs the NEXT hand's
+    // setup under a second dealId — same protocol, same secrecy gates (that
+    // deal has no live hand yet, so the street gate reads -1: own-hole and
+    // board shares stay locked; only the harmless others'-holes pre-collect
+    // and the shuffle itself go out early).
+    if (zs.next && zs.next.dealId && zs.next.dealId !== zs.dealId) {
+      try { await runDeal(t, zs.next.dealId); } catch (e) {
+        if (!/stale dealId|not collecting|not your/i.test(e.message || "")) console.warn("[zk-agent] predeal:", e.message || e);
+      }
+    }
+  }
 
+  async function runDeal(t, dealId) {
     const signature = await sign(t, dealId);
     const task = await post("/zk/task", { tableId: t, dealId, signature });
     if (task.observer || task.phase === "none" || task.participant === undefined) return;

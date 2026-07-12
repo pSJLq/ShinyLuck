@@ -130,12 +130,13 @@ function startObserver(events) {
             board: (s.board || []).length,
             phase: s.zk ? s.zk.phase : "-", keysIn: s.zk ? s.zk.keysIn : 0,
             shuffleTurn: s.zk ? s.zk.shuffleTurn : 0, dealId: s.zk ? s.zk.dealId : null,
+            next: s.zk && s.zk.next ? `${s.zk.next.phase}(k:${s.zk.next.keysIn},sh:${s.zk.next.shuffleTurn})` : "-",
           };
           const key = JSON.stringify({ ...cur, ts: 0 });
           if (!prev || prev.key !== key) {
             events.push(cur);
             const d = prev ? ((cur.ts - prev.ts) / 1000).toFixed(1).padStart(6) : "  0.0";
-            console.log(`[obs] +${d}s hand=${cur.handId} live=${cur.inProgress ? 1 : 0} street=${cur.street} board=${cur.board} zk=${cur.phase}(k:${cur.keysIn},sh:${cur.shuffleTurn})`);
+            console.log(`[obs] +${d}s hand=${cur.handId} live=${cur.inProgress ? 1 : 0} street=${cur.street} board=${cur.board} zk=${cur.phase}(k:${cur.keysIn},sh:${cur.shuffleTurn}) next=${cur.next}`);
             prev = { key, ts: cur.ts };
           }
         }
@@ -222,6 +223,9 @@ async function main() {
         const s = r.ok ? await r.json() : null;
         const dealId = s && s.zk && s.zk.dealId ? s.zk.dealId : (s && s.hand.inProgress ? s.hand.dealId : null);
         if (dealId) await b.step(dealId);
+        // pre-deal of the next hand (runs during the current hand's showdown)
+        const nd = s && s.zk && s.zk.next && s.zk.next.dealId;
+        if (nd && nd !== dealId) await b.step(nd);
         const h = await room.getHand(TABLE);
         if (h.inProgress && Number(h.actingSeat) === b.seat && Number(h.street) <= 3) {
           const sh = await room.getSeatHand(TABLE, b.seat);

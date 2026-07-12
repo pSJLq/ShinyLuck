@@ -17,8 +17,8 @@ class SimClient {
     this.holes = null; // locally decrypted own cards
   }
 
-  step(state, t) {
-    const task = zkDealer.zkTask(state, t, this.addr);
+  step(state, t, wantDealId) {
+    const task = zkDealer.zkTask(state, t, this.addr, wantDealId);
     if (task.observer || task.phase === "none") return;
     const dealId = task.dealId;
 
@@ -187,6 +187,148 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     expect((await room.getHand(0)).inProgress).to.equal(false);
     expect((await room.getSeat(0, 1)).stack).to.equal(E(101)); // BB wins the blinds
     expect(await tick()).to.equal("hand-ended");
+  });
+
+  // check the current hand down to street 4 (SHOWDOWN), boards revealed
+  async function checkDownToShowdown(room, alice, bob, tick, stepAll) {
+    await room.connect(alice).act(0, CALL, 0);
+    await room.connect(bob).act(0, CHECK, 0);
+    expect(await tick()).to.equal("board-wait");
+    stepAll();
+    expect(await tick()).to.equal("board:3");
+    for (const street of [2, 3]) {
+      await room.connect(bob).act(0, CHECK, 0);
+      await room.connect(alice).act(0, CHECK, 0);
+      expect(await tick()).to.equal("board-wait");
+      stepAll();
+      expect(await tick()).to.equal(`board:${street + 2}`);
+    }
+    await room.connect(bob).act(0, CHECK, 0);
+    await room.connect(alice).act(0, CHECK, 0);
+    expect(Number((await room.getHand(0)).street)).to.equal(4);
+  }
+
+  it("pre-deal: next hand's setup + prepareDeal overlap the showdown; settle → started with nothing but startHand between", async function () {
+    const { alice, bob, room, zkd, state, clients, tick, stepAll } = await setup();
+    await dealHand(tick, stepAll);
+    stepAll(); // decrypt holes
+    await checkDownToShowdown(room, alice, bob, tick, stepAll);
+
+    // the speculative next-hand session opened on the first live tick and has
+    // been idling in `keys` (clients only fed the live deal so far)
+    expect(await tick()).to.equal("showdown-collect");
+    const nx0 = state.get(zkDealer.nextKey(0));
+    expect(nx0, "pre-deal session open").to.exist;
+    expect(nx0.phase).to.equal("keys");
+    const nextDealId = String(nx0.dealId);
+    // clients serve BOTH deals now, exactly like the browser agent
+    const stepBoth = () => clients.forEach((c) => { c.step(state, 0); c.step(state, 0, nextDealId); });
+
+    stepBoth(); // main: own-hole shares; next: both keys
+    expect(await tick({ showdownMs: 60000 })).to.equal("showdown-ready"); // reveals; next: keys→shuffle
+    stepBoth(); // next: both shuffles + Wikström proofs → holeshares
+    expect(await tick({ showdownMs: 60000 })).to.equal("showdown-wait");
+    stepBoth(); // next: pre-collect shares for the OTHERS' holes
+    expect(await tick({ showdownMs: 60000 })).to.equal("showdown-wait"); // next → prepare; prepareDeal rides the pause
+
+    const nx = state.get(zkDealer.nextKey(0));
+    expect(nx.phase).to.equal("prepare");
+    expect(nx.prepared, "prepareDeal sent during the winner-display pause").to.equal(true);
+    // no early peek: my NEXT-hand cards are never relayed while speculative
+    const t0 = zkDealer.zkTask(state, 0, clients[0].addr, nextDealId);
+    expect(t0.myHoles, "myHoles withheld for a speculative deal").to.equal(undefined);
+
+    expect(await tick()).to.equal("settled"); // showdownMs 0 → pot moves
+    expect(await tick()).to.equal("hand-ended:next-ready"); // pre-deal promoted
+    expect(await tick({ interHandMs: 0 })).to.equal("started"); // ONLY startHand left
+
+    const h2 = await room.getHand(0);
+    expect(h2.inProgress).to.equal(true);
+    expect(Number(h2.handId)).to.equal(2);
+    expect(String(h2.dealId)).to.equal(nextDealId); // the pre-dealt deal got bound
+
+    // the promoted deal serves hole cards normally now — valid and distinct
+    clients.forEach((c) => { c.holes = null; c.step(state, 0); });
+    const all = [...clients[0].holes, ...clients[1].holes];
+    expect(all.every((c) => c >= 0 && c <= 51)).to.equal(true);
+    expect(new Set(all).size).to.equal(4);
+  });
+
+  it("pre-deal is discarded when eligibility changes at settle — a stale seat set can never bind", async function () {
+    const { alice, bob, room, zkd, state, clients, tick, stepAll } = await setup();
+    await dealHand(tick, stepAll);
+    stepAll();
+    await checkDownToShowdown(room, alice, bob, tick, stepAll);
+
+    expect(await tick()).to.equal("showdown-collect");
+    const nextDealId = String(state.get(zkDealer.nextKey(0)).dealId);
+    const stepBoth = () => clients.forEach((c) => { c.step(state, 0); c.step(state, 0, nextDealId); });
+    stepBoth();
+    expect(await tick({ showdownMs: 60000 })).to.equal("showdown-ready");
+    stepBoth();
+    expect(await tick({ showdownMs: 60000 })).to.equal("showdown-wait");
+    stepBoth();
+    expect(await tick({ showdownMs: 60000 })).to.equal("showdown-wait");
+    expect(state.get(zkDealer.nextKey(0)).prepared).to.equal(true);
+    expect(await tick()).to.equal("settled");
+
+    // bob sits out between settle and the next hand — the prediction is stale
+    await room.connect(bob).setSitOut(0, true);
+    expect(await tick()).to.equal("hand-ended:next-ready");
+    expect(await tick({ interHandMs: 0 })).to.equal("idle"); // <2 eligible → promoted session discarded
+    expect((await zkd.dealInfo(nextDealId)).bound).to.equal(false); // orphaned prepared deal never bound
+    expect((await room.getHand(0)).inProgress).to.equal(false);
+
+    // bob returns → a FRESH session opens (new dealId), the normal path intact
+    await room.connect(bob).setSitOut(0, false);
+    expect(await tick({ interHandMs: 0 })).to.match(/^keys:0\/2/);
+    expect(String(state.get(0).dealId)).to.not.equal(nextDealId);
+  });
+
+  it("pre-deal covers fold endings too: fold on the flop → next hand starts from the promoted session", async function () {
+    const { alice, bob, room, state, clients, tick, stepAll } = await setup();
+    await dealHand(tick, stepAll);
+    stepAll(); // decrypt holes
+    await room.connect(alice).act(0, CALL, 0);
+    await room.connect(bob).act(0, CHECK, 0); // → flop
+    expect(await tick()).to.equal("board-wait"); // pre-deal session opens here
+    const nextDealId = String(state.get(zkDealer.nextKey(0)).dealId);
+    const stepBoth = () => clients.forEach((c) => { c.step(state, 0); c.step(state, 0, nextDealId); });
+    stepBoth(); // board shares + next keys
+    expect(await tick()).to.equal("board:3");
+    stepBoth(); // next: both shuffles
+    expect(await tick()).to.equal("wait");
+    stepBoth(); // next: hole-share pre-collect
+    expect(await tick()).to.equal("wait"); // next → prepare; prepareDeal fires (no reveal pending)
+    expect(state.get(zkDealer.nextKey(0)).prepared).to.equal(true);
+
+    await room.connect(bob).act(0, FOLD, 0); // fold-win, no crypto needed
+    expect((await room.getHand(0)).inProgress).to.equal(false);
+    expect(await tick()).to.equal("hand-ended:next-ready");
+    expect(await tick({ interHandMs: 0 })).to.equal("started");
+    const h2 = await room.getHand(0);
+    expect(Number(h2.handId)).to.equal(2);
+    expect(String(h2.dealId)).to.equal(nextDealId);
+  });
+
+  it("old clients that ignore the pre-deal: silent fallback to the normal path, no strikes", async function () {
+    const { alice, bob, room, state, tick, stepAll } = await setup();
+    await dealHand(tick, stepAll);
+    stepAll();
+    await checkDownToShowdown(room, alice, bob, tick, stepAll);
+
+    // clients only ever serve the LIVE deal (an old cached zk-agent)
+    expect(await tick()).to.equal("showdown-collect"); // pre-deal session opens…
+    stepAll();
+    const tags = [];
+    for (let i = 0; i < 8 && !tags.includes("settled"); i++) { stepAll(); tags.push(await tick()); }
+    expect(tags).to.include("settled");
+    expect(tags.join(",")).to.not.match(/strike|cancelled/);
+
+    // …but nobody fed it → dropped silently at promotion; normal redeal follows
+    expect(await tick()).to.equal("hand-ended");
+    expect(state.get(zkDealer.nextKey(0))).to.equal(undefined);
+    expect(await tick({ interHandMs: 0 })).to.match(/^keys:0\/2/);
   });
 
   it("mid-hand deserter: accusation → un-rescued window → penalized cancel forfeits to the others", async function () {

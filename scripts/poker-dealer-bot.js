@@ -606,7 +606,7 @@ async function main() {
         let tickTimer;
         const tickTimeout = new Promise((_, rej) => { tickTimer = setTimeout(() => rej(new Error("table tick timeout (60s)")), 60_000); });
         const tickP = ZK_MODE
-          ? zkDrv.tickZkTable(worker.room, worker.zkd, zkState, t, { tx: worker.runTx, concurrentTx: true, noNewHands: freeze.has(t), persistDir: PERSIST_DIR })
+          ? zkDrv.tickZkTable(worker.room, worker.zkd, zkState, t, { tx: worker.runTx, concurrentTx: true, noNewHands: freeze.has(t), persistDir: PERSIST_DIR, predeal: process.env.PREDEAL !== "0" })
           : tickTable(room, dealer, MASTER, state, t, { tx: runTx, noNewHands: freeze.has(t) });
         tickP.catch(() => {}); // if the race is lost, the zombie tick must not become an unhandledRejection
         const tag = await Promise.race([tickP.finally(() => clearTimeout(tickTimer)), tickTimeout]);
@@ -695,9 +695,10 @@ function startCardServer(room, state, zkCtx = {}) {
   // behind one IP still fit. Buckets are pruned so the map can't grow forever.
   const BUCKETS = new Map(); // ip -> { zk, chat, get } tokens + last refill
   const LIMITS = {
-    // sized for ~10-15 players sharing one NAT IP (a real client ≈ 4 zk rps +
-    // ~8 get rps); a flood is 100-1000× that and still dies at the bucket
-    zk: { burst: 200, rps: 60 },  // POST /zk/* + /holes (protocol traffic)
+    // sized for ~10-15 players sharing one NAT IP (a real client ≈ 4 zk rps,
+    // ~8 during pre-deal overlap, + ~8 get rps); a flood is 100-1000× that and
+    // still dies at the bucket
+    zk: { burst: 250, rps: 100 }, // POST /zk/* + /holes (protocol traffic)
     chat: { burst: 10, rps: 2 },  // POST /chat (human messages)
     get: { burst: 300, rps: 120 }, // GET snapshot/lobby/history/chat polls
   };
@@ -753,12 +754,12 @@ function startCardServer(room, state, zkCtx = {}) {
         const t = Number(body.tableId);
         const addr = await resolveSigner(`ShinyPoker:zk:${t}:${body.dealId}`, body.signature);
         let out;
-        if (req.url.startsWith("/zk/task")) out = zkDrv.zkTask(zkCtx.zkState, t, addr);
+        if (req.url.startsWith("/zk/task")) out = zkDrv.zkTask(zkCtx.zkState, t, addr, body.dealId);
         else if (req.url.startsWith("/zk/key")) out = zkDrv.zkPostKey(zkCtx.zkState, t, addr, body);
         else if (req.url.startsWith("/zk/shuffleproof")) out = zkDrv.zkPostShuffleProof(zkCtx.zkState, t, addr, body); // before /zk/shuffle (prefix!)
         else if (req.url.startsWith("/zk/shuffle")) out = zkDrv.zkPostShuffle(zkCtx.zkState, t, addr, body);
         else if (req.url.startsWith("/zk/shares")) out = zkDrv.zkPostShares(zkCtx.zkState, t, addr, body);
-        else if (req.url.startsWith("/zk/chain")) out = zkDrv.zkChain(zkCtx.zkState, t); // full proof transcript for client-side chain verification
+        else if (req.url.startsWith("/zk/chain")) out = zkDrv.zkChain(zkCtx.zkState, t, body.dealId); // full proof transcript for client-side chain verification
         else { res.writeHead(404).end(); return; }
         res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
         return res.end(JSON.stringify(out));
