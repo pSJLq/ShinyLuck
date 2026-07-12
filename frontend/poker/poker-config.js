@@ -3,18 +3,18 @@
 export const POKER_CONFIG = {
   network: "somniaTestnet",
   // --- deployed addresses (filled in on deploy) ---
-  pokerRoom: "0x7E1387FCE14522B981C07bca921e857CfeD636e3",
-  commitRevealDealer: "0x551C3ee9352199Ad0b100D7deD0fD13637B30E79",
-  pokerTournament: "0xB4808411903Fb8e2Eee23bceB9f274943EDAf766",
+  pokerRoom: "0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24",
+  commitRevealDealer: "",
+  pokerTournament: "0x0228841acA2715820a2503617bd9A0AfF465b445",
   playerProfile: "0x7364E1ED8a07b4659c059fa66D346c42907C3F14", // on-chain nicknames (PlayerProfile.sol) — filled on deploy
   avatarStore: "0x20c39988b480485aD2a9715c32Ff1866Ea890Ec4", // on-chain uploaded avatars (AvatarStore.sol)
   zkDealerV2: "0x292Ef0e15fC62613B00c55b0eEAC38279Efdb67D", // zkShuffle v2 on-chain verifier (ZkDealerV2.sol) — powers the zk-lab page
-  zkTableDealer: "0x3D3611364FaCc7b8AFdECD77755708cCec41D6a9", // v2 live card layer implementing IPokerDealer (ZkTableDealer.sol)
+  zkTableDealer: "0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8", // v2 live card layer implementing IPokerDealer (ZkTableDealer.sol)
   // "zk" = the room's dealer is ZkTableDealer (mental poker; cards decrypted in
   // the player's browser). "v1" = commit-reveal. Written by the deploy script.
-  cardLayer: "v1",
+  cardLayer: "zk",
   // Off-chain dealer bot's hole-card API (serves each player only their cards).
-  dealerApiUrl: "http://localhost:3002",
+  dealerApiUrl: "https://shinia.mom/dealer",
   // Reciprocal link back to the ShinyLuck casino (Casino⇄Poker switcher).
   casinoUrl: "https://shiny-luck.vercel.app/",
   // Same Privy app as ShinyLuck → same embedded Somnia wallet across both

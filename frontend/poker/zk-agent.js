@@ -12,7 +12,8 @@
 //   - every relayed decryption share is CP-verified against that player's key
 //   - the ciphertexts of MY hole cards are checked against the ON-CHAIN
 //     commitments (ctHash) before I trust what I see
-import { bn254 } from "/vendor/noble-bn254.js";
+import nobleBn254 from "/vendor/noble-bn254.js"; // esbuild CJS bundle → single default export
+const { bn254 } = nobleBn254;
 import { ethers } from "/vendor/ethers.bundle.js";
 import * as zk from "./zk-bn254.js";
 import { POKER_CONFIG } from "./poker-config.js";

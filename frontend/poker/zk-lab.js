@@ -2,7 +2,8 @@
 // every proof AGAINST THE DEPLOYED CONTRACT (ZkDealerV2 on Somnia testnet) with
 // a zero-gas eth_call. So the "verified on-chain" claim isn't a description —
 // you watch the browser ask the actual contract, live.
-import { bn254 } from "/vendor/noble-bn254.js"; // self-hosted (no CDN dependency)
+import nobleBn254 from "/vendor/noble-bn254.js"; // self-hosted (no CDN); esbuild CJS bundle → default export
+const { bn254 } = nobleBn254;
 import { ethers } from "/vendor/ethers.bundle.js";
 import { POKER_CONFIG, NETWORK } from "./poker-config.js";
 import * as zk from "./zk-bn254.js";
