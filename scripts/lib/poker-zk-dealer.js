@@ -594,16 +594,20 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
     }
   }
 
-  // 2. board reveals in lockstep with the streets
+  // 2. board reveals in lockstep with the streets. Reveal EVERY due card that
+  //    already has all shares in ONE tick (not one per poll cycle) — so the flop
+  //    (3 cards) comes out as a unit instead of trickling one card at a time.
   const want = boardCountForStreet(street);
   if (want > sess.boardRevealed) {
-    const slot = sess.boardRevealed;
-    const idx = boardIdx(sess.k, slot);
     sess.boardNeeded = [];
     for (let sl = sess.boardRevealed; sl < want; sl++) sess.boardNeeded.push(boardIdx(sess.k, sl));
     if (!sess.boardDeadline) sess.boardDeadline = now + (opts.boardMs ?? 9_000);
 
-    if (haveAllShares(sess, idx)) {
+    let revealed = 0;
+    while (sess.boardRevealed < want) {
+      const slot = sess.boardRevealed;
+      const idx = boardIdx(sess.k, slot);
+      if (!haveAllShares(sess, idx)) break; // reveal only the ready contiguous prefix
       const card = decryptCard(sess, idx);
       const ct = sess.deck[idx];
       const sh = contractShares(sess, idx);
@@ -613,11 +617,11 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
         return await _revealFailed(room, state, tableId, sess, e, send, opts);
       }
       sess.boardRevealed = slot + 1;
-      sess.boardDeadline = 0;
-      return `board:${slot + 1}`;
+      revealed++;
     }
+    if (revealed) { sess.boardDeadline = 0; return `board:${sess.boardRevealed}`; }
     if (sess.accused && (await _tryIngestRescue(room, zkd, sess, now, opts))) return "rescued";
-    if (now > sess.boardDeadline) return await _sharesTimeout(room, zkd, state, tableId, sess, [idx], send, opts);
+    if (now > sess.boardDeadline) return await _sharesTimeout(room, zkd, state, tableId, sess, [boardIdx(sess.k, sess.boardRevealed)], send, opts);
     return "board-wait";
   }
   sess.boardNeeded = [];

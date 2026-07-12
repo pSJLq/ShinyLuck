@@ -141,11 +141,10 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     await room.connect(bob).act(0, CHECK, 0);
     expect(Number((await room.getHand(0)).street)).to.equal(1);
 
-    // flop: bot requests board shares, clients answer, three reveals land
+    // flop: bot requests board shares, clients answer, the whole flop reveals
+    // as a UNIT (all 3 cards in one tick, not one per poll cycle)
     expect(await tick()).to.equal("board-wait");
     stepAll();
-    expect(await tick()).to.equal("board:1");
-    expect(await tick()).to.equal("board:2");
     expect(await tick()).to.equal("board:3");
 
     // check through turn + river
@@ -265,12 +264,11 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
 
     // the bot ingests the rescued share from the chain; the ACCUSED card reveals
     expect(await tick({ now: () => Date.now() + 60_000 })).to.equal("rescued");
-    expect(await tick()).to.equal("board:1");
+    expect(await tick()).to.equal("board:1"); // only the rescued (accused) card is ready
     // (the rescue covers exactly the accused share — for the remaining flop
     // cards bob's HTTP path comes back and the hand proceeds normally)
     clients[1].step(state, 0);
-    expect(await tick()).to.equal("board:2");
-    expect(await tick()).to.equal("board:3");
+    expect(await tick()).to.equal("board:3"); // the rest of the flop reveals together
     expect((await room.getHand(0)).inProgress).to.equal(true); // nobody was punished
 
     // no chips moved: both stacks intact minus their live commitments
@@ -368,8 +366,6 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     clients.forEach((c) => c.step(state2, 0));
     expect(await tickR()).to.equal("board-wait");
     clients.forEach((c) => c.step(state2, 0));
-    expect(await tickR()).to.equal("board:1");
-    expect(await tickR()).to.equal("board:2");
-    expect(await tickR()).to.equal("board:3");
+    expect(await tickR()).to.equal("board:3"); // flop reveals as a unit
   });
 });

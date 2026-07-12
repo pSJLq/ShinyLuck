@@ -659,14 +659,19 @@ body {
 .hud .hgroup button:hover { color: var(--text-2); }
 .hud .hgroup button.on { background: var(--accent); color: #fff; }
 .hud .hsep { width: 1px; height: 22px; background: var(--line); }
-.hud .htoggle { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-2);
-  cursor: pointer; padding: 5px 8px; }
-.hud .htoggle .sw { width: 30px; height: 17px; border-radius: 999px; background: #222; position: relative;
-  transition: .18s; border: 1px solid var(--line); }
-.hud .htoggle .sw i { position: absolute; top: 1px; left: 1px; width: 13px; height: 13px; border-radius: 50%;
-  background: var(--muted); transition: .18s; }
-.hud .htoggle.on .sw { background: var(--accent); border-color: var(--accent); }
-.hud .htoggle.on .sw i { left: 14px; background: #fff; }
+/* Toggle switch — GLOBAL (not just inside .hud) so the table-settings panel
+   gets the real pill switch instead of an unstyled "dot". Clear off/on states:
+   off = grey track, knob left; on = accent track, knob slid right. */
+.htoggle { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-2);
+  cursor: pointer; padding: 5px 8px; background: none; border: 0; }
+.htoggle .sw { width: 42px; height: 24px; border-radius: 999px; background: #2b2b33; position: relative;
+  transition: background .18s, border-color .18s; border: 1px solid var(--line-2, #3a3a42);
+  box-sizing: border-box; flex: 0 0 auto; }
+.htoggle .sw i { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #8a8a94; transition: transform .18s, background .18s; box-shadow: 0 1px 3px rgba(0,0,0,.55); }
+.htoggle.on .sw { background: var(--accent); border-color: var(--accent); }
+.htoggle.on .sw i { transform: translateX(18px); background: #fff; }
+.htoggle:hover .sw { border-color: var(--accent); }
 .hud .hkey { font-size: 9px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px;
   padding: 1px 4px; margin-left: 1px; }
 
