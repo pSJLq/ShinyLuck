@@ -160,11 +160,11 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     await room.connect(alice).act(0, CHECK, 0);
     expect(Number((await room.getHand(0)).street)).to.equal(4); // SHOWDOWN
 
-    // showdown: own-hole shares released, seats revealed, pot settled
+    // showdown: own-hole shares released, then ONE tick reveals every ready
+    // seat and marks readiness (the old one-seat-per-tick flow made the
+    // showdown tail cost ~4 poll cycles)
     expect(await tick()).to.equal("showdown-collect");
     stepAll();
-    expect(await tick()).to.match(/^holes:seat/);
-    expect(await tick()).to.match(/^holes:seat/);
     expect(await tick()).to.equal("showdown-ready");
     expect(await tick()).to.equal("settled");
 
@@ -262,13 +262,13 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     await expect(room.connect(coordinator).accuseAbandon(0, 1, idx, ctA, ctB))
       .to.be.revertedWithCustomError(room, "AlreadyVindicated");
 
-    // the bot ingests the rescued share from the chain; the ACCUSED card reveals
+    // the bot ingests the rescued share from the chain; the flop stays HELD
+    // (atomic flop: no card shows until all 3 are ready), then bob's HTTP path
+    // comes back and the whole flop reveals as one unit
     expect(await tick({ now: () => Date.now() + 60_000 })).to.equal("rescued");
-    expect(await tick()).to.equal("board:1"); // only the rescued (accused) card is ready
-    // (the rescue covers exactly the accused share — for the remaining flop
-    // cards bob's HTTP path comes back and the hand proceeds normally)
+    expect(await tick()).to.equal("board-wait"); // rescued card ready, flop still held
     clients[1].step(state, 0);
-    expect(await tick()).to.equal("board:3"); // the rest of the flop reveals together
+    expect(await tick()).to.equal("board:3"); // the whole flop reveals together
     expect((await room.getHand(0)).inProgress).to.equal(true); // nobody was punished
 
     // no chips moved: both stacks intact minus their live commitments

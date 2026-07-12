@@ -460,6 +460,13 @@ async function recoverSession(zkd, dir, tableId, dealIdOnChain) {
 // ---------------------------------------------------------------------------
 async function tickZkTable(room, zkd, state, tableId, opts = {}) {
   const send = opts.tx || ((fn) => fn().then((r) => r.wait()));
+  // Multi-tx reveals go out concurrently ONLY when the caller's sender
+  // pipelines nonces (the production runner); plain signers (tests, ad-hoc
+  // drivers) would nonce-race, so they keep the sequential path.
+  const sendAll = async (thunks) => {
+    if (opts.concurrentTx) { await Promise.all(thunks.map((th) => th())); return; }
+    for (const th of thunks) await th();
+  };
   const now = opts.now ? opts.now() : Date.now();
   const cfg = await room.getTable(tableId);
   const maxSeats = Number(cfg.maxSeats);
@@ -476,7 +483,7 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
       return "hand-ended";
     }
     const endedAt = state.get(`ended:${tableId}`);
-    if (endedAt && now - endedAt < (opts.interHandMs ?? 1200)) return "inter-hand";
+    if (endedAt && now - endedAt < (opts.interHandMs ?? 400)) return "inter-hand";
     state.delete(`ended:${tableId}`);
     if (opts.noNewHands) return "hold";
 
@@ -603,23 +610,53 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
     for (let sl = sess.boardRevealed; sl < want; sl++) sess.boardNeeded.push(boardIdx(sess.k, sl));
     if (!sess.boardDeadline) sess.boardDeadline = now + (opts.boardMs ?? 9_000);
 
-    let revealed = 0;
-    while (sess.boardRevealed < want) {
-      const slot = sess.boardRevealed;
-      const idx = boardIdx(sess.k, slot);
-      if (!haveAllShares(sess, idx)) break; // reveal only the ready contiguous prefix
-      const card = decryptCard(sess, idx);
-      const ct = sess.deck[idx];
-      const sh = contractShares(sess, idx);
+    // The flop is atomic for the UI: hold the first reveal until all 3 cards
+    // have their shares, so watchers never see the flop trickle one card at a
+    // time (shares arrive per-client-poll, so card 0 is often ready first).
+    // Past the deadline the hold lifts — the timeout path below needs the
+    // ready prefix revealed to name the right missing card.
+    const flopHold = street === STREET.FLOP && sess.boardRevealed === 0
+      && ![0, 1, 2].every((sl) => haveAllShares(sess, boardIdx(sess.k, sl)))
+      && now <= sess.boardDeadline;
+    // Collect every share-ready contiguous slot, then dispatch the reveal txs
+    // CONCURRENTLY (the worker's pipelined sender keeps nonces contiguous) so
+    // a multi-card reveal lands in one block — watchers see the flop appear as
+    // one unit instead of card-by-card at ~0.6s tx intervals.
+    const readySlots = [];
+    if (!flopHold) {
+      for (let slot = sess.boardRevealed; slot < want; slot++) {
+        if (!haveAllShares(sess, boardIdx(sess.k, slot))) break; // contiguous prefix only
+        readySlots.push(slot);
+      }
+    }
+    if (readySlots.length) {
       try {
-        await send(() => zkd.revealBoardCard(sess.dealId, slot, card, [cPt(ct.A), cPt(ct.B)], sh.d, sh.R1, sh.R2, sh.s));
+        const args = readySlots.map((slot) => {
+          const idx = boardIdx(sess.k, slot);
+          const ct = sess.deck[idx];
+          const sh = contractShares(sess, idx);
+          return [sess.dealId, slot, decryptCard(sess, idx), [cPt(ct.A), cPt(ct.B)], sh.d, sh.R1, sh.R2, sh.s];
+        });
+        // The contract enforces slot order (boardSlot == boardCount), so later
+        // slots can't be gas-ESTIMATED against the pre-state — estimate the
+        // first (valid now), give the rest the same limit with headroom, and
+        // let the pipelined sender broadcast all of them; same-sender nonce
+        // order guarantees in-order execution within the block.
+        let overrides = {};
+        if (opts.concurrentTx && args.length > 1) {
+          const est = await zkd.revealBoardCard.estimateGas(...args[0]);
+          overrides = { gasLimit: (est * 16n) / 10n };
+        }
+        await sendAll(args.map((a) => () => send(() => zkd.revealBoardCard(...a, overrides))));
       } catch (e) {
+        // recheck on-chain how far the batch got before deciding it's fatal
+        sess.boardRevealed = Number(await zkd.boardRevealedCount(sess.dealId));
         return await _revealFailed(room, state, tableId, sess, e, send, opts);
       }
-      sess.boardRevealed = slot + 1;
-      revealed++;
+      sess.boardRevealed = readySlots[readySlots.length - 1] + 1;
+      sess.boardDeadline = 0;
+      return `board:${sess.boardRevealed}`;
     }
-    if (revealed) { sess.boardDeadline = 0; return `board:${sess.boardRevealed}`; }
     if (sess.accused && (await _tryIngestRescue(room, zkd, sess, now, opts))) return "rescued";
     if (now > sess.boardDeadline) return await _sharesTimeout(room, zkd, state, tableId, sess, [boardIdx(sess.k, sess.boardRevealed)], send, opts);
     return "board-wait";
@@ -638,24 +675,33 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
     sess.ownNeeded = new Set(liveParts.filter((p) => !sess.holesRevealed.has(p)));
     if (!sess.showdownDeadline) sess.showdownDeadline = now + (opts.showdownSharesMs ?? 12_000);
 
-    for (const p of liveParts) {
-      if (sess.holesRevealed.has(p)) continue;
+    // Reveal EVERY share-ready hand in this one tick (the old one-seat-per-tick
+    // return made a heads-up showdown cost ~4 poll cycles before the pot could
+    // move), then mark readiness in the SAME tick — the showdown tail drops
+    // from ~10s to roughly the winner-display pause.
+    // Reveal every ready seat CONCURRENTLY (seat reveals are order-independent
+    // on-chain) so a multi-way showdown costs one confirmation, not one per seat.
+    const readyParts = liveParts.filter((p) => {
+      if (sess.holesRevealed.has(p)) return false;
       const [i0, i1] = holeIdxsOf(p, sess.k);
-      if (haveAllShares(sess, i0) && haveAllShares(sess, i1)) {
-        const c0 = decryptCard(sess, i0), c1 = decryptCard(sess, i1);
-        const s0 = contractShares(sess, i0), s1 = contractShares(sess, i1);
-        const ct0 = sess.deck[i0], ct1 = sess.deck[i1];
-        try {
-          await send(() => zkd.revealHoleCards(
+      return haveAllShares(sess, i0) && haveAllShares(sess, i1);
+    });
+    let revealedNow = 0;
+    if (readyParts.length) {
+      try {
+        await sendAll(readyParts.map((p) => () => {
+          const [i0, i1] = holeIdxsOf(p, sess.k);
+          const c0 = decryptCard(sess, i0), c1 = decryptCard(sess, i1);
+          const s0 = contractShares(sess, i0), s1 = contractShares(sess, i1);
+          const ct0 = sess.deck[i0], ct1 = sess.deck[i1];
+          return send(() => zkd.revealHoleCards(
             sess.dealId, p, sess.seats[p], [c0, c1],
             [cPt(ct0.A), cPt(ct0.B), cPt(ct1.A), cPt(ct1.B)],
             [...s0.d, ...s1.d], [...s0.R1, ...s1.R1], [...s0.R2, ...s1.R2], [...s0.s, ...s1.s],
-          ));
-        } catch (e) {
-          return await _revealFailed(room, state, tableId, sess, e, send, opts);
-        }
-        sess.holesRevealed.add(p);
-        return `holes:seat${sess.seats[p]}`;
+          )).then(() => { sess.holesRevealed.add(p); revealedNow++; });
+        }));
+      } catch (e) {
+        return await _revealFailed(room, state, tableId, sess, e, send, opts);
       }
     }
 
@@ -667,10 +713,11 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
         sess.showdownAt = now;
         return "showdown-ready";
       }
-      if (now - (sess.showdownAt || 0) < (opts.showdownMs ?? 1800)) return "showdown-wait";
+      if (now - (sess.showdownAt || 0) < (opts.showdownMs ?? 1200)) return "showdown-wait";
       await send(() => room.resolveShowdown(tableId));
       return "settled";
     }
+    if (revealedNow) return `holes:${revealedNow}`;
     if (sess.accused && (await _tryIngestRescue(room, zkd, sess, now, opts))) return "rescued";
     if (now > sess.showdownDeadline) {
       const missing = liveParts.filter((p) => !sess.holesRevealed.has(p) && !(haveAllShares(sess, holeIdxsOf(p, sess.k)[0]) && haveAllShares(sess, holeIdxsOf(p, sess.k)[1])));

@@ -196,7 +196,7 @@ const SNAPS = new Map(); // tableId -> snapshot object (ts inside)
 const WATCHED = new Map(); // tableId -> last /snapshot request ts (watched tables refresh hot)
 const LOBBY = { ts: 0, obj: null };
 const CTL = new Map(); // tableId -> controller address (immutable after creation)
-const STATUS = { startedAt: Date.now(), lastLoopEndAt: 0, gasWei: "0", tables: 0, spawned: 0, snapErrors: 0 };
+const STATUS = { startedAt: Date.now(), lastLoopEndAt: 0, gasWei: "0", tables: 0, spawned: 0, snapErrors: 0, workerGas: new Map() };
 const jsonBig = (v) => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x));
 
 async function controllerOf(room, t) {
@@ -372,7 +372,12 @@ async function main() {
   must(MASTER && /^0x[0-9a-fA-F]{64}$/.test(MASTER), "missing/invalid POKER_SEED_MASTER_KEY (need 32-byte hex)");
   const { room: roomAddr, dealer: dealerAddr, tournament: trnAddr, zk: zkAddr, deployBlock } = loadAddresses();
 
-  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  // ethers v6 defaults the HTTP timeout to 300s — LONGER than the 180s watchdog,
+  // so one silently-hung RPC request used to take the whole process down. 15s
+  // turns a hung request into a normal retryable error instead.
+  const fetchReq = new ethers.FetchRequest(RPC_URL);
+  fetchReq.timeout = 15_000;
+  const provider = new ethers.JsonRpcProvider(fetchReq);
   // ethers v6 defaults pollingInterval to 4000ms → every tx.wait() waits up to
   // 4s for the next poll AFTER it mines. That, times N serial writes, was the
   // bulk of the multi-table lag. 400ms makes each confirmation near-instant.
@@ -427,19 +432,38 @@ async function main() {
       let nextNonce = null, syncing = null;
       const rawSend = w.sendTransaction.bind(w);
       w.sendTransaction = async (tx) => {
-        if (nextNonce === null) { syncing = syncing || w.getNonce("latest").then((n) => { nextNonce = n; syncing = null; }); await syncing; }
+        if (nextNonce === null) { syncing = syncing || w.getNonce("pending").then((n) => { nextNonce = n; syncing = null; }); await syncing; }
         const nonce = nextNonce++; // atomic allocation (nextNonce++ can't yield) → broadcasts run CONCURRENTLY
         for (let a = 0; ; a++) {
           try { return await rawSend({ ...tx, nonce }); }
           catch (e) {
             const m = (e.shortMessage || e.message || "").toLowerCase();
             if (/nonce too low|already known|already imported|replacement/.test(m)) throw e; // already in mempool/mined — not a gap
-            if (a >= 4) throw e; // give up (rare) — the loop re-drives the table next tick
+            if (a >= 4) {
+              // this nonce never reached the mempool — without a resync every
+              // later tx would sit behind the hole FOREVER (.wait() that never
+              // resolves; the exact shape of the 2026-07-12 watchdog death loop)
+              nextNonce = null;
+              throw e;
+            }
             await new Promise((r) => setTimeout(r, 120 * (a + 1))); // transient RPC hiccup → retry the SAME nonce so no gap forms
           }
         }
       };
-      const run = (fn) => fn().then((r) => r.wait()); // concurrent broadcast → parallel confirm
+      // Concurrent broadcast → parallel confirm, but NEVER an unbounded wait: a
+      // tx the chain accepted-then-dropped (broke wallet, mempool eviction)
+      // otherwise parks .wait() forever and wedges the whole main loop. On
+      // timeout: resync the nonce counter and surface a normal table error.
+      const run = (fn) => fn().then((r) => {
+        let timer;
+        const timeout = new Promise((_, rej) => {
+          timer = setTimeout(() => {
+            nextNonce = null;
+            rej(new Error(`tx ${r.hash} unconfirmed after 25s (dropped?) — worker ${w.address.slice(0, 10)}`));
+          }, 25_000);
+        });
+        return Promise.race([r.wait().finally(() => clearTimeout(timer)), timeout]);
+      });
       WORKERS.push({
         wallet: w, runTx: run,
         room: new ethers.Contract(roomAddr, loadAbi("PokerRoom"), w),
@@ -474,16 +498,18 @@ async function main() {
   const timeoutStreak = new Map(); // tableId -> consecutive timeout-fold count
   let lastGasWarnAt = 0;
 
+  let lastGasCheckAt = 0;
   async function loop() {
     // Low-gas alarm: every action costs gas; below ~0.5 STT dealing starts failing.
     try {
-      if (Date.now() - lastGasWarnAt > 60_000) {
+      if (Date.now() - lastGasCheckAt > 60_000) {
+        lastGasCheckAt = Date.now();
         const balWei = await provider.getBalance(wallet.address);
         STATUS.gasWei = balWei.toString();
         // SELF-REFUEL: the bot key IS the room/tournament owner, so the house's
         // own take (cash rake + tournament fees) tops the gas tank up before
         // dealing can stall — no manual STT top-ups needed.
-        if (balWei < 3000000000000000000n) { // < 3 STT
+        if (balWei < 10000000000000000000n) { // < 10 STT: drain house take into the gas tank early — workers refuel from here
           try {
             const rake = await room.rakeCollected();
             if (rake > 0n) {
@@ -517,14 +543,30 @@ async function main() {
         }
         // zk worker keys refuel from the main wallet (which self-refuels from
         // the rake above) — each worker pays prepare/reveal gas on its tables.
+        // A worker that runs dry doesn't just stall its tables: its txs start
+        // getting accepted-then-dropped by the RPC, which is what wedged the
+        // main loop on 2026-07-12. So refuel is now proportional — the old
+        // "only when main >4 STT" gate let workers starve while main held 2-3.
         if (ZK_MODE) {
+          const ONE = 1000000000000000000n;
+          const MAIN_RESERVE = ONE; // never drain main below 1 STT (it pays trn/kick/spawn gas)
+          let mainLeft = balWei;
           for (const w of WORKERS) {
             try {
               const wb = await provider.getBalance(w.wallet.address);
-              if (wb < 1000000000000000000n && balWei > 4000000000000000000n) { // worker <1 STT, main >4
-                await (await wallet.sendTransaction({ to: w.wallet.address, value: 2000000000000000000n })).wait();
-                console.log(`[poker-bot] worker refuel: 2 STT → ${w.wallet.address.slice(0, 10)}…`);
+              STATUS.workerGas.set(w.wallet.address, wb.toString());
+              if (wb >= ONE / 2n) continue; // healthy enough (~40-250 dealer txs)
+              const target = 2n * ONE;
+              const room_ = mainLeft > MAIN_RESERVE ? mainLeft - MAIN_RESERVE : 0n;
+              const amt = (target - wb) < room_ ? (target - wb) : room_;
+              if (amt < ONE / 4n) { // can't meaningfully help — say it loudly
+                console.error(`[poker-bot] WORKER LOW GAS, refuel impossible: ${w.wallet.address.slice(0, 10)}… has ${ethers.formatEther(wb)} STT, main has ${ethers.formatEther(mainLeft)} — TOP UP ${wallet.address}`);
+                continue;
               }
+              await (await wallet.sendTransaction({ to: w.wallet.address, value: amt })).wait();
+              mainLeft -= amt;
+              STATUS.workerGas.set(w.wallet.address, (wb + amt).toString());
+              console.log(`[poker-bot] worker refuel: ${ethers.formatEther(amt)} STT → ${w.wallet.address.slice(0, 10)}…`);
             } catch (e) { console.error("[poker-bot] worker refuel:", e.shortMessage || e.message); }
           }
         }
@@ -558,9 +600,16 @@ async function main() {
           if (foreign) { console.log(`[poker-bot] table ${t}: controlled by foreign/orphaned ${ctl} — skipping permanently`); return; }
         }
         const worker = ZK_MODE ? WORKERS[t % WORKERS.length] : null;
-        const tag = ZK_MODE
-          ? await zkDrv.tickZkTable(worker.room, worker.zkd, zkState, t, { tx: worker.runTx, noNewHands: freeze.has(t), persistDir: PERSIST_DIR })
-          : await tickTable(room, dealer, MASTER, state, t, { tx: runTx, noNewHands: freeze.has(t) });
+        // A tick is bounded (~seconds) when RPC + txs behave; Promise.race is the
+        // last line of defence so ONE stuck table can never hold the whole loop
+        // hostage (the watchdog would then kill the process — the death loop).
+        let tickTimer;
+        const tickTimeout = new Promise((_, rej) => { tickTimer = setTimeout(() => rej(new Error("table tick timeout (60s)")), 60_000); });
+        const tickP = ZK_MODE
+          ? zkDrv.tickZkTable(worker.room, worker.zkd, zkState, t, { tx: worker.runTx, concurrentTx: true, noNewHands: freeze.has(t), persistDir: PERSIST_DIR })
+          : tickTable(room, dealer, MASTER, state, t, { tx: runTx, noNewHands: freeze.has(t) });
+        tickP.catch(() => {}); // if the race is lost, the zombie tick must not become an unhandledRejection
+        const tag = await Promise.race([tickP.finally(() => clearTimeout(tickTimer)), tickTimeout]);
         if (tag && tag !== "idle" && tag !== "wait" && !/^(keys:|shuffle:|holeshares|board-wait|showdown-collect|showdown-wait|prep|inter-hand|hold)/.test(tag)) {
           console.log(`[poker-bot] table ${t}: ${tag}`);
         }
@@ -638,6 +687,47 @@ async function main() {
 // /zk/key, /zk/shuffle, /zk/shares. All sig-gated to the seat owner.
 // ---------------------------------------------------------------------------
 function startCardServer(room, state, zkCtx = {}) {
+  // ---- per-IP rate limiting (DoS hygiene for the public launch) ----------
+  // Token buckets, refilled continuously. Generous enough for real clients
+  // (a browser polls /zk/task at ~1.4 rps + /snapshot at ~0.7 rps, with short
+  // bursts during the shuffle), tight enough that a flood gets 429s instead of
+  // burning signature checks and BN254 math. NAT-friendly: several players
+  // behind one IP still fit. Buckets are pruned so the map can't grow forever.
+  const BUCKETS = new Map(); // ip -> { zk, chat, get } tokens + last refill
+  const LIMITS = {
+    // sized for ~10-15 players sharing one NAT IP (a real client ≈ 4 zk rps +
+    // ~8 get rps); a flood is 100-1000× that and still dies at the bucket
+    zk: { burst: 200, rps: 60 },  // POST /zk/* + /holes (protocol traffic)
+    chat: { burst: 10, rps: 2 },  // POST /chat (human messages)
+    get: { burst: 300, rps: 120 }, // GET snapshot/lobby/history/chat polls
+  };
+  function clientIp(req) {
+    const ra = req.socket.remoteAddress || "";
+    const local = ra === "127.0.0.1" || ra === "::1" || ra === "::ffff:127.0.0.1";
+    if (local && req.headers["x-forwarded-for"]) return String(req.headers["x-forwarded-for"]).split(",")[0].trim();
+    return ra;
+  }
+  function allow(req, kind) {
+    const ip = clientIp(req);
+    const now = Date.now();
+    let b = BUCKETS.get(ip);
+    if (!b) { b = { at: now }; BUCKETS.set(ip, b); }
+    const lim = LIMITS[kind];
+    const cur = b[kind] === undefined ? lim.burst : Math.min(lim.burst, b[kind] + ((now - b.at) / 1000) * lim.rps);
+    b.at = now;
+    if (cur < 1) { b[kind] = cur; return false; }
+    b[kind] = cur - 1;
+    return true;
+  }
+  setInterval(() => { // prune idle buckets (full again after ~burst/rps seconds)
+    const cut = Date.now() - 120_000;
+    for (const [ip, b] of BUCKETS) if (b.at < cut) BUCKETS.delete(ip);
+  }, 60_000).unref();
+  function tooMany(res) {
+    res.writeHead(429, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Retry-After": "2" });
+    res.end(JSON.stringify({ error: "rate limited" }));
+  }
+
   // signature → effective player address (session keys resolve to their owner)
   async function resolveSigner(message, signature) {
     const signer = ethers.verifyMessage(message, signature);
@@ -657,6 +747,7 @@ function startCardServer(room, state, zkCtx = {}) {
   const server = http.createServer(async (req, res) => {
     // ---- zkShuffle v2 protocol relay --------------------------------------
     if (zkCtx.ZK_MODE && req.method === "POST" && req.url.startsWith("/zk/")) {
+      if (!allow(req, "zk")) return tooMany(res);
       try {
         const body = JSON.parse((await readBody(req)) || "{}");
         const t = Number(body.tableId);
@@ -684,6 +775,7 @@ function startCardServer(room, state, zkCtx = {}) {
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
     if (req.method === "OPTIONS") return res.writeHead(204).end();
+    if (req.method === "GET" && !allow(req, "get")) return tooMany(res);
     if (req.method === "GET" && req.url.startsWith("/health")) {
       const now = Date.now();
       const loopAge = now - (STATUS.lastLoopEndAt || STATUS.startedAt);
@@ -692,6 +784,7 @@ function startCardServer(room, state, zkCtx = {}) {
         uptimeSec: Math.round((now - STATUS.startedAt) / 1000),
         loopAgeMs: loopAge,
         gasSTT: Number(STATUS.gasWei) / 1e18,
+        workersSTT: [...STATUS.workerGas.entries()].map(([a, v]) => ({ w: a.slice(0, 10), stt: Number(v) / 1e18 })),
         tables: STATUS.tables,
         spawned: STATUS.spawned,
         snapErrors: STATUS.snapErrors,
@@ -737,6 +830,7 @@ function startCardServer(room, state, zkCtx = {}) {
       return res.end(JSON.stringify({ messages: list }));
     }
     if (req.method === "POST" && req.url.startsWith("/chat")) {
+      if (!allow(req, "chat")) return tooMany(res);
       let body = "";
       req.on("data", (c) => (body += c));
       req.on("end", async () => {
@@ -768,6 +862,7 @@ function startCardServer(room, state, zkCtx = {}) {
       res.writeHead(404).end();
       return;
     }
+    if (!allow(req, "zk")) return tooMany(res);
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", async () => {

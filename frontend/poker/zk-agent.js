@@ -61,6 +61,14 @@ export function startZkAgent(sdk, getTableId) {
   // dealId -> { ok, hash } — verdict of my own verification of the full shuffle
   // chain. I contribute NO decryption share until every stage is proven.
   const chainVerdict = new Map();
+  // dealId -> Map(stage -> {inH,outH,prfH,aggH}) — stages already proven during
+  // the shuffle phase (incremental pre-verification). Keyed by content hashes:
+  // the final verifyChain only skips a stage if the transcript it is looking at
+  // is byte-identical to what was proven, so a coordinator that swaps data
+  // after the pre-pass gains nothing.
+  const chainProg = new Map();
+  let preverifyBusy = false;
+  let preverifyAt = 0;
   const myShuffle = new Map(); // dealId -> { outHash, aggKey } pin of my own contribution
   let running = false;
   let stopped = false;
@@ -90,6 +98,44 @@ export function startZkAgent(sdk, getTableId) {
     const slot = idx - 2 * k;
     const boardDue = street >= 3 ? 5 : street === 2 ? 4 : street === 1 ? 3 : 0; // river(3)/showdown(4)→all
     return slot < boardDue;
+  }
+
+  const stageSig = (ch, i, X) => ({
+    inH: i === 0 ? "init" : deckHashHex(ch.decks[i - 1]),
+    outH: deckHashHex(ch.decks[i]),
+    prfH: ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(ch.proofs[i]))),
+    aggH: (() => { const a = zk.aff(X); return `${a.x.toString(16)}:${a.y.toString(16)}`; })(),
+  });
+
+  /// Incremental pre-verification: while OTHER players are still shuffling,
+  /// verify the already-posted stages so the expensive MSMs don't all land in
+  /// the holeshares window (at a 6-max table that's ~2s of proofs + a ~0.5MB
+  /// transcript fetch that used to stall the deal right before hole cards).
+  /// Purely an optimization — verifyChain re-checks anything not byte-matched.
+  async function preverifyChain(t, dealId, signature) {
+    if (chainVerdict.has(dealId) || preverifyBusy || Date.now() - preverifyAt < 900) return;
+    preverifyBusy = true;
+    preverifyAt = Date.now();
+    try {
+      const ch = await post("/zk/chain", { tableId: t, dealId, signature });
+      if (!ch || !Array.isArray(ch.decks) || !Array.isArray(ch.proofs) || !Array.isArray(ch.pubkeys) ||
+          !ch.pubkeys.length || ch.pubkeys.some((p) => !p)) return; // keys not all in yet
+      const pubkeys = ch.pubkeys.map(parsePt);
+      let X = G1.ZERO;
+      for (const P of pubkeys) X = X.add(P);
+      let prog = chainProg.get(dealId);
+      if (!prog) { prog = new Map(); chainProg.set(dealId, prog); }
+      const initial = zk.initialDeck(zk.deckPoints());
+      for (let i = 0; i < ch.decks.length; i++) {
+        if (prog.has(i) || !ch.proofs[i] || !ch.decks[i]) continue;
+        const inDeck = i === 0 ? initial : ch.decks[i - 1].map(parseCt);
+        const outDeck = ch.decks[i].map(parseCt);
+        const prf = zk.shuffleProofFromWire(ch.proofs[i], parsePt);
+        if (!zk.verifyShuffle(`SPZK:${dealId}:shuffle:${i}`, inDeck, outDeck, X, prf)) return; // final pass will re-check & refuse
+        prog.set(i, stageSig(ch, i, X));
+      }
+    } catch (_) { /* best-effort — the authoritative pass is verifyChain */ }
+    finally { preverifyBusy = false; }
   }
 
   /// Fetch the full shuffle transcript and verify EVERY stage's Wikström proof
@@ -170,12 +216,21 @@ export function startZkAgent(sdk, getTableId) {
         console.error("[zk-agent] chain does NOT contain my own shuffle output — refusing");
         return cacheBad(dealId);
       }
+      const prog = chainProg.get(dealId);
       for (let i = 0; i < ch.k; i++) {
+        // skip the MSM only when the pre-verified stage is byte-identical
+        // (same in/out decks, same proof, same aggregate) to what's here now
+        const cached = prog && prog.get(i);
+        if (cached) {
+          const sig = stageSig(ch, i, X);
+          if (cached.inH === sig.inH && cached.outH === sig.outH && cached.prfH === sig.prfH && cached.aggH === sig.aggH) continue;
+        }
         if (!zk.verifyShuffle(`SPZK:${dealId}:shuffle:${i}`, decks[i], decks[i + 1], X, proofs[i])) {
           console.error(`[zk-agent] shuffle proof ${i} FAILED verification — refusing`);
           return cacheBad(dealId);
         }
       }
+      chainProg.delete(dealId);
       const hash = zk.shuffleTranscriptHash(`SPZKSH:tr:${dealId}`, proofs.map((p, i) => ({ deck: decks[i + 1], proof: p })));
       // expose the VERIFIED participant count and seat map so the share gate can
       // use them instead of the coordinator-supplied task.k / task.mySeat: both k
@@ -292,6 +347,12 @@ export function startZkAgent(sdk, getTableId) {
     const signature = await sign(t, dealId);
     const task = await post("/zk/task", { tableId: t, dealId, signature });
     if (task.observer || task.phase === "none" || task.participant === undefined) return;
+
+    // while OTHERS shuffle, verify the posted stages in the background so the
+    // full-chain check is (mostly) done before shares are requested
+    if ((task.phase === "shuffle" || task.phase === "holeshares") && task.do !== "shuffle" && task.do !== "shuffleproof") {
+      preverifyChain(t, dealId, signature).catch(() => {});
+    }
 
     if (task.do === "key") {
       const sec = secretFor(t, dealId, task.domain);
@@ -467,11 +528,11 @@ export function startZkAgent(sdk, getTableId) {
     } finally { running = false; }
     // Accusation watch runs on the CHAIN, not the bot relay, every ~3.5s — the
     // 45s rescue window leaves plenty of margin even with a couple of misses.
-    if (++ticks % 5 === 0 && sdk.address) {
+    if (++ticks % 10 === 0 && sdk.address) {
       const t = Number(getTableId());
       if (Number.isFinite(t)) selfRescue(t).catch((e) => console.warn("[zk-agent] rescue check:", e.message || e));
     }
-  }, 700);
+  }, 350);
 
   return { stop() { stopped = true; clearInterval(timer); } };
 }
