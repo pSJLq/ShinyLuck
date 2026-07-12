@@ -160,11 +160,16 @@ async function main() {
   const zkd = new ethers.Contract(m.addresses.zkTableDealer, loadAbi("ZkTableDealer"), p);
   const wal = (name) => new ethers.Wallet(ethers.keccak256(ethers.solidityPacked(["bytes32", "string"], [master, name])), p);
 
-  // 2 players = arena-b-bot-0/1; top them up from other arena-b leftovers
+  // 2 players = arena-b-bot-0/1; top them up from other arena-b leftovers.
+  // A bot already seated (or with the buy-in banked) only needs act gas.
   const players = [wal("arena-b-bot-0"), wal("arena-b-bot-1")];
-  const NEED = ethers.parseEther("0.62"); // 0.4 buy-in + acts/deposit gas
+  const ACT_GAS = ethers.parseEther("0.15");
   const donors = Array.from({ length: 16 }, (_, i) => wal(`arena-b-bot-${i + 2}`));
   for (const pl of players) {
+    const seated = Number(await room.seatOf(TABLE, pl.address)) !== 255;
+    const banked = await room.balance(pl.address);
+    const buyInDue = seated ? 0n : (banked >= ethers.parseEther("0.4") ? 0n : ethers.parseEther("0.4") - banked);
+    const NEED = ACT_GAS + buyInDue + (buyInDue > 0n ? ethers.parseEther("0.07") : 0n);
     let bal = await p.getBalance(pl.address);
     while (bal < NEED && donors.length) {
       const d = donors.shift();
@@ -193,6 +198,10 @@ async function main() {
         const st = await room.getSeat(TABLE, s);
         if (!st.occupied) { await (await room.connect(pl).sitDown(TABLE, s, buyIn)).wait(); seat = s; break; }
       }
+    } else if ((await room.getSeat(TABLE, seat)).sittingOut) {
+      // a previous interrupted run got struck into sit-out — come back
+      await (await room.connect(pl).setSitOut(TABLE, false)).wait();
+      console.log(`[sit] ${pl.address.slice(0, 8)} was sitting out — back in`);
     }
     console.log(`[sit] ${pl.address.slice(0, 8)} seat ${seat} buyIn ${ethers.formatEther(buyIn)}`);
     const b = new Bot(zk, G1, pl, room, zkd);

@@ -99,12 +99,12 @@ function SideRail() {
       </div>
       <div className="pfwidget" data-anno="pf">
         <div className="pfhead">
-          <span className="ttl">{I.shield} provably fair · commit-reveal</span>
+          <span className="ttl">{I.shield} provably fair · zkShuffle</span>
           <span className="zkbadge" style={{ padding: "3px 8px" }}><span className="chk">{I.check}</span>Verify</span>
         </div>
         <div className="commit">
-          <div><span className="lab">commit</span> 0x8af3c1d9…e7b2d21c</div>
-          <div style={{ marginTop: 4 }}><span className="lab">deck</span> sealed pre-deal · reveal post-hand</div>
+          <div><span className="lab">deal</span> #8af3c1d9e7b2…</div>
+          <div style={{ marginTop: 4 }}><span className="lab">cards</span> player-encrypted · every reveal proven</div>
         </div>
       </div>
     </aside>

@@ -1069,7 +1069,9 @@ function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose })
       </div>
       <div className="railbody" ref={bodyRef}>
         {tab === "chat" && (msgs.length === 0
-          ? <div className="chatline dealer">Welcome — live on Somnia. Provably-fair commit-reveal dealing.</div>
+          ? <div className="chatline dealer">{SP.sdk.zkLayer
+              ? SPT("Welcome — live on Somnia. zkShuffle dealing: only your browser can see your cards.")
+              : SPT("Welcome — live on Somnia. Provably-fair commit-reveal dealing.")}</div>
           : msgs.map((m) => <div key={m.id} className={"chatline" + (m.dealer ? " dealer" : "")}>{!m.dealer && <span className="who">{m.who}</span>}{m.text}</div>))}
         {tab === "hands" && (hands == null
           ? <div className="chatline dealer">Loading on-chain history…</div>
@@ -1111,12 +1113,19 @@ function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose })
       )}
       <div className="pfwidget">
         <div className="pfhead">
-          <span className="ttl">{ChromeIcons.shield} {SPT("provably fair · commit-reveal")}</span>
+          <span className="ttl">{ChromeIcons.shield} {SPT(SP.sdk.zkLayer ? "provably fair · zkShuffle" : "provably fair · commit-reveal")}</span>
         </div>
-        <div className="commit">
-          <div><span className="lab">commit</span> {commit ? shh(commit.seedHash) : "— waiting for a hand —"}</div>
-          <div style={{ marginTop: 4 }}><span className="lab">deck</span> {commit && commit.revealed ? "revealed & verified on-chain ✓" : "sealed pre-deal · reveal post-hand"}</div>
-        </div>
+        {SP.sdk.zkLayer ? (
+          <div className="commit">
+            <div><span className="lab">deal</span> {commit && commit.dealId ? "#" + BigInt(commit.dealId).toString(16).slice(0, 14) + "…" : "— waiting for a hand —"}</div>
+            <div style={{ marginTop: 4 }}><span className="lab">cards</span> {commit && commit.revealed ? "showdown proofs verified on-chain ✓" : "player-encrypted · every reveal proven"}</div>
+          </div>
+        ) : (
+          <div className="commit">
+            <div><span className="lab">commit</span> {commit ? shh(commit.seedHash) : "— waiting for a hand —"}</div>
+            <div style={{ marginTop: 4 }}><span className="lab">deck</span> {commit && commit.revealed ? "revealed & verified on-chain ✓" : "sealed pre-deal · reveal post-hand"}</div>
+          </div>
+        )}
       </div>
     </aside>
   );

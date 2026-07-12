@@ -19,7 +19,9 @@
         <div class="lupd">How ShinyPoker makes the deal impossible to rig — and independently verifiable by anyone. Written straight, including what we don’t yet do.</div>
       </div>
 
-      <div class="callout"><b>The short version.</b> Before every hand a sealed commitment to the deck is posted on-chain, and the shuffle is locked to a future block hash that no one can predict. After the hand the seed is revealed and the entire 52-card deck is re-derived and verified on-chain. No one can stack the deck or change a card, and anyone can re-check any hand. Card secrecy during play is handled by a dealer service in this v1 — see §4 for exactly what it can and cannot do.</div>
+      <div class="callout" style="border-color:rgba(217,171,74,0.45)"><b>Update — live tables now run zkShuffle v2.</b> Cash tables and tournaments have moved to full mental poker: the deck is shuffled and encrypted by the players’ own browsers, every shuffle is zk-proven, and your hole cards are decrypted only on your machine — no dealer service ever sees a card. Watch the protocol run in real time in the <a href="zk-lab">zk Lab</a>. The commit-reveal scheme below powered v1 and is kept documented here.</div>
+
+      <div class="callout"><b>The short version (v1).</b> Before every hand a sealed commitment to the deck is posted on-chain, and the shuffle is locked to a future block hash that no one can predict. After the hand the seed is revealed and the entire 52-card deck is re-derived and verified on-chain. No one can stack the deck or change a card, and anyone can re-check any hand. Card secrecy during play is handled by a dealer service in this v1 — see §4 for exactly what it can and cannot do.</div>
 
       <h2>1. What "maximally on-chain" means here</h2>
       <p>On ShinyPoker, the things that decide who wins money live on-chain (Somnia testnet today): your escrow balance, buy-ins, blinds and antes, every betting action (fold / check / call / bet / raise / all-in), the main pot and side-pots, rake, payouts, tournament registration and prize pools. Somnia's high throughput and sub-second finality let all of this happen without the table feeling slow.</p>
