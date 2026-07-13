@@ -127,6 +127,7 @@ function LiveTable() {
   const sdTimerRef = useRef(null);
   const potFlyRef = useRef(null);
   const sdWinRef = useRef(null);
+  const boardsRef = useRef({}); // dealId -> last non-empty board (combo display survives the post-settle board clear)
   const holeRetryRef = useRef(null);
   const gotHolesRef = useRef({}); // dealId -> true once holes landed (retry-timer guard)
   const dealIdRef = useRef("0");
@@ -489,8 +490,15 @@ function LiveTable() {
   async function connect() {
     try {
       const a = await SP.sdk.connect(); setAddr(a); setConnected(true); refreshBal(); flash("Connected ✓");
-      // brand-new email wallets start empty — guide funding so they can play
-      try { if ((await SP.sdk.walletBalance()) < SP.parseEther("0.02")) setModal({ type: "fund" }); } catch {}
+      // brand-new email wallets start empty — drip starter gas automatically,
+      // and only fall back to the funding guide if the faucet couldn't help
+      try {
+        if ((await SP.sdk.walletBalance()) < SP.parseEther("0.02")) {
+          const dripped = await SP.sdk.requestStarterGas();
+          if (dripped) { flash(window.__SPLANG === "ru" ? "Стартовый газ зачислен ✓" : "Starter gas sent ✓"); refreshBal(); }
+          if ((await SP.sdk.walletBalance()) < SP.parseEther("0.02")) setModal({ type: "fund" });
+        }
+      } catch {}
     }
     catch (e) { if (e && e.message !== "cancelled") flash(e.message || "connect failed", 5000); }
   }
@@ -516,6 +524,7 @@ function LiveTable() {
     setMovedTo(null); setModal(null);
     moveRef.current = false; wasSeatedHereRef.current = false;
     gotHolesRef.current = {};
+    boardsRef.current = {};
     prevRef.current = { handId: 0, boardLen: 0, inProgress: false, stacks: {} };
     [dealTimerRef, winTimerRef, sdTimerRef, potFlyRef, holeRetryRef].forEach((r) => clearTimeout(r.current));
     try { history.replaceState(null, "", "table?t=" + tid); } catch {}
@@ -528,6 +537,20 @@ function LiveTable() {
   const maxSeats = cfg.maxSeats;
   const board = snap.board.map(SP.intToCardStr);
   const dealKey = String(hand.dealId);
+  // freeze the last non-empty board per deal: after settle the live board
+  // empties while revealed cards + the winner banner are still on screen —
+  // recomputing combos against an empty board briefly showed nonsense
+  // ("High Card" right after "Two Pair" won)
+  if (snap.board.length) boardsRef.current = { [dealKey]: snap.board };
+  const sdBoard = snap.board.length ? snap.board : (boardsRef.current[dealKey] || snap.board);
+  // the winning combination's exact five cards — the UI highlights them and
+  // dims everything else (board cards and winner holes that play no part)
+  const winUsed = (() => {
+    const wSeat = anim.winnerSeat >= 0 ? anim.winnerSeat : (sdWin && sdWin.dealId === dealKey ? sdWin.seat : -1);
+    if (wSeat < 0 || !reveals[dealKey] || !reveals[dealKey][wSeat]) return null;
+    const ev = SP.handEval(reveals[dealKey][wSeat].concat(sdBoard));
+    return ev && ev.used ? { seat: wSeat, set: new Set(ev.used) } : null;
+  })();
   const myHoleObj = hand.inProgress ? holes[dealKey] : null;
   const myHole = myHoleObj ? myHoleObj.cardsStr : null;
   // combo label only from the flop — preflop "High Card" is pure noise for a
@@ -704,7 +727,8 @@ function LiveTable() {
             <div className="felt">
               <div className="center">
                 {anim.dealing && <span className="zkbadge shuffling"><span className="chk">{ChromeIcons.shield}</span>{SPT("shuffling — commitment sealed on-chain")}</span>}
-                <Board cards={board} deckMode={deck} flipFrom={anim.flipFrom} />
+                <Board cards={board} deckMode={deck} flipFrom={anim.flipFrom}
+                  dim={winUsed ? snap.board.map((c) => !winUsed.set.has(c)) : null} />
                 {hand.inProgress
                   ? <Pot pot={NV(hand.pot)} chips={CHIPS} />
                   : <div className="pot"><div className="potmain"><span className="k">
@@ -717,7 +741,7 @@ function LiveTable() {
                 const settled = anim.winnerSeat >= 0;
                 const wSeat = settled ? anim.winnerSeat : sdWin.seat;
                 const rvW = reveals[dealKey] && reveals[dealKey][wSeat];
-                const comboEn = rvW ? SP.handName(rvW.concat(snap.board)) : (sdWin && sdWin.seat === wSeat ? sdWin.comboEn : null);
+                const comboEn = rvW ? SP.handName(rvW.concat(sdBoard)) : (sdWin && sdWin.seat === wSeat ? sdWin.comboEn : null);
                 const iWon = mySeat === wSeat;
                 const played = mySeat >= 0 && !!holes[dealKey]; // I was dealt into this hand
                 return <WinBanner
@@ -774,12 +798,13 @@ function LiveTable() {
                     status: s.allIn ? SPT("all-in") : s.folded ? SPT("folded") : s.sittingOut ? SPT("sitting out") : (hand.inProgress && s.inHand ? "" : SPT("waiting")),
                     folded: s.folded, allin: s.allIn, winner: s.index === anim.winnerSeat || (sdWin && sdWin.seat === s.index),
                     timer: Number(cfg.actionTimeout),
-                    combo: rev ? SPTHand(SP.handName(reveals[dealKey][s.index].concat(snap.board))) : null,
-                    comboCat: rev ? (SP.handEval(reveals[dealKey][s.index].concat(snap.board)) || {}).cat : null,
+                    combo: rev ? SPTHand(SP.handName(reveals[dealKey][s.index].concat(sdBoard))) : null,
+                    comboCat: rev ? (SP.handEval(reveals[dealKey][s.index].concat(sdBoard)) || {}).cat : null,
                     lastAct: actFor(s.index) ? { kind: lastActs[s.index].kind, text: actLabel(lastActs[s.index]) } : null,
                   }}
                   pos={pos} active={active} marker={markerFor(s.index)} deckMode={deck}
-                  revealCards={rev} revealAnim={!reducedMo} />
+                  revealCards={rev} revealAnim={!reducedMo}
+                  revealDim={rev && winUsed && winUsed.seat === s.index ? reveals[dealKey][s.index].map((c) => !winUsed.set.has(c)) : null} />
               );
             })}
 
@@ -798,7 +823,9 @@ function LiveTable() {
                 {hand.inProgress && (seats[mySeat].inHand || seats[mySeat].folded) && (
                   <div className="hole peek">
                     {myHole
-                      ? myHole.map((c, i) => <Card key={dealKey + i} c={c} folded={seats[mySeat].folded} className={heroDealing ? "deal" : ""} style={heroDealing ? { "--dy": "-220px", "--dr": (i ? 4 : -2) + "deg", animationDelay: i * 80 + "ms" } : undefined} />)
+                      ? myHole.map((c, i) => <Card key={dealKey + i} c={c} folded={seats[mySeat].folded}
+                          dim={!!(winUsed && winUsed.seat === mySeat && myHoleObj && !winUsed.set.has(myHoleObj.cards[i]))}
+                          className={heroDealing ? "deal" : ""} style={heroDealing ? { "--dy": "-220px", "--dr": (i ? 4 : -2) + "deg", animationDelay: i * 80 + "ms" } : undefined} />)
                       : (seats[mySeat].inHand ? [<Card key="0" back />, <Card key="1" back />] : null)}
                   </div>
                 )}
@@ -977,22 +1004,35 @@ function LiveTable() {
     const cur = hand.currentBet, committed = me.committedStreet;
     const toCallW = cur > committed ? cur - committed : 0n;
     const minRaiseToW = cur === 0n ? cfg.bigBlind : cur + hand.minRaise;
-    const maxToW = committed + me.stack;
-    const minN = NV(minRaiseToW), maxN = NV(maxToW), call = NV(toCallW), pot = NV(hand.pot);
+    // EFFECTIVE-STACK cap: never offer sizes beyond what any live opponent can
+    // actually match — betting 10k into a lone 7k stack is legal on-chain (the
+    // excess comes back) but reads wrong at the table, so the UI caps at the
+    // biggest opponent's street total instead.
+    const effCapW = seats.reduce((m, s) => {
+      if (s.empty || s.index === mySeat || !s.inHand) return m;
+      const v = s.committedStreet + s.stack;
+      return v > m ? v : m;
+    }, 0n);
+    const myMaxW = committed + me.stack;
+    const maxToW = effCapW > 0n && effCapW < myMaxW ? (effCapW > minRaiseToW ? effCapW : (minRaiseToW < myMaxW ? minRaiseToW : myMaxW)) : myMaxW;
+    // the call NEVER costs more than my stack — an over-shove call is an all-in
+    const callW = toCallW < me.stack ? toCallW : me.stack;
+    const minN = NV(minRaiseToW), maxN = NV(maxToW), call = NV(callW), pot = NV(hand.pot);
     const canCheck = toCallW === 0n;
     const isBet = cur === 0n;
+    const callIsAllIn = !canCheck && toCallW >= me.stack;
     const canRaise = me.stack > toCallW && maxToW > cur && maxN > minN;
     const bv = Math.min(maxN, Math.max(minN, betValue || minN));
     const onFold = () => act(A.FOLD);
-    const onCheckCall = () => act(canCheck ? A.CHECK : A.CALL);
+    const onCheckCall = () => act(canCheck ? A.CHECK : callIsAllIn ? A.ALLIN : A.CALL);
     const onRaise = (v) => act(isBet ? A.BET : A.RAISE, Math.min(maxN, Math.max(minN, v)));
     if (!canRaise) {
       return (
         <div className="actionbar" style={{ justifyContent: "center", gap: 10 }}>
           <div className="actions">
             <button className="abtn fold" disabled={busy} onClick={onFold}><span className="key">F</span><span className="lbl">{SPT("Fold")}</span></button>
-            <button className="abtn call" disabled={busy} onClick={onCheckCall}><span className="key">C</span><span className="lbl">{canCheck ? SPT("Check") : SPT("Call")}</span>{!canCheck && <span className="amt tnum">{call.toFixed(2)}</span>}</button>
-            {me.stack > 0n && !canCheck && <button className="abtn raise" disabled={busy} onClick={() => act(A.ALLIN)}><span className="lbl">{SPT("All-in")}</span><span className="amt tnum">{maxN.toFixed(2)}</span></button>}
+            <button className="abtn call" disabled={busy} onClick={onCheckCall}><span className="key">C</span><span className="lbl">{canCheck ? SPT("Check") : callIsAllIn ? SPT("All-in") : SPT("Call")}</span>{!canCheck && <span className="amt tnum">{call.toFixed(2)}</span>}</button>
+            {me.stack > 0n && !canCheck && !callIsAllIn && <button className="abtn raise" disabled={busy} onClick={() => act(A.ALLIN)}><span className="lbl">{SPT("All-in")}</span><span className="amt tnum">{NV(myMaxW).toFixed(2)}</span></button>}
           </div>
         </div>
       );

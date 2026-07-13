@@ -92,6 +92,10 @@ describe("PokerTournament — buy-in + sponsored pool, custom split", function (
     await expect(tx).to.emit(trn, "Finished").withArgs(id, alice.address, E(120));
     expect(await room.balance(alice.address)).to.equal(E(120)); // prize credited to in-room balance
     expect((await trn.info(id)).status).to.equal(2); // FINISHED
+    // the WINNER's seat is freed too — no ghost seat on the dead table that
+    // "already playing elsewhere" checks would trip over forever
+    expect((await room.getSeat(t, 0)).occupied).to.equal(false);
+    expect(Number(await room.seatOf(t, alice.address))).to.equal(255);
   });
 
   it("host reward: creator's hostBps cut is paid at the finish, prizes come from the net pool", async function () {

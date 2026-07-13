@@ -404,6 +404,20 @@ export class ShinyPoker {
   /// Native STT/SOMI balance of the connected wallet (for funding guidance).
   async walletBalance() { return this.address ? this.read.getBalance(this.address) : 0n; }
 
+  /// Starter-gas faucet (testnet): asks the dealer service to drip a little
+  /// STT into a brand-new empty wallet so the first deposit tx can happen at
+  /// all. One drip per address, server-enforced; resolves true if gas landed.
+  async requestStarterGas() {
+    if (!this.address) return false;
+    try {
+      const r = await fetch(`${this.cfg.dealerApiUrl}/faucet`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: this.address }), signal: AbortSignal.timeout(20000),
+      });
+      return r.ok;
+    } catch (_) { return false; }
+  }
+
   // ---- tournaments ----
   hasTournaments() { return !!this.trnRead; }
 

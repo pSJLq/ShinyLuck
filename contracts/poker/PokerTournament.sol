@@ -501,8 +501,25 @@ contract PokerTournament is Ownable, ReentrancyGuard {
                 emit HostPaid(id, t.creator, hostCut);
             }
             t.status = FINISHED;
+            // stand the winner up too: a seat left occupied on the dead
+            // controlled table is a ghost that "you're already playing
+            // elsewhere" checks trip over forever
+            for (uint256 ti = 0; ti < t.tables.length; ti++) {
+                uint8 ms = uint8(_seatsPerTable(t));
+                for (uint8 sj = 0; sj < ms; sj++) {
+                    if (room.getSeat(t.tables[ti], sj).player == winner) {
+                        room.removeSeat(t.tables[ti], sj);
+                        ti = t.tables.length; // break both loops
+                        break;
+                    }
+                }
+            }
             emit Finished(id, winner, prize);
         }
+    }
+
+    function _seatsPerTable(T storage t) internal view returns (uint8) {
+        return t.seatsPerTable == 0 ? t.maxPlayers : t.seatsPerTable;
     }
 
     /// @notice MTT rebalancing: move a player (with their whole stack) from one

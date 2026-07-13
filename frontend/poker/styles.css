@@ -307,6 +307,8 @@ body {
 .card.back .mk { width: 40%; color: rgba(242,215,138,0.85); }
 
 .card.folded { filter: grayscale(1) brightness(0.5); opacity: 0.5; }
+/* plays no part in the winning combination — the used five stay bright */
+.card.offcombo { filter: grayscale(0.85) brightness(0.55); opacity: 0.8; transition: filter 0.35s ease, opacity 0.35s ease; }
 .card.dealing { animation: dealIn .32s cubic-bezier(.2,.7,.3,1) both; }
 @keyframes dealIn { from { transform: translateY(-16px) scale(.9); opacity: 0 } to { transform: none; opacity: 1 } }
 

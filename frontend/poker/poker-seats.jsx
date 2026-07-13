@@ -52,7 +52,7 @@ function fmtChips(n) {
   return String(n);
 }
 
-function Seat({ player, data, pos, active, marker, deckMode, revealCards, revealAnim }) {
+function Seat({ player, data, pos, active, marker, deckMode, revealCards, revealAnim, revealDim }) {
   const cls = ["seat"];
   if (player.hero) cls.push("hero");
   if (active) cls.push("active");
@@ -87,7 +87,7 @@ function Seat({ player, data, pos, active, marker, deckMode, revealCards, reveal
            top opponent's cards slide off-screen under the HUD */
         <div className={"seatreveal" + (pos.y < 50 ? " below" : "")}>
           <div className="hole" style={{ justifyContent: "center", transform: "scale(0.62)", transformOrigin: pos.y < 50 ? "top center" : "bottom center" }}>
-            {revealCards.map((c, i) => <Card key={i} c={c} className={revealAnim ? "reveal" : ""}
+            {revealCards.map((c, i) => <Card key={i} c={c} dim={!!(revealDim && revealDim[i])} className={revealAnim ? "reveal" : ""}
               style={revealAnim ? { animationDelay: (i * 130) + "ms" } : undefined} />)}
           </div>
           {data.combo && <span className="combobadge" style={comboStyle(data.comboCat)}>{data.combo}</span>}
@@ -111,12 +111,12 @@ function BetChips({ pos, amount, chips, slide, fromSeat }) {
   );
 }
 
-function Board({ cards = [], deckMode, dealing, flipFrom = 99 }) {
+function Board({ cards = [], deckMode, dealing, flipFrom = 99, dim }) {
   const slots = [];
   for (let i = 0; i < 5; i++) {
     if (cards[i]) {
       const isNew = i >= flipFrom;
-      slots.push(<Card key={i} c={cards[i]} className={isNew ? "flip" : ""}
+      slots.push(<Card key={i} c={cards[i]} dim={!!(dim && dim[i])} className={isNew ? "flip" : ""}
         style={isNew ? { animationDelay: ((i - flipFrom) * 80) + "ms" } : undefined} />);
     } else {
       slots.push(<div key={i} className="slot empty" />);

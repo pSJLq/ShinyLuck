@@ -477,7 +477,7 @@ async function main() {
 
   // --- hole-card API: a player proves wallet ownership, gets only their cards.
   //     In zk mode the same server also relays the mental-poker protocol.
-  startCardServer(room, state, { zkState, ZK_MODE });
+  startCardServer(room, state, { zkState, ZK_MODE, wallet, provider });
 
   // --- snapshot cache: one chain read per table serves every watcher over HTTP.
   //     Card views (board etc.) come from whichever dealer the room runs on —
@@ -706,6 +706,9 @@ function startCardServer(room, state, zkCtx = {}) {
   // burning signature checks and BN254 math. NAT-friendly: several players
   // behind one IP still fit. Buckets are pruned so the map can't grow forever.
   const BUCKETS = new Map(); // ip -> { zk, chat, get } tokens + last refill
+  // starter-gas faucet bookkeeping: once per address, survives restarts
+  const FAUCET = { file: path.join(__dirname, "..", "deployments", "faucet-given.json"), given: new Set(), busy: new Set() };
+  try { for (const a of JSON.parse(fs.readFileSync(FAUCET.file, "utf8"))) FAUCET.given.add(a); } catch (_) {}
   const LIMITS = {
     // sized for ~10-15 players sharing one NAT IP (a real client ≈ 4 zk rps,
     // ~8 during pre-deal overlap, + ~8 get rps); a flood is 100-1000× that and
@@ -841,6 +844,40 @@ function startCardServer(room, state, zkCtx = {}) {
       const list = (CHATS.get(t) || []).filter((m) => m.id > since);
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ messages: list }));
+    }
+    // Starter-gas faucet (testnet): a brand-new Privy wallet holds zero STT and
+    // can't even send its first deposit tx. One small drip per address, only
+    // to near-empty wallets, only while the operator wallet keeps a healthy
+    // reserve. Chat-tier rate limit per IP; disable with FAUCET=0.
+    if (req.method === "POST" && req.url.startsWith("/faucet")) {
+      if (!allow(req, "chat")) return tooMany(res);
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", async () => {
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        try {
+          if (process.env.FAUCET === "0" || !zkCtx.wallet) throw new Error("faucet disabled");
+          const addr = ethers.getAddress(JSON.parse(body || "{}").address || "");
+          const key = addr.toLowerCase();
+          if (FAUCET.given.has(key) || FAUCET.busy.has(key)) throw new Error("already funded");
+          if ((await zkCtx.provider.getBalance(addr)) >= ethers.parseEther("0.01")) throw new Error("wallet not empty");
+          if ((await zkCtx.provider.getBalance(zkCtx.wallet.address)) < ethers.parseEther("5")) throw new Error("faucet reserve low");
+          FAUCET.busy.add(key);
+          try {
+            await (await zkCtx.wallet.sendTransaction({ to: addr, value: ethers.parseEther("0.05") })).wait();
+            FAUCET.given.add(key);
+            try { fs.writeFileSync(FAUCET.file, JSON.stringify([...FAUCET.given])); } catch (_) {}
+            console.log(`[poker-bot] faucet: 0.05 STT → ${addr.slice(0, 10)}…`);
+          } finally { FAUCET.busy.delete(key); }
+          res.writeHead(200);
+          res.end(JSON.stringify({ ok: true, amount: "0.05" }));
+        } catch (e) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: e.message || "faucet failed" }));
+        }
+      });
+      return;
     }
     if (req.method === "POST" && req.url.startsWith("/chat")) {
       if (!allow(req, "chat")) return tooMany(res);

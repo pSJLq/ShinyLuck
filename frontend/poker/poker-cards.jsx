@@ -17,7 +17,7 @@ function Suit({ s, size }) {
 }
 
 /* card string like "As", "Kh", "Td", "9c"  — or {back:true} */
-function Card({ c, back, folded, dealing, className, style, delay }) {
+function Card({ c, back, folded, dealing, dim, className, style, delay }) {
   if (back || !c) {
     return (
       <div className={"card back " + (className || "")} style={style}>
@@ -30,6 +30,7 @@ function Card({ c, back, folded, dealing, className, style, delay }) {
   const cls = ["card", "s-" + SUIT_NAME[suit]];
   if (folded) cls.push("folded");
   if (dealing) cls.push("dealing");
+  if (dim) cls.push("offcombo"); // plays no part in the winning combination
   if (className) cls.push(className);
   const st = Object.assign({}, style);
   if (dealing && delay != null) st.animationDelay = delay + "ms";
@@ -263,8 +264,14 @@ const SP_RU_HIGH = ["двойки", "тройки", "четвёрки", "пят�
 const SP_RU_PL = ["двоек", "троек", "четвёрок", "пятёрок", "шестёрок", "семёрок", "восьмёрок", "девяток", "десяток", "вальтов", "дам", "королей", "тузов"];
 const spRuHigh = (w) => SP_RU_HIGH[SP_EN_RANKS.indexOf(w)] || w;
 const spRuPl = (w) => SP_RU_PL[SP_EN_PLURAL.indexOf(w)] || w;
+const SP_RU_TIER = {
+  "High Card": "Старшая карта", "Pair": "Пара", "Two Pair": "Две пары", "Three of a Kind": "Тройка",
+  "Straight": "Стрит", "Flush": "Флеш", "Full House": "Фулл-хаус", "Four of a Kind": "Каре",
+  "Straight Flush": "Стрит-флеш", "Royal Flush": "Флеш-рояль",
+};
 window.SPTHand = (name) => {
   if (!name || window.__SPLANG === "en") return name;
+  if (SP_RU_TIER[name]) return SP_RU_TIER[name]; // plain tier names (current handName output)
   let m;
   if (name === "Royal Flush") return "Флеш-рояль";
   if ((m = name.match(/^Straight Flush, (\w+) high$/))) return "Стрит-флеш до " + spRuHigh(m[1]);
