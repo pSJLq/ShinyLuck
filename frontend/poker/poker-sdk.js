@@ -134,12 +134,16 @@ export class ShinyPoker {
   }
 
   // ---- wallet ----
-  /// Open the connect chooser (email/Privy primary; injected wallets in beta),
-  /// or pass a method to skip it.
+  /// Connect the wallet. The product is built entirely on Privy (email →
+  /// embedded Somnia wallet, headless, shared with the ShinyLuck casino), so
+  /// there is no wallet chooser: we go straight to Privy. Skipping the extra
+  /// chooser modal also fixed mobile, where its overlay swallowed the tap that
+  /// should have opened the Privy login sheet. `connectInjected` is kept for a
+  /// possible future re-enable but is no longer reachable from the UI.
   async connect(method) {
     if (this.address) return this.address;
-    if (!method) method = await this._chooseWallet();
-    return method === "privy" ? this.connectPrivy() : this.connectInjected();
+    if (method === "injected") return this.connectInjected();
+    return this.connectPrivy();
   }
 
   /// Email login → embedded Somnia wallet (HEADLESS — no popup for txs or
@@ -182,7 +186,7 @@ export class ShinyPoker {
     // cold load can take well over the old 8s, which surfaced as a bogus
     // "Privy timeout" when users clicked Connect right after page load.
     return new Promise((resolve, reject) => {
-      const finish = (ok) => { clearTimeout(t); clearInterval(iv); document.removeEventListener("shinyluck:auth-state", on); ok ? resolve() : reject(new Error("Email login is still loading — give it a few seconds and try again (or use MetaMask)."));
+      const finish = (ok) => { clearTimeout(t); clearInterval(iv); document.removeEventListener("shinyluck:auth-state", on); ok ? resolve() : reject(new Error("Email login is still loading — give it a few seconds and try again."));
       };
       const t = setTimeout(() => finish(false), ms);
       const check = () => { const a = window.ShinyLuckAuth; return !!(a && pred({ ready: a.ready, authenticated: a.authenticated, address: a.address })); };
@@ -387,15 +391,20 @@ export class ShinyPoker {
     const n = await this.tableCount();
     const checks = await Promise.all(Array.from({ length: n }, (_, t) =>
       t === excludeTable ? Promise.resolve(255) : this.roomRead.seatOf(t, this.address).then(Number).catch(() => 255)));
+    const currentTrn = (this.cfg.pokerTournament || "").toLowerCase();
     for (let t = 0; t < n; t++) {
       if (checks[t] === 255) continue;
       try {
         const ctl = await this.roomRead.tableController(t);
         if (ctl !== ethers.ZeroAddress) {
+          // A table controlled by ANY tournament contract other than the one
+          // this frontend runs against is from a previous deploy — its seats
+          // are ghosts (that event can never resume here), never a live game.
+          if (ctl.toLowerCase() !== currentTrn) continue;
           const trn = await this.tournamentOfTable(t);
           if (!trn || trn.status >= 2) continue; // finished/orphaned event — ghost seat, not a live game
         }
-      } catch {}
+      } catch { continue; } // unreadable controller → don't let it wedge cash play
       return t;
     }
     return -1;

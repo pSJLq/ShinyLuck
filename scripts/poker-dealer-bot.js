@@ -178,9 +178,11 @@ async function startTournamentIndexer(provider, trn, fromBlock) {
 
 const CHATS = new Map(); // tableId -> [{ id, who, text, dealer, ts }]
 let chatSeq = 1;
-function pushChat(tableId, who, text, dealer = false) {
+function pushChat(tableId, who, text, dealer = false, addr = null) {
   const list = CHATS.get(Number(tableId)) || [];
-  list.push({ id: chatSeq++, who, text: String(text).slice(0, 240), dealer, ts: Date.now() });
+  // `addr` (full player address) lets the frontend show the live on-chain
+  // nickname; `who` stays as a shortened-address fallback for old clients.
+  list.push({ id: chatSeq++, who, addr, text: String(text).slice(0, 240), dealer, ts: Date.now() });
   while (list.length > 60) list.shift();
   CHATS.set(Number(tableId), list);
 }
@@ -857,7 +859,9 @@ function startCardServer(room, state, zkCtx = {}) {
         res.setHeader("Content-Type", "application/json");
         res.setHeader("Access-Control-Allow-Origin", "*");
         try {
-          if (process.env.FAUCET === "0" || !zkCtx.wallet) throw new Error("faucet disabled");
+          // OFF by default — a testnet-only convenience, never wanted on
+          // mainnet (players bring their own gas). Enable with FAUCET=1.
+          if (process.env.FAUCET !== "1" || !zkCtx.wallet) throw new Error("faucet disabled");
           const addr = ethers.getAddress(JSON.parse(body || "{}").address || "");
           const key = addr.toLowerCase();
           if (FAUCET.given.has(key) || FAUCET.busy.has(key)) throw new Error("already funded");
@@ -898,7 +902,7 @@ function startCardServer(room, state, zkCtx = {}) {
           const seatIdx = Number(await room.seatOf(tableId, effective));
           if (seatIdx === 255) throw new Error("not seated at this table");
           const who = effective.slice(0, 6) + "…" + effective.slice(-4);
-          pushChat(tableId, who, String(text).trim());
+          pushChat(tableId, who, String(text).trim(), false, effective);
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true }));
         } catch (e) {

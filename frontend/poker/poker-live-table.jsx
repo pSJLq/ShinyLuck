@@ -490,15 +490,8 @@ function LiveTable() {
   async function connect() {
     try {
       const a = await SP.sdk.connect(); setAddr(a); setConnected(true); refreshBal(); flash("Connected ✓");
-      // brand-new email wallets start empty — drip starter gas automatically,
-      // and only fall back to the funding guide if the faucet couldn't help
-      try {
-        if ((await SP.sdk.walletBalance()) < SP.parseEther("0.02")) {
-          const dripped = await SP.sdk.requestStarterGas();
-          if (dripped) { flash(window.__SPLANG === "ru" ? "Стартовый газ зачислен ✓" : "Starter gas sent ✓"); refreshBal(); }
-          if ((await SP.sdk.walletBalance()) < SP.parseEther("0.02")) setModal({ type: "fund" });
-        }
-      } catch {}
+      // brand-new email wallets start empty — guide funding so they can play
+      try { if ((await SP.sdk.walletBalance()) < SP.parseEther("0.02")) setModal({ type: "fund" }); } catch {}
     }
     catch (e) { if (e && e.message !== "cancelled") flash(e.message || "connect failed", 5000); }
   }
@@ -644,15 +637,12 @@ function LiveTable() {
           <div className="spacer" />
           {connected ? (
             <>
-              <button className="metapill" style={{ cursor: "pointer" }} onClick={() => setModal({ type: "cashier" })}>
-                <span className="k">{SPT("Cashier")}</span><b>{bal.toFixed(2)}</b>
+              {/* one wallet chip = balance + nickname; click opens the cashier
+                  (the separate Cashier button + the "session" pill were noise —
+                  Privy is always headless, so there's no session to toggle) */}
+              <button className="wallet" style={{ cursor: "pointer", font: "inherit", color: "inherit" }} title={SPT("Cashier")} onClick={() => setModal({ type: "cashier" })}>
+                <BraceLogo size={16} /><span className="bal tnum">{bal.toFixed(1)}</span><span className="net">{nameOf(addr)}</span>
               </button>
-              {mySeat >= 0 && sessionOn && (
-                <div className="session" title="Table session active — acting without a wallet popup">
-                  <span className="pulse" /><span className="lock">{ChromeIcons.lock}</span><span>session</span>
-                </div>
-              )}
-              <div className="wallet"><BraceLogo size={16} /><span className="bal tnum">{bal.toFixed(1)}</span><span className="net">{short(addr)}</span></div>
             </>
           ) : (
             <button className="metapill" style={{ cursor: "pointer", color: "var(--accent-soft)", borderColor: "var(--accent-32)", background: "var(--accent-12)" }} onClick={connect}>{SPT("Connect Wallet")}</button>
@@ -674,15 +664,7 @@ function LiveTable() {
         {showSettings && (
           <SettingsPanel t={prefs} lang={lang} setLang={setLang}
             set={setPref} dir={theme} setDir={setTheme} onClose={() => setShowSettings(false)}
-            session={{
-              active: sessionOn, busy,
-              label: SP.sdk.backend === "privy" ? "Email wallet · headless (no popups)" : null,
-              cap: mySeat >= 0 ? (CHIPS ? fmtChips(NV(seats[mySeat].stack)) : NV(seats[mySeat].stack).toFixed(2)) + " " + (CHIPS ? "chips" : SP.NETWORK.currency.symbol) : null,
-              onActivate: SP.sdk.backend === "injected" ? () => tx("Activate session", () => SP.sdk.activateSession()).then(() => setSessionOn(true)) : null,
-              onRevoke: SP.sdk.backend === "privy"
-                ? () => { SP.sdk.signOut().finally(() => location.reload()); }
-                : () => tx("Revoke session", () => SP.sdk.revokeSession()).then(() => setSessionOn(false)),
-            }} />
+            session={null} /* Privy-only → always headless; no session key to manage */ />
         )}
 
         {trn && (() => {
@@ -862,7 +844,7 @@ function LiveTable() {
           <button className="railfab" title={SPT("chat")} onClick={() => setRailOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 12a8 8 0 0 1-8 8H4l2.2-2.6A8 8 0 1 1 21 12z"/></svg>
           </button>
-          <LiveSideRail key={tableId} tableId={tableId} snap={snap} connected={connected} mySeat={mySeat} mobileOpen={railOpen} onClose={() => setRailOpen(false)} />
+          <LiveSideRail key={tableId} tableId={tableId} snap={snap} connected={connected} mySeat={mySeat} mobileOpen={railOpen} onClose={() => setRailOpen(false)} nameOf={nameOf} />
         </div>
 
         {renderBar()}
@@ -1048,7 +1030,7 @@ function LiveTable() {
 }
 
 /* live side rail: real chat (via dealer bot), on-chain hand history, private notes */
-function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose }) {
+function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose, nameOf }) {
   const [tab, setTab] = useState("chat");
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
@@ -1112,12 +1094,12 @@ function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose })
           ? <div className="chatline dealer">{SP.sdk.zkLayer
               ? SPT("Welcome — live on Somnia. zkShuffle dealing: only your browser can see your cards.")
               : SPT("Welcome — live on Somnia. Provably-fair commit-reveal dealing.")}</div>
-          : msgs.map((m) => <div key={m.id} className={"chatline" + (m.dealer ? " dealer" : "")}>{!m.dealer && <span className="who">{m.who}</span>}{m.text}</div>))}
+          : msgs.map((m) => <div key={m.id} className={"chatline" + (m.dealer ? " dealer" : "")}>{!m.dealer && <span className="who">{(m.addr && nameOf ? nameOf(m.addr) : m.who)}</span>}{m.text}</div>))}
         {tab === "hands" && (hands == null
           ? <div className="chatline dealer">Loading on-chain history…</div>
           : hands.length === 0 ? <div className="chatline dealer">No settled hands yet at this table.</div>
           : hands.map((h2, i) => {
-              const who = snap && snap.seats[h2.seat] && !snap.seats[h2.seat].empty ? short(snap.seats[h2.seat].player) : "seat " + h2.seat;
+              const who = snap && snap.seats[h2.seat] && !snap.seats[h2.seat].empty ? (nameOf ? nameOf(snap.seats[h2.seat].player) : short(snap.seats[h2.seat].player)) : "seat " + h2.seat;
               return <div key={i} className="hhrow"><span className="st">#{h2.handId}</span><span className="act">{who} won <b className="tnum">{CHIPS ? Number(h2.amount) : Number(SP.fmt(h2.amount, 6))}</b> · {h2.kind}</span></div>;
             }))}
         {tab === "notes" && (
@@ -1132,7 +1114,7 @@ function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose })
                       <span key={c} onClick={() => saveNote(s.player.toLowerCase(), { tag: n.tag === c ? null : c })}
                         style={{ width: 12, height: 12, borderRadius: "50%", background: c, cursor: "pointer", opacity: n.tag === c ? 1 : 0.35, outline: n.tag === c ? "1.5px solid #fff" : "none" }} />
                     ))}
-                    <span style={{ fontFamily: "var(--label)", fontSize: 11.5, color: n.tag || "var(--text-2)" }}>{short(s.player)}</span>
+                    <span style={{ fontFamily: "var(--label)", fontSize: 11.5, color: n.tag || "var(--text-2)" }}>{nameOf ? nameOf(s.player) : short(s.player)}</span>
                   </div>
                   <input placeholder="Add a note…" defaultValue={n.text || ""}
                     onBlur={(e) => saveNote(s.player.toLowerCase(), { text: e.target.value })}

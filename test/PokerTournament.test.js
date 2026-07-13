@@ -60,8 +60,8 @@ describe("PokerTournament — buy-in + sponsored pool, custom split", function (
     await trn.connect(bob).register(id, { value: E(11) });
 
     let info = await trn.info(id);
-    expect(info.pool).to.equal(E(120)); // 100 sponsored + 10 + 10
-    expect(await trn.feeCollected()).to.equal(E(2));
+    expect(info.pool).to.equal(E(110)); // 90% of 100 sponsored (10% fee) + 10 + 10 buy-ins
+    expect(await trn.feeCollected()).to.equal(E(12)); // 10 sponsor fee + 2 buy-in fees
     expect(info.registered).to.equal(2);
 
     // start → controlled table created, both seated with 1000 chips
@@ -89,8 +89,8 @@ describe("PokerTournament — buy-in + sponsored pool, custom split", function (
 
     // report bob's bust → he's 2nd (no payout), alice wins the whole pool
     const tx = await trn.connect(operator).reportBust(id, 0, 1);
-    await expect(tx).to.emit(trn, "Finished").withArgs(id, alice.address, E(120));
-    expect(await room.balance(alice.address)).to.equal(E(120)); // prize credited to in-room balance
+    await expect(tx).to.emit(trn, "Finished").withArgs(id, alice.address, E(110));
+    expect(await room.balance(alice.address)).to.equal(E(110)); // prize credited to in-room balance
     expect((await trn.info(id)).status).to.equal(2); // FINISHED
     // the WINNER's seat is freed too — no ghost seat on the dead table that
     // "already playing elsewhere" checks would trip over forever
@@ -162,14 +162,25 @@ describe("PokerTournament — buy-in + sponsored pool, custom split", function (
     expect((await trn.info(0)).status).to.equal(3); // CANCELLED
   });
 
-  it("free fully-sponsored event: buyIn 0, creator funds the whole prize", async function () {
+  it("free fully-sponsored event: buyIn 0, creator funds the prize, 10% platform fee", async function () {
     const { alice, bob, carol, trn } = await loadFixture(setup);
     await trn.connect(carol).createTournament(tp({ buyIn: 0, fee: 0, payoutBps: [10000] }), { value: E(40) });
     await trn.connect(alice).register(0, { value: 0 }); // free entry
     await trn.connect(bob).register(0, { value: 0 });
     const info = await trn.info(0);
-    expect(info.pool).to.equal(E(40)); // entirely the sponsor's
+    expect(info.pool).to.equal(E(36)); // 90% of the sponsorship — the flat 10% fee applies
+    expect(await trn.feeCollected()).to.equal(E(4)); // 10% platform fee
     expect(info.registered).to.equal(2);
+  });
+
+  it("sponsored cancel: creator gets the FULL sponsorship back and the fee is reversed", async function () {
+    const { owner, carol, trn } = await loadFixture(setup);
+    await trn.connect(carol).createTournament(tp({ buyIn: 0, fee: 0, payoutBps: [10000] }), { value: E(40) });
+    expect(await trn.feeCollected()).to.equal(E(4));
+    const before = await ethers.provider.getBalance(carol.address);
+    await trn.connect(owner).cancel(0); // owner cancels → no gas cost to carol
+    expect((await ethers.provider.getBalance(carol.address)) - before).to.equal(E(40)); // full gross refund
+    expect(await trn.feeCollected()).to.equal(0); // fee reversed — nothing earned on an event that never ran
   });
 
   it("scheduled start: operator must wait for startTime; can start after", async function () {

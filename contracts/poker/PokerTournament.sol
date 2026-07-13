@@ -245,8 +245,14 @@ contract PokerTournament is Ownable, ReentrancyGuard {
         t.startTime = p.startTime;
         t.approvalRequired = p.approvalRequired;
         t.hostBps = p.hostBps;
+        // A creator sponsorship pays the same flat 10% platform fee a buy-in
+        // does: 90% seeds the prize pool, 10% is the house fee. `sponsored`
+        // keeps the GROSS so a cancel (event never ran) refunds it in full and
+        // reverses the fee. Fee is floor(value/10); the pool gets the rest.
+        uint128 sponsorFee = uint128(msg.value / 10);
+        feeCollected += sponsorFee;
         t.sponsored = uint128(msg.value);
-        t.pool = uint128(msg.value);
+        t.pool = uint128(msg.value) - sponsorFee;
         t.status = REGISTERING;
         for (uint256 i = 0; i < p.payoutBps.length; i++) t.payoutBps.push(p.payoutBps[i]);
         emit TournamentCreated(id, msg.sender, p.buyIn, p.fee, uint128(msg.value), p.maxPlayers);
@@ -551,12 +557,15 @@ contract PokerTournament is Ownable, ReentrancyGuard {
         if (msg.sender != t.creator && msg.sender != owner()) revert NotOperator();
         t.status = CANCELLED;
         uint256 each = uint256(t.buyIn) + uint256(t.fee);
-        uint256 feesBack = uint256(t.fee) * t.players.length;
+        // reverse both fee streams the event collected: per-player buy-in fees
+        // AND the sponsorship fee (floor(sponsored/10)) taken at create time
+        uint256 feesBack = uint256(t.fee) * t.players.length + uint256(t.sponsored) / 10;
         if (feeCollected >= feesBack) feeCollected -= feesBack;
+        else feeCollected = 0;
         for (uint256 i = 0; i < t.players.length; i++) {
             if (each > 0) payable(t.players[i]).sendValue(each);
         }
-        if (t.sponsored > 0) payable(t.creator).sendValue(t.sponsored);
+        if (t.sponsored > 0) payable(t.creator).sendValue(t.sponsored); // full gross refund
         t.pool = 0;
         emit Cancelled(id);
     }

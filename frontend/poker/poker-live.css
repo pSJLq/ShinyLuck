@@ -21,7 +21,14 @@
 
 .lt-modalbg { position: fixed; inset: 0; background: rgba(0, 0, 0, .66); display: grid; place-items: center; z-index: 300; }
 .lt-modal { background: rgba(15, 15, 20, .99); border: 1px solid var(--line-2, #3a3a48); border-radius: 16px;
-  padding: 22px; width: min(380px, 92vw); font-family: var(--label, monospace); }
+  padding: 22px; width: min(380px, 92vw); font-family: var(--label, monospace);
+  scrollbar-width: thin; scrollbar-color: var(--line-2, #3a3a48) transparent; }
+/* the default white/system scrollbar on the scrolling create-tournament modal
+   looked jarring against the matte-black chrome — theme it to the gold-line UI */
+.lt-modal::-webkit-scrollbar { width: 9px; }
+.lt-modal::-webkit-scrollbar-track { background: transparent; }
+.lt-modal::-webkit-scrollbar-thumb { background: var(--line-2, #3a3a48); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+.lt-modal::-webkit-scrollbar-thumb:hover { background: var(--accent, #d9ab4a); background-clip: padding-box; }
 .lt-modal h3 { margin: 0 0 12px; font-family: var(--mono, 'IBM Plex Mono', monospace); color: var(--text, #e6e6ee); }
 .lt-modal .note { font-size: 12px; color: var(--muted, #9a9aa8); line-height: 1.5; }
 .lt-modal label { display: block; font-size: 12px; color: var(--muted, #9a9aa8); margin: 12px 0 5px; }

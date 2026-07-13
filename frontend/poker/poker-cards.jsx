@@ -153,10 +153,9 @@ const SP_AVATARS = [
 function AvatarIcon({ av, img, name, size, style }) {
   const box = size ? { width: size, height: size, fontSize: Math.round(size * 0.38) } : undefined;
   if (img) {
+    // an uploaded photo shows as-is — no dot overlay on the user's own picture
     return (
-      <div className="avatar deco" style={{ background: `url("${img}") center/cover no-repeat, #15151c`, ...box, ...style }}>
-        <span className="ava-grid" />
-      </div>
+      <div className="avatar deco" style={{ background: `url("${img}") center/cover no-repeat, #15151c`, ...box, ...style }} />
     );
   }
   const id = Number(av) || 0;
@@ -169,7 +168,6 @@ function AvatarIcon({ av, img, name, size, style }) {
       {glyph
         ? <span className="em" style={{ position: "relative", ...(size ? { fontSize: Math.round(size * 0.54) } : {}) }}>{glyph}</span>
         : <span style={{ position: "relative" }}>{(name || "?").replace(/^0x/i, "")[0].toUpperCase()}</span>}
-      <span className="ava-grid" />
     </div>
   );
 }

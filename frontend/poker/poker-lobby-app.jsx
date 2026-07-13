@@ -527,9 +527,9 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
         <Seg k="mode" opts={[["buyin", "Buy-in pool"], ["sponsored", "I sponsor it · free entry"]]} />
         {sponsored ? (
           <div style={{ marginTop: 8 }}>
-            <label>Sponsor amount ({sym}) <Hint text="You fund the whole prize pool — entry is free for everyone else." /></label>
+            <label>Sponsor amount ({sym}) <Hint text="You fund the prize pool; entry is free for everyone else. A flat 10% platform fee applies, the same as buy-in events — 90% becomes the prize pool." /></label>
             <input value={f.sponsor} onChange={set("sponsor")} />
-            <p className="note" style={{ marginTop: 4 }}>Free entry · no platform fee — 100% of your sponsorship becomes the prize pool</p>
+            <p className="note" style={{ marginTop: 4 }}>Free entry · prize pool gets 90% · 10% platform fee{parseFloat(f.sponsor) > 0 ? ` — pool ≈ ${(parseFloat(f.sponsor) * 0.9).toFixed(4)} ${sym}` : ""}</p>
           </div>
         ) : (
           <div style={{ marginTop: 8 }}>
