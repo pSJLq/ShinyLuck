@@ -25,6 +25,7 @@ struct RoomSeat {
     bool occupied;
     bool sittingOut;
     uint64 sitInHandId;
+    uint64 sitOutSince; // when sittingOut was set (0 = playing) — idle-forfeit basis
 }
 
 interface IPokerRoomT {
@@ -101,6 +102,12 @@ contract PokerTournament is Ownable, ReentrancyGuard {
     uint256 public count;
     mapping(uint256 => T) internal _t;
     uint256 public feeCollected;
+    // Mental-poker tables can't deal an absent player dead hands (the deal
+    // needs every participant's live key), so an abandoned seat's stack would
+    // freeze and block the event from ever finishing. After this many seconds
+    // of continuous sit-out the operator may forfeit the seat at its current
+    // place; a connected player cancels the countdown any time by sitting in.
+    uint64 public idleForfeitSecs = 300;
 
     event TournamentCreated(uint256 indexed id, address indexed creator, uint128 buyIn, uint128 fee, uint128 sponsored, uint8 maxPlayers);
     event Registered(uint256 indexed id, address indexed player, uint128 pool, uint8 count);
@@ -115,6 +122,7 @@ contract PokerTournament is Ownable, ReentrancyGuard {
     event HostPaid(uint256 indexed id, address indexed host, uint128 amount);
     event Cancelled(uint256 indexed id);
     event PlayerMoved(uint256 indexed id, address indexed player, uint256 fromTable, uint256 toTable);
+    event ForfeitedIdle(uint256 indexed id, address indexed player, uint8 place);
 
     error NotOperator();
     error BadParams();
@@ -130,6 +138,7 @@ contract PokerTournament is Ownable, ReentrancyGuard {
     error NotBusted();
     error NotCreator();
     error NotPending();
+    error NotIdleLongEnough();
 
     constructor(address initialOwner, IPokerRoomT room_) Ownable(initialOwner) {
         room = room_;
@@ -142,6 +151,11 @@ contract PokerTournament is Ownable, ReentrancyGuard {
 
     function setOperator(address op) external onlyOwner {
         operator = op;
+    }
+
+    function setIdleForfeitSecs(uint64 s) external onlyOwner {
+        if (s < 60) revert BadParams(); // never a hair-trigger — players get a real window to reconnect
+        idleForfeitSecs = s;
     }
 
     function setRoom(IPokerRoomT r) external onlyOwner {
@@ -372,6 +386,11 @@ contract PokerTournament is Ownable, ReentrancyGuard {
         t.level += 1;
         uint128 sb;
         uint128 bb;
+        // BLIND CAP: once the big blind covers every chip in play twice, more
+        // levels add nothing — every table is all-in-or-fold long before this.
+        // Uncapped geometric growth overflowed uint128 in abandoned events and
+        // wedged them; all escalation math below saturates at the cap instead.
+        uint256 cap = uint256(t.startStack) * t.players.length * 2;
         if (custom && t.level < t.structure.length) {
             Level storage lv = t.structure[t.level];
             sb = lv.sb; bb = lv.bb; t.curAnte = lv.ante;
@@ -379,15 +398,19 @@ contract PokerTournament is Ownable, ReentrancyGuard {
             // Past the end of the schedule (or geometric mode): keep escalating so
             // an abandoned table can't blind-oscillate forever — someone must bust.
             uint16 g = t.growthBps < 10500 ? 15000 : t.growthBps; // structure events may not set growthBps
-            sb = uint128((uint256(t.curSb) * g) / 10000);
-            bb = uint128((uint256(t.curBb) * g) / 10000);
-            if (bb <= t.curBb) bb = t.curBb + 1; // rounding floor — always move up
-            if (sb <= t.curSb) sb = t.curSb + 1;
-            if (sb > bb) sb = bb;
+            uint256 sb256 = (uint256(t.curSb) * g) / 10000;
+            uint256 bb256 = (uint256(t.curBb) * g) / 10000;
+            if (bb256 <= t.curBb) bb256 = uint256(t.curBb) + 1; // rounding floor — always move up
+            if (sb256 <= t.curSb) sb256 = uint256(t.curSb) + 1;
+            if (bb256 > cap) bb256 = cap;
+            if (sb256 > bb256) sb256 = bb256;
+            sb = uint128(sb256);
+            bb = uint128(bb256);
             if (t.curAnte > 0) {
-                uint128 ante = uint128((uint256(t.curAnte) * g) / 10000);
-                if (ante <= t.curAnte) ante = t.curAnte + 1; // always move up
-                t.curAnte = ante;
+                uint256 ante = (uint256(t.curAnte) * g) / 10000;
+                if (ante <= t.curAnte) ante = uint256(t.curAnte) + 1; // always move up
+                if (ante > cap) ante = cap;
+                t.curAnte = uint128(ante);
             }
         }
         t.curSb = sb;
@@ -407,9 +430,12 @@ contract PokerTournament is Ownable, ReentrancyGuard {
     }
 
     /// @notice True when the next blind level is due right now (off-chain driver helper).
+    ///         Goes quiet once the blinds hit the cap — further levels are no-ops,
+    ///         so the driver shouldn't freeze tables or burn gas for them.
     function dueForLevelUp(uint256 id) external view returns (bool) {
         T storage t = _t[id];
         if (t.status != RUNNING) return false;
+        if (t.structure.length == 0 && uint256(t.curBb) >= uint256(t.startStack) * t.players.length * 2) return false;
         return block.timestamp >= t.startedAt + _timeForNextLevel(t);
     }
 
@@ -427,9 +453,37 @@ contract PokerTournament is Ownable, ReentrancyGuard {
         uint256 tid = t.tables[tableIdx];
         if (room.handInProgress(tid)) revert HandLive();
         RoomSeat memory s = room.getSeat(tid, seat);
-        address player = s.player;
-        if (player == address(0) || !t.registered[player] || t.busted[player] || s.stack != 0) revert NotBusted();
+        if (s.player == address(0) || !t.registered[s.player] || t.busted[s.player] || s.stack != 0) revert NotBusted();
+        _eliminate(t, id, tid, seat, s.player);
+    }
 
+    /// @notice Forfeit a seat whose owner abandoned the event. A mental-poker
+    ///         table cannot deal an absent player dead hands (every deal needs
+    ///         the player's live key), so an abandoned stack never pays blinds,
+    ///         never busts, and would block the event from EVER finishing.
+    ///         After idleForfeitSecs of continuous sit-out the operator may
+    ///         eliminate the seat at its current place (any in-the-money prize
+    ///         for that place is still paid). A connected player cancels the
+    ///         countdown at any moment by sitting back in — the room resets
+    ///         sitOutSince to 0 — so only truly absent seats are forfeitable.
+    function forfeitIdle(uint256 id, uint8 tableIdx, uint8 seat) external onlyOp nonReentrant {
+        T storage t = _t[id];
+        if (t.status != RUNNING) revert NotRunning();
+        if (tableIdx >= t.tables.length) revert BadParams();
+        uint256 tid = t.tables[tableIdx];
+        if (room.handInProgress(tid)) revert HandLive();
+        RoomSeat memory s = room.getSeat(tid, seat);
+        if (s.player == address(0) || !t.registered[s.player] || t.busted[s.player]) revert NotBusted();
+        if (!s.sittingOut || s.sitOutSince == 0 || block.timestamp < uint256(s.sitOutSince) + idleForfeitSecs) {
+            revert NotIdleLongEnough();
+        }
+        emit ForfeitedIdle(id, s.player, t.remaining);
+        _eliminate(t, id, tid, seat, s.player);
+    }
+
+    /// @dev Shared elimination: assign the current place, pay it if ITM, free
+    ///      the seat, and finish the event when one player is left.
+    function _eliminate(T storage t, uint256 id, uint256 tid, uint8 seat, address player) internal {
         uint8 place = t.remaining; // this player finishes here (global place, e.g. 18th of 18)
         t.busted[player] = true;
         t.remaining -= 1;

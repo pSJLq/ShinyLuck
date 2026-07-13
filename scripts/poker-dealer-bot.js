@@ -574,8 +574,20 @@ async function main() {
     } catch (_) {}
 
     if (trn) {
-      const tags = await tickTournaments(trn, room, { freeze });
-      for (const tag of tags) console.log(`[poker-bot] ${tag}`);
+      // Same last-line-of-defence as table ticks: under RPC congestion the
+      // per-seat reads of a multi-tournament pass can balloon past the
+      // watchdog (observed once at 30-bot chaos load: 207s of loop silence).
+      // A timed-out pass just retries next loop — never holds the loop hostage.
+      let trnTimer;
+      const trnTimeout = new Promise((_, rej) => { trnTimer = setTimeout(() => rej(new Error("tournament pass timeout (90s)")), 90_000); });
+      const trnP = tickTournaments(trn, room, { freeze });
+      trnP.catch(() => {});
+      try {
+        const tags = await Promise.race([trnP.finally(() => clearTimeout(trnTimer)), trnTimeout]);
+        for (const tag of tags) console.log(`[poker-bot] ${tag}`);
+      } catch (e) {
+        console.error("[poker-bot] tournaments:", e.message || e);
+      }
     }
     let tableCount;
     try {

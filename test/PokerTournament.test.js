@@ -342,4 +342,74 @@ describe("PokerTournament — buy-in + sponsored pool, custom split", function (
     const bad = [{ sb: 100, bb: 20, ante: 0, durationSecs: 60 }];
     await expect(trn.connect(alice).createTournament(tp({ buyIn: E(1), structure: bad }))).to.be.revertedWithCustomError(trn, "BadParams");
   });
+
+  it("idle forfeit: an abandoned (sat-out) stack can no longer freeze the event — and sitting back in cancels the countdown", async function () {
+    const { operator, alice, bob, carol, room, trn } = await loadFixture(setup);
+    await trn.connect(carol).createTournament(tp({ buyIn: E(10), maxPlayers: 3, payoutBps: [10000] }));
+    for (const pl of [alice, bob, carol]) await trn.connect(pl).register(0, { value: E(10) });
+    await trn.connect(operator).start(0);
+    const t = Number((await trn.info(0)).tableId);
+    const seatOf = async (pl) => Number(await room.seatOf(t, pl.address));
+
+    // bob's tab dies → the zk strike path sits him out (operator = dealer op)
+    await room.connect(operator).sitOutIdle(t, await seatOf(bob));
+    // too early — the reconnect window is his
+    await expect(trn.connect(operator).forfeitIdle(0, 0, await seatOf(bob)))
+      .to.be.revertedWithCustomError(trn, "NotIdleLongEnough");
+
+    // alice also gets struck, but SITS BACK IN — her countdown is cancelled
+    await room.connect(operator).sitOutIdle(t, await seatOf(alice));
+    await time.increase(200);
+    await room.connect(alice).setSitOut(t, false);
+    await time.increase(200); // bob is now 400s idle, alice only "in"
+    await expect(trn.connect(operator).forfeitIdle(0, 0, await seatOf(alice)))
+      .to.be.revertedWithCustomError(trn, "NotIdleLongEnough");
+
+    // bob's window elapsed → forfeited at his CURRENT place (3rd of 3)
+    await expect(trn.connect(operator).forfeitIdle(0, 0, await seatOf(bob)))
+      .to.emit(trn, "ForfeitedIdle").withArgs(0, bob.address, 3);
+    expect(Number((await trn.info(0)).remaining)).to.equal(2);
+    // same seat can't be forfeited twice
+    await expect(trn.connect(operator).forfeitIdle(0, 0, 1)).to.be.revertedWithCustomError(trn, "NotBusted");
+
+    // carol abandons too → her forfeit ENDS the event, alice takes the pool
+    await room.connect(operator).sitOutIdle(t, await seatOf(carol));
+    await time.increase(301);
+    const tx = trn.connect(operator).forfeitIdle(0, 0, await seatOf(carol));
+    await expect(tx).to.emit(trn, "Finished").withArgs(0, alice.address, E(30));
+    expect(await room.balance(alice.address)).to.equal(E(30));
+    expect((await trn.info(0)).status).to.equal(2); // FINISHED — no eternal stall
+  });
+
+  it("idle forfeit: owner tunes the window, hair-trigger values are rejected", async function () {
+    const { owner, trn } = await loadFixture(setup);
+    await expect(trn.connect(owner).setIdleForfeitSecs(30)).to.be.revertedWithCustomError(trn, "BadParams");
+    await trn.connect(owner).setIdleForfeitSecs(120);
+    expect(Number(await trn.idleForfeitSecs())).to.equal(120);
+  });
+
+  it("blind cap: geometric escalation saturates at 2× the chips in play and dueForLevelUp goes quiet", async function () {
+    const { operator, alice, bob, room, trn } = await loadFixture(setup);
+    // 2 players × 1000 chips → cap = 4000; ×2 growth from 10/20
+    await trn.connect(alice).createTournament(tp({ buyIn: E(1) }));
+    await trn.connect(alice).register(0, { value: E(1) });
+    await trn.connect(bob).register(0, { value: E(1) });
+    await trn.connect(operator).start(0);
+    const t = Number((await trn.info(0)).tableId);
+
+    for (let i = 0; i < 30; i++) {
+      if (!(await trn.dueForLevelUp(0))) {
+        const cfg = await room.getTable(t);
+        if (cfg.bigBlind >= 4000n) break; // capped — the driver stops being told to level
+        await time.increase(61);
+        continue;
+      }
+      await trn.connect(operator).levelUp(0);
+    }
+    const cfg = await room.getTable(t);
+    expect(cfg.bigBlind).to.equal(4000n);      // saturated exactly at the cap
+    expect(cfg.smallBlind).to.be.lte(4000n);   // never above bb, no overflow
+    await time.increase(3600);
+    expect(await trn.dueForLevelUp(0)).to.equal(false); // stays quiet forever
+  });
 });

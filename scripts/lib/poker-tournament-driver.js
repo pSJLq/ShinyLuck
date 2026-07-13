@@ -91,14 +91,30 @@ async function tickTournament(trn, room, id, opts = {}) {
   if (!due && freeze) for (const tid of tables) freeze.delete(tid);
 
   // 1. Busted seats → report one per tick (place is global). Idle tables only.
+  //    1b. Abandoned seats: a zk-unresponsive player gets sat out by the strike
+  //    path and a mental-poker table can't deal them dead hands — their stack
+  //    would freeze forever and block the finish. Once the contract's idle
+  //    window has elapsed, forfeit the seat at its current place.
+  let forfeitAfter = null; // lazily read only when a sat-out seat shows up
   for (let ti = 0; ti < tables.length; ti++) {
     if (await room.handInProgress(tables[ti])) continue;
     const cfg = await room.getTable(tables[ti]);
     for (let s = 0; s < Number(cfg.maxSeats); s++) {
       const seat = await room.getSeat(tables[ti], s);
-      if (seat.occupied && seat.stack === 0n) {
+      if (!seat.occupied) continue;
+      if (seat.stack === 0n) {
         await (await trn.reportBust(id, ti, s)).wait();
         return "bust:" + ti + ":" + s;
+      }
+      if (seat.sittingOut && Number(seat.sitOutSince ?? 0) > 0) {
+        if (forfeitAfter === null) forfeitAfter = Number(await trn.idleForfeitSecs().catch(() => 0)) || 0;
+        const nowSec = opts.now ? opts.now() : Math.floor(Date.now() / 1000);
+        if (forfeitAfter > 0 && nowSec >= Number(seat.sitOutSince) + forfeitAfter) {
+          try {
+            await (await trn.forfeitIdle(id, ti, s)).wait();
+            return "forfeit-idle:" + ti + ":" + s;
+          } catch (_) { /* raced a sit-in or an older contract — never fatal */ }
+        }
       }
     }
   }

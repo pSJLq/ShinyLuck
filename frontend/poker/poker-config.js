@@ -5,7 +5,7 @@ export const POKER_CONFIG = {
   // --- deployed addresses (filled in on deploy) ---
   pokerRoom: "0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24",
   commitRevealDealer: "",
-  pokerTournament: "0x360C52285F6b8B0Fc558277BfDAF81f232AcD26D",
+  pokerTournament: "0xB7948480648899b70e9aB680a5d2d76d119Ebe61",
   playerProfile: "0x7364E1ED8a07b4659c059fa66D346c42907C3F14", // on-chain nicknames (PlayerProfile.sol) — filled on deploy
   avatarStore: "0x20c39988b480485aD2a9715c32Ff1866Ea890Ec4", // on-chain uploaded avatars (AvatarStore.sol)
   zkDealerV2: "0x292Ef0e15fC62613B00c55b0eEAC38279Efdb67D", // zkShuffle v2 on-chain verifier (ZkDealerV2.sol) — powers the zk-lab page

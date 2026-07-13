@@ -14,10 +14,10 @@
   "addresses": {
     "pokerRoom": "0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24",
     "zkTableDealer": "0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8",
-    "pokerTournament": "0x360C52285F6b8B0Fc558277BfDAF81f232AcD26D",
+    "pokerTournament": "0xB7948480648899b70e9aB680a5d2d76d119Ebe61",
     "playerProfile": "0x7364E1ED8a07b4659c059fa66D346c42907C3F14",
     "avatarStore": "0x20c39988b480485aD2a9715c32Ff1866Ea890Ec4",
-    "pokerTournamentOld": "0x0228841acA2715820a2503617bd9A0AfF465b445"
+    "pokerTournamentOld": "0x360C52285F6b8B0Fc558277BfDAF81f232AcD26D"
   },
   "v1": {
     "pokerRoom": "0x7E1387FCE14522B981C07bca921e857CfeD636e3",
@@ -25,5 +25,5 @@
     "pokerTournament": "0xB4808411903Fb8e2Eee23bceB9f274943EDAf766"
   },
   "deployedAt": "2026-07-11T15:14:43.761Z",
-  "tournamentRedeployedAt": "2026-07-12T15:00:57.313Z"
+  "tournamentRedeployedAt": "2026-07-13T06:40:21.554Z"
 }
