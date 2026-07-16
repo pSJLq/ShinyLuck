@@ -1,5 +1,5 @@
 /* =========================================================================
-   ShinyPoker — Table animation choreography.
+   ShinyPoker · Table animation choreography.
    Deal, board flip, chip-slide, pot-collect, showdown reveal, winner glow.
    All gated by [data-anim="on"] so reduced-motion / static export skip them.
    ========================================================================= */

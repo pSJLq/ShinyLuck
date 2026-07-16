@@ -48,7 +48,15 @@ function safeJoin(root, reqPath) {
 const server = http.createServer((req, res) => {
   const parsed = url.parse(req.url);
   let p = parsed.pathname || "/";
-  if (p === "/") p = "/SomniaLuck.html";
+  if (p === "/") p = "/index.html";
+  // Shell view routes + zk-lab — mirror the production Caddy rewrites.
+  const SHORT = {
+    "/poker": "/index.html", "/dice": "/index.html", "/roulette": "/index.html",
+    "/vault7": "/index.html", "/sugar": "/index.html",
+    "/docs": "/index.html", "/fair": "/index.html", "/leaderboard": "/index.html",
+    "/zk-lab": "/poker/zk-lab.html",
+  };
+  if (SHORT[p]) p = SHORT[p];
   // /games/sugar/  →  /games/sugar/index.html
   let filePath = safeJoin(ROOT, p);
   if (!filePath) { res.statusCode = 403; return res.end("forbidden"); }

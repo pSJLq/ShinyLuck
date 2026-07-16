@@ -8,8 +8,27 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <!-- Absolute paths - works even when http-server doesn't redirect trailing-slash. -->
-<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/v2.css">
 <link rel="stylesheet" href="/games/vault7/styles.css">
+<style>
+  /* Merged-site re-tint: base surfaces follow the gold/matte design system.
+     Game feedback colors (win/lose, candy art, reel symbols) stay untouched. */
+  :root {
+    --bg-0: #0A0A0B; --bg-1: #0A0A0C; --bg-2: #101014;
+    --line: #17171C; --line-2: #24242A;
+    --violet: #D9B970; --purple: #C9A961;
+    --gold: #D9B970; --amber: #E9CC85;
+  }
+  .ambient {
+    background:
+      radial-gradient(60% 50% at 50% -10%, rgba(217,185,112,.10), transparent 70%),
+      linear-gradient(180deg, #0B0A08 0%, #0A0A0B 50%, #070708 100%) !important;
+  }
+  .ambient-orb, .ambient-stars { display: none !important; }
+  /* fit the whole machine on one screen (desktop) */
+  @media (min-width: 861px) { .vault-shell { zoom: .85; } }
+</style>
+
 <style>
   /* Custom RAF cursor (from partials.js) stays ON for vault7 - the page
      is light enough. Only the heavy ambient orb background is disabled
@@ -20,33 +39,38 @@
   .sl-connect-prompt {
     position: fixed; inset: 0; display: flex; align-items: center;
     justify-content: center; padding: 24px; z-index: 50;
-    background: radial-gradient(ellipse at center, rgba(78,227,255,0.08), rgba(8,10,18,0.94));
+    background: radial-gradient(ellipse at center, rgba(217,185,112,0.08), rgba(7,7,8,0.94));
     backdrop-filter: blur(6px);
     font-family: 'JetBrains Mono', monospace;
   }
   .sl-connect-prompt .card {
     text-align: center; padding: 36px 44px; max-width: 460px;
-    border: 1px solid rgba(255,255,255,0.08); border-radius: 18px;
-    background: linear-gradient(135deg, #1a1830, #0e0d20);
-    box-shadow: 0 24px 80px rgba(78,227,255,0.18);
+    border: 1px solid rgba(217,185,112,0.18); border-radius: 18px;
+    background: linear-gradient(135deg, #14110B, #0A0A0C);
+    box-shadow: 0 24px 80px rgba(217,185,112,0.14);
   }
-  .sl-connect-prompt h2 { margin: 0 0 12px; font-size: 24px; color: #fff; letter-spacing: 1px; }
-  .sl-connect-prompt p  { color: #b6b0c8; margin: 0 0 18px; line-height: 1.55; font-size: 13px; }
+  .sl-connect-prompt h2 { margin: 0 0 12px; font-size: 24px; color: #F6F1E7; letter-spacing: 1px; }
+  .sl-connect-prompt p  { color: #A5A29B; margin: 0 0 18px; line-height: 1.55; font-size: 13px; }
   .sl-connect-prompt small { color: #6b6b75; font-size: 11px; }
 </style>
+  <script type="module" src="/lib/i18n.js"></script>
 </head>
 <body data-active-page="games">
 <div data-page-shell>
 
 <div data-mount="nav"></div>
 
-<div id="slot-root"></div>
-
-<div data-mount="footer"></div>
+<div style="display:flex;align-items:flex-start">
+  <div data-mount="side"></div>
+  <main data-r-padb-m style="flex:1;min-width:0">
+    <div id="slot-root"></div>
+    <div data-mount="footer"></div>
+  </main>
+</div>
 
 </div>
 
-<div class="sl-connect-prompt" id="connect-prompt">
+<div class="sl-connect-prompt" id="connect-prompt" style="display:none">
   <div class="card">
     <h2>VAULT.7 · 5×3 / 20 lines</h2>
     <p>Sign in to play on Somnia Testnet. Reels are seeded by the contract -
@@ -243,6 +267,12 @@
     mountProduction().catch(() => {});
     return true;
   }
+  // Reveal the connect card ONLY once Privy has actually settled as
+  // signed-out · showing it while the session restores made it flash at
+  // players who were already logged in.
+  import('/lib/auth-gate.js').then(({ whenAuthSettled }) => whenAuthSettled()).then((authed) => {
+    if (!authed && !currentSlot && !SL.address) prompt.style.display = '';
+  }).catch(() => {});
   document.addEventListener('shinyluck:connected', tryMount);
   document.addEventListener('shinyluck:auth-state', tryMount);
   pollHandle = setInterval(() => {

@@ -1,4 +1,4 @@
-/* ShinyPoker — LIVE table. Reuses the design's visual components (Card, Seat,
+/* ShinyPoker · LIVE table. Reuses the design's visual components (Card, Seat,
    Board, Pot, grid felt) but every value is read from the on-chain snapshot via
    window.SP (poker-bridge.js). No hardcoded SCENES. */
 const { useState, useEffect, useRef } = React;
@@ -13,12 +13,12 @@ const POS = {
 const short = (a) => (a && a !== "0x0000000000000000000000000000000000000000" ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const N = (wei) => Number(SP.fmt(wei, 6));
 // Tournament tables play in plain CHIP units (1500 chips, blinds 10/20), not
-// wei — NV switches the whole table's value formatting per mode.
+// wei · NV switches the whole table's value formatting per mode.
 let CHIPS = false;
 const NV = (v) => (CHIPS ? Number(v) : Number(SP.fmt(v, 6)));
 const A = SP.ACTION, ST = SP.STREET;
 
-// Tiny WebAudio synth — no assets, gated by the sound preference.
+// Tiny WebAudio synth · no assets, gated by the sound preference.
 let AC = null;
 function sfx(kind, on) {
   if (!on) return;
@@ -58,7 +58,7 @@ function FlyChips({ wrapRef, toX, toY }) {
   );
 }
 
-// the reverse: chips fly FROM a seat / bet spot INTO the pot — antes at the
+// the reverse: chips fly FROM a seat / bet spot INTO the pot · antes at the
 // deal and each street's bets being collected. Every client renders this from
 // the same snapshot diff, so everyone sees everyone posting.
 function FlyToPot({ wrapRef, fromX, fromY, delay = 0 }) {
@@ -85,9 +85,15 @@ function LiveTable() {
   const [bal, setBal] = useState(0);
   const [holes, setHoles] = useState({}); // dealId -> [strA,strB]
   const [theme, setTheme] = useState(() => localStorage.getItem("sp_theme") || "b");
-  const [lang, setLangState] = useState(() => window.__SPLANG || "en");
-  const setLang = (l) => { window.SPLangSet(l); setLangState(l); }; // re-render → SPT() picks up the new language everywhere
-  // persisted table preferences — every toggle here actually works
+  // Language lives in the casino's Settings now · we only listen, so SPT() at
+  // this table repaints the moment the player switches it out there.
+  const [, setLangState] = useState(() => window.__SPLANG || "en");
+  useEffect(() => {
+    const on = (e) => setLangState((e && e.detail && e.detail.lang) || window.__SPLANG || "en");
+    window.addEventListener("sp-lang-changed", on);
+    return () => window.removeEventListener("sp-lang-changed", on);
+  }, []);
+  // persisted table preferences · every toggle here actually works
   const [prefs, setPrefs] = useState(() => {
     const d = { sound: true, deck: "4", turbo: false, reduced: false, bbstacks: false };
     try { return Object.assign(d, JSON.parse(localStorage.getItem("sp_prefs") || "{}")); } catch { return d; }
@@ -108,8 +114,8 @@ function LiveTable() {
   const [reveals, setReveals] = useState({}); // dealId -> { seat: [c0,c1] }
   const [sdWin, setSdWin] = useState(null); // showdown winner computed from reveals, BEFORE on-chain settle
   const [pendingAct, setPendingAct] = useState(null); // optimistic: my action tx sent, waiting for the chain
-  const [lastActs, setLastActs] = useState({}); // seat -> {kind, amt, ts} — floating action badges
-  const [potFly, setPotFly] = useState(null); // {ts, kind: "ante"|"sweep", idxs} — chips flying into the pot
+  const [lastActs, setLastActs] = useState({}); // seat -> {kind, amt, ts} · floating action badges
+  const [potFly, setPotFly] = useState(null); // {ts, kind: "ante"|"sweep", idxs} · chips flying into the pot
   const [trn, setTrn] = useState(null); // tournament info+clock when this table is controlled
   const [movedTo, setMovedTo] = useState(null); // MTT rebalance: my seat is now at this table
   const [bustHidden, setBustHidden] = useState(false); // bust screen dismissed → observe
@@ -143,12 +149,12 @@ function LiveTable() {
 
   useEffect(() => { localStorage.setItem("sp_theme", theme); }, [theme]);
 
-  // live snapshot poll — the table you're AT polls fast (served from the
+  // live snapshot poll · the table you're AT polls fast (served from the
   // dealer's HTTP cache, cheap) so actions and reveals feel near-instant.
   useEffect(() => SP.sdk.watch(tableId, setSnap, 900), [tableId]);
 
   // The controller decides the whole render mode (chip formatting, seats
-  // managed by a tournament vs open sit-down). Resolve it BEFORE first paint —
+  // managed by a tournament vs open sit-down). Resolve it BEFORE first paint -
   // tournament tables used to flash cash-table UI ("+ Sit" seats, wei-formatted
   // blinds) for a second until the slower tournament poll landed.
   useEffect(() => {
@@ -159,7 +165,7 @@ function LiveTable() {
     return () => { stop = true; };
   }, [tableId]);
 
-  // auto-restore an existing email (Privy) session — now and whenever Privy boots
+  // auto-restore an existing email (Privy) session · now and whenever Privy boots
   useEffect(() => {
     const restore = () => SP.sdk.tryRestorePrivy().then((a) => { if (a) { setAddr(a); setConnected(true); refreshBal(); } }).catch(() => {});
     restore();
@@ -168,7 +174,7 @@ function LiveTable() {
     return () => document.removeEventListener("shinyluck:auth-state", on);
   }, []);
 
-  // wallet balance refresh — sequence-guarded so a slow stale response can't
+  // wallet balance refresh · sequence-guarded so a slow stale response can't
   // overwrite a newer value (the header briefly "jumping" between balances)
   async function refreshBal() {
     if (!SP.sdk.address) return;
@@ -189,15 +195,15 @@ function LiveTable() {
     const f = new GridField(canvasRef.current, cfg);
     fieldRef.current = f; f.start();
     // GridField sizes its buffer at construction, before the scaler finishes
-    // layout — re-measure a couple of times so the felt grid fills the oval.
+    // layout · re-measure a couple of times so the felt grid fills the oval.
     const r1 = setTimeout(() => f._resize(), 160);
     const r2 = setTimeout(() => f._resize(), 650);
     return () => { clearTimeout(r1); clearTimeout(r2); f.destroy(); };
-    // Re-run once the first snapshot arrives — until then the felt canvas isn't
+    // Re-run once the first snapshot arrives · until then the felt canvas isn't
     // mounted (loading state), so the grid had nothing to attach to.
   }, [theme, snap ? 1 : 0]);
 
-  // fetch my hole cards once per deal — failed attempts retry on a FAST local
+  // fetch my hole cards once per deal · failed attempts retry on a FAST local
   // timer (dealer is still locking entropy) instead of waiting for the next
   // snapshot poll, so the cards land the moment they're available
   useEffect(() => { if (snap) dealIdRef.current = String(snap.hand.dealId); }, [snap]);
@@ -216,7 +222,7 @@ function LiveTable() {
     fetchingRef.current = true;
     try {
       // Sign once per hand; reuse the signature on retries while the dealer
-      // finishes locking entropy — so only ONE wallet popup per hand.
+      // finishes locking entropy · so only ONE wallet popup per hand.
       if (!sigCacheRef.current[key]) sigCacheRef.current[key] = await SP.sdk.signHoles(tableId, dealId);
       const r = await SP.sdk.myHoleCards(tableId, dealId, sigCacheRef.current[key]);
       gotHolesRef.current[key] = true;
@@ -267,14 +273,14 @@ function LiveTable() {
       if (!localStorage.getItem("sp_hint_dealer")) {
         localStorage.setItem("sp_hint_dealer", "1");
         flash(window.__SPLANG === "ru"
-          ? "Метка D — баттон (дилер): от него идёт раздача и порядок ходов, каждую руку он сдвигается. SB/BB — малый и большой блайнды."
-          : "The D chip marks the dealer button — dealing & betting order rotate from it each hand. SB/BB are the small & big blinds.", 9000);
+          ? "Метка D · баттон (дилер): от него идёт раздача и порядок ходов, каждую руку он сдвигается. SB/BB · малый и большой блайнды."
+          : "The D chip marks the dealer button · dealing & betting order rotate from it each hand. SB/BB are the small & big blinds.", 9000);
       }
     } catch {}
   }, [snap && snap.hand.inProgress]);
 
   // tournament HUD: if this table is controlled by a tournament, poll its state
-  // (clock + my registration/seat + finishing places — feeds the HUD, the MTT
+  // (clock + my registration/seat + finishing places · feeds the HUD, the MTT
   // table switcher, the move-redirect, the bust screen and the final standings)
   useEffect(() => {
     if (!SP.sdk.hasTournaments()) return;
@@ -339,7 +345,7 @@ function LiveTable() {
   // MTT rebalance: the tournament moved my seat to another table → tell me and
   // take me there (the table in ?t=N is fixed at page load, so without this the
   // player is stranded watching a table they no longer sit at). Auto-follow
-  // ONLY if I actually held a seat HERE this session — a registered player
+  // ONLY if I actually held a seat HERE this session · a registered player
   // spying on a sibling table via the switcher must not get yanked away.
   const wasSeatedHereRef = useRef(false);
   useEffect(() => { if (snap && snap.mySeat >= 0) wasSeatedHereRef.current = true; }, [snap && snap.mySeat]);
@@ -349,7 +355,7 @@ function LiveTable() {
       moveRef.current = true;
       setMovedTo(trn.myTable);
       const dest = trn.myTable;
-      setTimeout(() => switchTable(dest), 2600); // in-place switch — no reload
+      setTimeout(() => switchTable(dest), 2600); // in-place switch · no reload
     }
   }, [trn]);
 
@@ -367,7 +373,7 @@ function LiveTable() {
       setPreAct(null); // pre-actions never carry across hands
       setSdWin(null); clearTimeout(sdTimerRef.current);
       setLastActs({}); // action badges never carry across hands
-      // antes are swept straight into the pot on-chain (no bet spot) — show
+      // antes are swept straight into the pot on-chain (no bet spot) · show
       // everyone's chips flying to the middle so posting is visible to all
       const hasAnte = trn ? Number(trn.curAnte || 0) > 0 : (snap.cfg.ante || 0n) > 0n;
       if (hasAnte && !reducedMo) {
@@ -388,7 +394,7 @@ function LiveTable() {
       }
     }
     // last-action badges: diff this snapshot against the previous one to see
-    // WHO just did WHAT (fold/check/call/bet/raise/all-in) — the chain has no
+    // WHO just did WHAT (fold/check/call/bet/raise/all-in) · the chain has no
     // push feed, so the poll delta is the source of truth
     if (h.inProgress && prev.sh) {
       const sameHand = h.handId === prev.handId;
@@ -413,7 +419,7 @@ function LiveTable() {
       for (const s of snap.seats) { const d = s.stack - (prev.stacks[s.index] || 0n); if (d > best) { best = d; winner = s.index; } }
       if (fieldRef.current) fieldRef.current.flash();
       // EVERY client gets the winner + amount (banner). Only the chip-flight
-      // motion itself respects reduced-motion — before, that flag silently
+      // motion itself respects reduced-motion · before, that flag silently
       // swallowed the whole payout announcement.
       if (winner >= 0) {
         setAnim((a) => ({ ...a, winnerSeat: winner, won: NV(best) }));
@@ -449,7 +455,7 @@ function LiveTable() {
   }, [snap]);
 
   // the instant reveals arrive at showdown, rank the hands CLIENT-side and
-  // announce the winner — on-chain settlement lands a few seconds later, and
+  // announce the winner · on-chain settlement lands a few seconds later, and
   // before this the table just sat silent with open cards
   useEffect(() => { sdWinRef.current = sdWin; }, [sdWin]);
   useEffect(() => {
@@ -473,10 +479,12 @@ function LiveTable() {
 
   function flash(msg, ms = 3000) { setToast(msg); setTimeout(() => setToast(null), ms); }
   async function tx(label, fn) {
+    // the clicked button owns the spinner until this settles
+    const done = SPPress.claim();
     setBusy(true);
     try { await fn(); flash(label + " ✓"); await refreshBal(); return true; }
     catch (e) { flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 80), 5000); console.error(e); return false; }
-    finally { setBusy(false); }
+    finally { setBusy(false); done(); }
   }
 
   // optimistic action bar: cleared as soon as the chain hands the turn onward
@@ -490,14 +498,14 @@ function LiveTable() {
   async function connect() {
     try {
       const a = await SP.sdk.connect(); setAddr(a); setConnected(true); refreshBal(); flash("Connected ✓");
-      // brand-new email wallets start empty — guide funding so they can play
+      // brand-new email wallets start empty · guide funding so they can play
       try { if ((await SP.sdk.walletBalance()) < SP.parseEther("0.02")) setModal({ type: "fund" }); } catch {}
     }
     catch (e) { if (e && e.message !== "cancelled") flash(e.message || "connect failed", 5000); }
   }
   const act = async (action, amount = 0) => {
     sfx("chip", prefs.sound);
-    // optimistic: swap the buttons for a "sent" strip immediately — the tx is
+    // optimistic: swap the buttons for a "sent" strip immediately · the tx is
     // headless and Somnia confirms fast, so waiting on the snapshot felt laggy
     if (snap && snap.hand.inProgress) setPendingAct({ dealId: String(snap.hand.dealId), street: snap.hand.street });
     const ok = await tx(["Fold", "Check", "Call", "Bet", "Raise", "All-in"][action], () => SP.sdk.act(tableId, action, amount, !!trn));
@@ -505,7 +513,7 @@ function LiveTable() {
     return ok;
   };
 
-  /// LePoker-style: move to another table of the event IN PLACE — no page
+  /// LePoker-style: move to another table of the event IN PLACE · no page
   /// reload. Resets every per-table piece of state; the pollers re-key off
   /// tableId; the URL stays shareable via replaceState.
   function switchTable(tid) {
@@ -531,12 +539,12 @@ function LiveTable() {
   const board = snap.board.map(SP.intToCardStr);
   const dealKey = String(hand.dealId);
   // freeze the last non-empty board per deal: after settle the live board
-  // empties while revealed cards + the winner banner are still on screen —
+  // empties while revealed cards + the winner banner are still on screen -
   // recomputing combos against an empty board briefly showed nonsense
   // ("High Card" right after "Two Pair" won)
   if (snap.board.length) boardsRef.current = { [dealKey]: snap.board };
   const sdBoard = snap.board.length ? snap.board : (boardsRef.current[dealKey] || snap.board);
-  // the winning combination's exact five cards — the UI highlights them and
+  // the winning combination's exact five cards · the UI highlights them and
   // dims everything else (board cards and winner holes that play no part)
   const winUsed = (() => {
     const wSeat = anim.winnerSeat >= 0 ? anim.winnerSeat : (sdWin && sdWin.dealId === dealKey ? sdWin.seat : -1);
@@ -546,7 +554,7 @@ function LiveTable() {
   })();
   const myHoleObj = hand.inProgress ? holes[dealKey] : null;
   const myHole = myHoleObj ? myHoleObj.cardsStr : null;
-  // combo label only from the flop — preflop "High Card" is pure noise for a
+  // combo label only from the flop · preflop "High Card" is pure noise for a
   // beginner ("why does it say ten-high before any cards are open?")
   const bestHand = myHoleObj && snap.board.length >= 3 ? SP.handName(myHoleObj.cards.concat(snap.board)) : "";
   const heroEval = bestHand ? SP.handEval(myHoleObj.cards.concat(snap.board)) : null;
@@ -580,7 +588,7 @@ function LiveTable() {
   const showdown = hand.inProgress && hand.street === ST.SHOWDOWN;
 
   // live big blind: tournament levels raise it mid-game while the table cfg is
-  // cached — bb-counts must follow the CURRENT level, not the opening one
+  // cached · bb-counts must follow the CURRENT level, not the opening one
   const curBB = trn ? Number(trn.curBb) : NV(cfg.bigBlind);
   const bbOf = (stack) => (curBB > 0 ? Math.round((NV(stack) / curBB) * 10) / 10 : null);
 
@@ -598,7 +606,7 @@ function LiveTable() {
   const iWonTrn = !!(trn && trn.res && trn.res.winner && myAddrLc && trn.res.winner.player.toLowerCase() === myAddrLc);
   const ordinal = (n) => { const s = ["th", "st", "nd", "rd"], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
   const medal = (p) => (p === 1 ? "🥇" : p === 2 ? "🥈" : p === 3 ? "🥉" : null);
-  // dismissals persist per tournament for the tab session — the screens must
+  // dismissals persist per tournament for the tab session · the screens must
   // not re-pop on every sibling table the player opens afterwards
   const seen = (k) => { try { return trn && sessionStorage.getItem(`sp_${k}seen_${trn.id}`) === "1"; } catch { return false; } };
   const markSeen = (k) => { try { if (trn) sessionStorage.setItem(`sp_${k}seen_${trn.id}`, "1"); } catch {} };
@@ -635,25 +643,16 @@ function LiveTable() {
             <span className="metapill"><span className="k">{SPT("Hand")}</span><b>#{hand.handId}</b></span>
           </div>
           <div className="spacer" />
-          {connected ? (
-            <>
-              {/* one wallet chip = balance + nickname; click opens the cashier
-                  (the separate Cashier button + the "session" pill were noise —
-                  Privy is always headless, so there's no session to toggle) */}
-              <button className="wallet" style={{ cursor: "pointer", font: "inherit", color: "inherit" }} title={SPT("Cashier")} onClick={() => setModal({ type: "cashier" })}>
-                <BraceLogo size={16} /><span className="bal tnum">{bal.toFixed(1)}</span><span className="net">{nameOf(addr)}</span>
-              </button>
-            </>
-          ) : (
-            <button className="metapill" style={{ cursor: "pointer", color: "var(--accent-soft)", borderColor: "var(--accent-32)", background: "var(--accent-12)" }} onClick={connect}>{SPT("Connect Wallet")}</button>
-          )}
+          {/* No wallet chip / connect button here: the merged shell's header
+              owns balance, nickname, avatar and the cashier (profile drawer),
+              so duplicating them at the table was pure noise. */}
           {connected && mySeat >= 0 && (
             <button className="iconbtn" title={seats[mySeat].sittingOut ? SPT("Sit in") : SPT("Sit out")} disabled={busy}
               onClick={() => tx(seats[mySeat].sittingOut ? "Sit in" : "Sit out", () => SP.sdk.sitOut(tableId, !seats[mySeat].sittingOut))}>{ChromeIcons.pause}</button>
           )}
           <button className="iconbtn" title={SPT("Settings")} onClick={() => setShowSettings((s) => !s)}>{ChromeIcons.gear}</button>
           {/* Tournament chips can't be cashed out mid-event (the contract
-              blocks leaveTable on controlled tables) — exit to the event page. */}
+              blocks leaveTable on controlled tables) · exit to the event page. */}
           {connected && mySeat >= 0 && (trn
             ? <button className="iconbtn leavebtn" title={SPT("Back to tournament")} disabled={busy}
                 onClick={() => (location.href = "tournament?id=" + trn.id)}>{ChromeIcons.leave}</button>
@@ -662,7 +661,7 @@ function LiveTable() {
         </header>
 
         {showSettings && (
-          <SettingsPanel t={prefs} lang={lang} setLang={setLang}
+          <SettingsPanel t={prefs}
             set={setPref} dir={theme} setDir={setTheme} onClose={() => setShowSettings(false)}
             session={null} /* Privy-only → always headless; no session key to manage */ />
         )}
@@ -708,14 +707,14 @@ function LiveTable() {
             <div className="feltglow" />
             <div className="felt">
               <div className="center">
-                {anim.dealing && <span className="zkbadge shuffling"><span className="chk">{ChromeIcons.shield}</span>{SPT("shuffling — commitment sealed on-chain")}</span>}
+                {anim.dealing && <span className="zkbadge shuffling"><span className="chk">{ChromeIcons.shield}</span>{SPT("shuffling · commitment sealed on-chain")}</span>}
                 <Board cards={board} deckMode={deck} flipFrom={anim.flipFrom}
                   dim={winUsed ? snap.board.map((c) => !winUsed.set.has(c)) : null} />
                 {hand.inProgress
                   ? <Pot pot={NV(hand.pot)} chips={CHIPS} />
                   : <div className="pot"><div className="potmain"><span className="k">
                       {seats.filter((s) => !s.empty && !s.sittingOut).length >= 2
-                        ? SPT("Next hand starting…") /* players ARE here — we're waiting on the dealer, say so */
+                        ? SPT("Next hand starting…") /* players ARE here · we're waiting on the dealer, say so */
                         : SPT("Waiting for players")}
                     </span></div></div>}
               </div>
@@ -740,7 +739,7 @@ function LiveTable() {
             {/* opponents' face-down cards while in hand; on fold the backs get
                 one last render with the muck animation (slide to the pot).
                 At SHOWDOWN each seat's backs stay put until ITS revealed cards
-                arrive from the chain — the reveal tx can take seconds under
+                arrive from the chain · the reveal tx can take seconds under
                 load, and backs vanishing into nothing read as a glitch */}
             {hand.inProgress && seats.map((s) => {
               if (s.empty || s.index === mySeat) return null;
@@ -800,7 +799,7 @@ function LiveTable() {
             {/* hero zone: hole cards + identity (design herozone) */}
             {mySeat >= 0 && (
               <div className="herozone">
-                {/* after folding your cards stay on the table, grayed — vanishing
+                {/* after folding your cards stay on the table, grayed · vanishing
                     instantly read as a glitch */}
                 {hand.inProgress && (seats[mySeat].inHand || seats[mySeat].folded) && (
                   <div className="hole peek">
@@ -812,8 +811,12 @@ function LiveTable() {
                   </div>
                 )}
                 {myHole && bestHand && !seats[mySeat].folded && <div className="herocombo" style={heroEval ? comboStyle(heroEval.cat) : undefined}>{SPTHand(bestHand)}</div>}
-                <div className={"heroinfo" + (hand.inProgress && hand.actingSeat === mySeat ? " active" : "") + (seats[mySeat].allIn ? " allin" : "") + (seats[mySeat].folded ? " folded" : "") + (mySeat === anim.winnerSeat || (sdWin && sdWin.seat === mySeat) ? " winner" : "")}>
+                <div className={"heroinfo" + (hand.inProgress && hand.actingSeat === mySeat ? " active" : "") + (seats[mySeat].allIn ? " allin" : "") + (seats[mySeat].folded ? " folded" : "") + (seats[mySeat].sittingOut ? " sitout" : "") + (mySeat === anim.winnerSeat || (sdWin && sdWin.seat === mySeat) ? " winner" : "")}>
                   {actFor(mySeat) && <span className={"actchip " + lastActs[mySeat].kind}>{actLabel(lastActs[mySeat])}</span>}
+                  {seats[mySeat].sittingOut && (
+                    <button className="sitinseat" disabled={busy} title={SPT("Sit in")}
+                      onClick={() => tx("Sit in", () => SP.sdk.sitOut(tableId, false))}>{SPT("SIT IN")}</button>
+                  )}
                   <AvatarIcon av={avOf(addr).id} img={avOf(addr).img} name={nameOf(addr)} />
                   <div className="meta">
                     <span className="nm">YOU · {nameOf(addr)}</span>
@@ -827,7 +830,7 @@ function LiveTable() {
               </div>
             )}
 
-            {/* pot collected to the winner (motion only — the banner shows regardless) */}
+            {/* pot collected to the winner (motion only · the banner shows regardless) */}
             {anim.winnerSeat >= 0 && !reducedMo && (
               <FlyChips wrapRef={feltWrapRef} toX={seatPos(anim.winnerSeat).x} toY={seatPos(anim.winnerSeat).y} />
             )}
@@ -877,8 +880,8 @@ function LiveTable() {
               {myBust && myBust.prize > 0n
                 ? <p className="note" style={{ color: "var(--win, #57d9a3)" }}>{RUv
                     ? `Приз ${N(myBust.prize)} ${SP.NETWORK.currency.symbol} уже зачислен на ваш баланс в кассе.`
-                    : `Prize ${N(myBust.prize)} ${SP.NETWORK.currency.symbol} — already credited to your Cashier balance.`}</p>
-                : <p className="note">{RUv ? "В этот раз без приза — удачи в следующем!" : "No prize this time — better luck in the next one!"}</p>}
+                    : `Prize ${N(myBust.prize)} ${SP.NETWORK.currency.symbol} · already credited to your Cashier balance.`}</p>
+                : <p className="note">{RUv ? "В этот раз без приза · удачи в следующем!" : "No prize this time · better luck in the next one!"}</p>}
               <div className="row" style={{ marginTop: 14 }}>
                 <button className="pill" onClick={() => { markSeen("bust"); setBustHidden(true); }}>{RUv ? "Наблюдать финал" : "Watch the finish"}</button>
                 <button className="pill primary" onClick={() => { markSeen("bust"); location.href = "tournament?id=" + trn.id; }}>{RUv ? "К турниру" : "Tournament page"}</button>
@@ -895,7 +898,7 @@ function LiveTable() {
               <div style={{ textAlign: "center", fontSize: 36, lineHeight: 1 }}>🏆</div>
               <h3 style={{ textAlign: "center", marginTop: 10 }}>
                 {iWonTrn
-                  ? (RUv ? "Поздравляем — вы выиграли турнир!" : "Congratulations — you won the tournament!")
+                  ? (RUv ? "Поздравляем · вы выиграли турнир!" : "Congratulations · you won the tournament!")
                   : (RUv ? "Турнир завершён" : "Tournament finished")}
               </h3>
               {trn.res.winner && (
@@ -913,7 +916,7 @@ function LiveTable() {
                       <span style={{ width: 36, fontFamily: "var(--mono)", fontSize: 13, color: r.place <= 3 ? "var(--accent-soft, #f2d78a)" : "var(--muted, #9a9aa8)" }}>{medal(r.place) || "#" + r.place}</span>
                       <AvatarIcon av={avOf(r.player).id} img={avOf(r.player).img} name={nameOf(r.player)} size={22} style={{ borderRadius: 6 }} />
                       <span style={{ flex: 1, fontFamily: "var(--mono)", fontSize: 13, color: "var(--text, #e6e6ee)" }}>{nameOf(r.player)}{me ? (RUv ? " · вы" : " · you") : ""}</span>
-                      <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: r.prize > 0n ? "var(--win, #57d9a3)" : "var(--muted, #9a9aa8)" }}>{r.prize > 0n ? `+${N(r.prize)} ${SP.NETWORK.currency.symbol}` : "—"}</span>
+                      <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: r.prize > 0n ? "var(--win, #57d9a3)" : "var(--muted, #9a9aa8)" }}>{r.prize > 0n ? `+${N(r.prize)} ${SP.NETWORK.currency.symbol}` : "-"}</span>
                     </div>
                   );
                 })}
@@ -936,7 +939,7 @@ function LiveTable() {
     if (!connected) return <StatusStrip text={SPT("Sign in to play")} sub={SPT("Email login → instant Somnia wallet, no popups")} accent="var(--accent-soft)" />;
     if (mySeat < 0) {
       if (trnBusted) return <StatusStrip
-        text={RUv ? "Вы выбыли — наблюдаете" : "You're out — observing"}
+        text={RUv ? "Вы выбыли · наблюдаете" : "You're out · observing"}
         sub={myBust ? (RUv ? `${myBust.place}-е место из ${trn.registered}` : `You finished ${ordinal(myBust.place)} of ${trn.registered}`) : ""}
         accent="var(--muted)" />;
       // spying on a sibling MTT table while my own seat lives elsewhere
@@ -944,25 +947,40 @@ function LiveTable() {
         return (
           <div className="actionbar" style={{ flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
             <div style={{ fontFamily: "var(--label)", fontSize: 13, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--accent-soft)" }}>
-              {RUv ? `Здесь вы наблюдаете — ваше место за столом #${trn.myTable}` : `You're observing — your seat is at table #${trn.myTable}`}
+              {RUv ? `Здесь вы наблюдаете · ваше место за столом #${trn.myTable}` : `You're observing · your seat is at table #${trn.myTable}`}
             </div>
             <button className="pill" onClick={() => switchTable(trn.myTable)}>{RUv ? "К своему столу →" : "Back to my table →"}</button>
           </div>
         );
       }
       return (trn || ctl !== ZERO_CTL)
-        ? <StatusStrip text={SPT("Tournament table — you're observing")} sub={SPT("Seats are assigned by the tournament; register on its page to play")} accent="var(--muted)" />
+        ? <StatusStrip text={SPT("Tournament table · you're observing")} sub={SPT("Seats are assigned by the tournament; register on its page to play")} accent="var(--muted)" />
         : <StatusStrip text={SPT("Take an empty seat to join")} sub={SPT("Click a “+ Sit” spot around the table")} accent="var(--muted)" />;
     }
     const me = seats[mySeat];
     const myTurn = hand.inProgress && hand.actingSeat === mySeat && hand.street <= ST.RIVER;
-    // action already sent — hide the buttons instantly instead of leaving them
+    // action already sent · hide the buttons instantly instead of leaving them
     // greyed-out until the snapshot confirms the turn moved on
     if (myTurn && pendingAct && pendingAct.dealId === dealKey && pendingAct.street === hand.street) {
       return <StatusStrip text={SPT("Action sent") + " ✓"} sub={SPT("Confirming on-chain…")} accent="var(--accent-soft)" />;
     }
     if (!myTurn) {
-      const text = hand.inProgress ? (hand.street === ST.SHOWDOWN ? SPT("Showdown — settling on-chain") : SPT("Waiting for your turn")) : SPT("Waiting for the next hand");
+      // Sitting out used to read as "Waiting for the next hand" · identical to
+      // a normal wait, so a player dealt out at the start of a tournament just
+      // saw a table that never included them. Name the state and put the way
+      // back into the same strip.
+      if (me.sittingOut) {
+        return (
+          <div className="actionbar" style={{ flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <div style={{ fontFamily: "var(--label)", fontSize: 13, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--accent)" }}>
+              {SPT("You're sitting out")}
+            </div>
+            <div style={{ fontFamily: "var(--body)", fontSize: 12.5, color: "var(--muted)" }}>{SPT("You won't be dealt into hands until you sit back in")}</div>
+            <button className="pill primary" disabled={busy} onClick={() => tx("Sit in", () => SP.sdk.sitOut(tableId, false))}>{SPT("Sit in")}</button>
+          </div>
+        );
+      }
+      const text = hand.inProgress ? (hand.street === ST.SHOWDOWN ? SPT("Showdown · settling on-chain") : SPT("Waiting for your turn")) : SPT("Waiting for the next hand");
       const showPre = hand.inProgress && me.inHand && !me.folded && !me.allIn && hand.street <= ST.RIVER;
       return (
         <div className="actionbar" style={{ flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
@@ -978,7 +996,7 @@ function LiveTable() {
           )}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
             <div style={{ fontFamily: "var(--label)", fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)" }}>{text}</div>
-            {showPre && preAct && <div style={{ fontFamily: "var(--body)", fontSize: 12.5, color: "var(--muted)" }}>{SPT("Pre-action armed — fires instantly on your turn")}</div>}
+            {showPre && preAct && <div style={{ fontFamily: "var(--body)", fontSize: 12.5, color: "var(--muted)" }}>{SPT("Pre-action armed · fires instantly on your turn")}</div>}
           </div>
         </div>
       );
@@ -987,23 +1005,32 @@ function LiveTable() {
     const toCallW = cur > committed ? cur - committed : 0n;
     const minRaiseToW = cur === 0n ? cfg.bigBlind : cur + hand.minRaise;
     // EFFECTIVE-STACK cap: never offer sizes beyond what any live opponent can
-    // actually match — betting 10k into a lone 7k stack is legal on-chain (the
+    // actually match · betting 10k into a lone 7k stack is legal on-chain (the
     // excess comes back) but reads wrong at the table, so the UI caps at the
     // biggest opponent's street total instead.
-    const effCapW = seats.reduce((m, s) => {
-      if (s.empty || s.index === mySeat || !s.inHand) return m;
+    const opps = seats.filter((s) => !s.empty && s.index !== mySeat && s.inHand && !s.folded);
+    const effCapW = opps.reduce((m, s) => {
+      const v = s.committedStreet + s.stack;
+      return v > m ? v : m;
+    }, 0n);
+    // Chips only matter if SOMEONE can still put more in. An opponent who is
+    // already all-in has nothing left to match, so raising past the current bet
+    // can only hand the excess straight back to me · offering a 10k shove at a
+    // lone all-in short stack is the table asking for a bet that cannot exist.
+    const raisableW = opps.reduce((m, s) => {
+      if (s.allIn || s.stack === 0n) return m;
       const v = s.committedStreet + s.stack;
       return v > m ? v : m;
     }, 0n);
     const myMaxW = committed + me.stack;
     const maxToW = effCapW > 0n && effCapW < myMaxW ? (effCapW > minRaiseToW ? effCapW : (minRaiseToW < myMaxW ? minRaiseToW : myMaxW)) : myMaxW;
-    // the call NEVER costs more than my stack — an over-shove call is an all-in
+    // the call NEVER costs more than my stack · an over-shove call is an all-in
     const callW = toCallW < me.stack ? toCallW : me.stack;
     const minN = NV(minRaiseToW), maxN = NV(maxToW), call = NV(callW), pot = NV(hand.pot);
     const canCheck = toCallW === 0n;
     const isBet = cur === 0n;
     const callIsAllIn = !canCheck && toCallW >= me.stack;
-    const canRaise = me.stack > toCallW && maxToW > cur && maxN > minN;
+    const canRaise = me.stack > toCallW && maxToW > cur && maxN > minN && raisableW > cur;
     const bv = Math.min(maxN, Math.max(minN, betValue || minN));
     const onFold = () => act(A.FOLD);
     const onCheckCall = () => act(canCheck ? A.CHECK : callIsAllIn ? A.ALLIN : A.CALL);
@@ -1014,14 +1041,22 @@ function LiveTable() {
           <div className="actions">
             <button className="abtn fold" disabled={busy} onClick={onFold}><span className="key">F</span><span className="lbl">{SPT("Fold")}</span></button>
             <button className="abtn call" disabled={busy} onClick={onCheckCall}><span className="key">C</span><span className="lbl">{canCheck ? SPT("Check") : callIsAllIn ? SPT("All-in") : SPT("Call")}</span>{!canCheck && <span className="amt tnum">{call.toFixed(2)}</span>}</button>
-            {me.stack > 0n && !canCheck && !callIsAllIn && <button className="abtn raise" disabled={busy} onClick={() => act(A.ALLIN)}><span className="lbl">{SPT("All-in")}</span><span className="amt tnum">{NV(myMaxW).toFixed(2)}</span></button>}
+            {/* short-shove (a stack too small for a legal min-raise) is still a real
+                option · but only when an opponent has chips left to call it, and
+                the amount shown is what can actually be matched, not my whole stack */}
+            {me.stack > 0n && !canCheck && !callIsAllIn && raisableW > cur && (
+              <button className="abtn raise" disabled={busy} onClick={() => act(A.ALLIN)}>
+                <span className="lbl">{SPT("All-in")}</span>
+                <span className="amt tnum">{NV(effCapW > 0n && effCapW < myMaxW ? effCapW : myMaxW).toFixed(2)}</span>
+              </button>
+            )}
           </div>
         </div>
       );
     }
     const actionData = {
       toCall: call, minRaise: minN, potForBet: pot, heroStack: maxN,
-      best: SPTHand(bestHand) || "—", outs: "—", potOdds: canCheck ? "—" : Math.round((call / (pot + call)) * 100) + "%",
+      best: SPTHand(bestHand) || "-", outs: "-", potOdds: canCheck ? "-" : Math.round((call / (pot + call)) * 100) + "%",
       raiseLabel: isBet ? SPT("Bet") : SPT("Raise to"), canCheck, step: NV(cfg.bigBlind) || (CHIPS ? 1 : 0.01), symbol: CHIPS ? SPT("chips") : SP.NETWORK.currency.symbol,
       timer: Math.max(0, hand.actingDeadline - now), timerTotal: Number(cfg.actionTimeout),
     };
@@ -1092,8 +1127,8 @@ function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose, n
       <div className="railbody" ref={bodyRef}>
         {tab === "chat" && (msgs.length === 0
           ? <div className="chatline dealer">{SP.sdk.zkLayer
-              ? SPT("Welcome — live on Somnia. zkShuffle dealing: only your browser can see your cards.")
-              : SPT("Welcome — live on Somnia. Provably-fair commit-reveal dealing.")}</div>
+              ? SPT("Welcome · live on Somnia. zkShuffle dealing: only your browser can see your cards.")
+              : SPT("Welcome · live on Somnia. Provably-fair commit-reveal dealing.")}</div>
           : msgs.map((m) => <div key={m.id} className={"chatline" + (m.dealer ? " dealer" : "")}>{!m.dealer && <span className="who">{(m.addr && nameOf ? nameOf(m.addr) : m.who)}</span>}{m.text}</div>))}
         {tab === "hands" && (hands == null
           ? <div className="chatline dealer">Loading on-chain history…</div>
@@ -1139,12 +1174,12 @@ function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose, n
         </div>
         {SP.sdk.zkLayer ? (
           <div className="commit">
-            <div><span className="lab">deal</span> {commit && commit.dealId ? "#" + BigInt(commit.dealId).toString(16).slice(0, 14) + "…" : "— waiting for a hand —"}</div>
+            <div><span className="lab">deal</span> {commit && commit.dealId ? "#" + BigInt(commit.dealId).toString(16).slice(0, 14) + "…" : "- waiting for a hand -"}</div>
             <div style={{ marginTop: 4 }}><span className="lab">cards</span> {commit && commit.revealed ? "showdown proofs verified on-chain ✓" : "player-encrypted · every reveal proven"}</div>
           </div>
         ) : (
           <div className="commit">
-            <div><span className="lab">commit</span> {commit ? shh(commit.seedHash) : "— waiting for a hand —"}</div>
+            <div><span className="lab">commit</span> {commit ? shh(commit.seedHash) : "- waiting for a hand -"}</div>
             <div style={{ marginTop: 4 }}><span className="lab">deck</span> {commit && commit.revealed ? "revealed & verified on-chain ✓" : "sealed pre-deal · reveal post-hand"}</div>
           </div>
         )}
@@ -1186,14 +1221,14 @@ function Modal({ kind, close, sdk, tableId, cfg, bal, tx, refresh }) {
                   // else (cash or a running tournament table)
                   const other = await sdk.seatedTableAt(tableId);
                   if (other >= 0) throw new Error(window.__SPLANG === "ru"
-                    ? `Вы уже играете за столом #${other} — сначала покиньте его`
-                    : `You're already playing at table #${other} — leave it first`);
+                    ? `Вы уже играете за столом #${other} · сначала покиньте его`
+                    : `You're already playing at table #${other} · leave it first`);
                   const need = SP.parseEther(amt);
                   const have = await sdk.balanceOf(sdk.address);
                   if (have < need) await sdk.deposit(SP.fmt(need - have, 6));
                   await sdk.sitDown(tableId, kind.seat, amt);
                   // injected wallets: grant a session key so actions need no popup.
-                  // Privy email wallets are already headless — nothing to do.
+                  // Privy email wallets are already headless · nothing to do.
                   if (sdk.backend === "injected" && !sdk.hasSession()) await sdk.activateSession();
                 });
               }}>{SPT("Take seat")}</button>
@@ -1205,11 +1240,9 @@ function Modal({ kind, close, sdk, tableId, cfg, bal, tx, refresh }) {
             <p className="note">Wallet <b className="mono">{short(sdk.address)}</b> · {walletBal == null ? "…" : walletBal.toFixed(3)} {sym} &nbsp;|&nbsp; In-room <b>{bal.toFixed(3)}</b> {sym}</p>
             {lowWallet && (
               <div className="fundbox">
-                <div className="fh">Low {sym} balance — you need {sym} to buy in and cover gas.</div>
+                <div className="fh">Low {sym} balance · you need {sym} to buy in and cover gas.</div>
                 <div className="fa"><span className="mono">{sdk.address}</span><button className="pill" onClick={copyAddr}>copy</button></div>
-                {isTestnet
-                  ? <a className="pill primary" href="https://testnet.somnia.network" target="_blank" rel="noopener" style={{ display: "block", textAlign: "center", textDecoration: "none", marginTop: 8 }}>Get free test {sym} — open faucet ↗</a>
-                  : <div className="note" style={{ marginTop: 6 }}>Send {sym} to this address from any wallet or exchange.</div>}
+                <div className="note" style={{ marginTop: 6 }}>Send {sym} to this address from any wallet or exchange.</div>
                 <div className="note" style={{ marginTop: 8 }}>Then deposit below and take a seat.</div>
               </div>
             )}
@@ -1238,7 +1271,14 @@ function mountScale() {
       scaler.style.width = ""; scaler.style.height = "";
       return;
     }
-    const s = Math.min((window.innerWidth - 24) / 1600, (window.innerHeight - 84) / 1000);
+    // The TABLE must fit BOTH axes · a player has to see their own seat at the
+    // bottom without scrolling, so unlike the lobby this never over-scales on
+    // width. Embedded, the shell owns the chrome, so only the slim topbar is
+    // subtracted instead of the standalone page's header+footer.
+    const embed = document.documentElement.classList.contains("sp-embed");
+    const sW = (window.innerWidth - 16) / 1600;
+    const sH = (window.innerHeight - (embed ? 16 : 84)) / 1000;
+    const s = Math.min(sW, sH);
     app.style.transform = `scale(${s})`; app.style.transformOrigin = "top left"; app.style.position = "absolute"; app.style.top = "0"; app.style.left = "0";
     scaler.style.width = 1600 * s + "px"; scaler.style.height = 1000 * s + "px";
   }

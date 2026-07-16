@@ -1,5 +1,5 @@
 /* =========================================================================
-   ShinyPoker — Design System
+   ShinyPoker · Design System
    Mapped from Somnia brand tokens. Dark, terminal, monospace, purple accent.
    ========================================================================= */
 
@@ -186,7 +186,7 @@ body {
 .felt { position: absolute; inset: 92px 150px 188px; border-radius: 280px;
   display: grid; place-items: center; }
 
-/* Direction A — Terminal felt. Same footprint as Premium (the seat ring is
+/* Direction A · Terminal felt. Same footprint as Premium (the seat ring is
    tuned to it); the rim must stay VISIBLE or seats read as floating in void. */
 [data-dir="a"] .felt {
   background:
@@ -203,7 +203,7 @@ body {
 [data-dir="a"] .felt::before { content:""; position:absolute; inset:16px; border-radius: 260px;
   border: 1px dashed rgba(217,171,74,0.14); }
 
-/* Direction B — Premium oval */
+/* Direction B · Premium oval */
 [data-dir="b"] .felt {
   background:
     radial-gradient(70% 70% at 50% 38%, #211a3f 0%, #171208 38%, #0d0a05 78%, #070510 100%);
@@ -218,8 +218,8 @@ body {
 [data-dir="b"] .felt::before { content:""; position:absolute; inset:0; border-radius: inherit;
   background: radial-gradient(60% 50% at 50% 30%, rgba(255,255,255,0.04), transparent 60%); }
 
-/* Direction C — Minimal grid. Keeps its clean-rect identity but on the SHARED
-   table footprint (it used to be a smaller square — the seat ring orbited it
+/* Direction C · Minimal grid. Keeps its clean-rect identity but on the SHARED
+   table footprint (it used to be a smaller square · the seat ring orbited it
    in dead space, "seats outside the table"). */
 [data-dir="c"] .felt {
   border-radius: 140px;
@@ -307,7 +307,7 @@ body {
 .card.back .mk { width: 40%; color: rgba(242,215,138,0.85); }
 
 .card.folded { filter: grayscale(1) brightness(0.5); opacity: 0.5; }
-/* plays no part in the winning combination — the used five stay bright */
+/* plays no part in the winning combination · the used five stay bright */
 .card.offcombo { filter: grayscale(0.85) brightness(0.55); opacity: 0.8; transition: filter 0.35s ease, opacity 0.35s ease; }
 .card.dealing { animation: dealIn .32s cubic-bezier(.2,.7,.3,1) both; }
 @keyframes dealIn { from { transform: translateY(-16px) scale(.9); opacity: 0 } to { transform: none; opacity: 1 } }
@@ -646,7 +646,7 @@ body {
 .annoLegend .sw.off { background: rgba(120,120,130,0.18); border-color: var(--muted); }
 
 /* =========================================================================
-   Review HUD (meta control — outside the product)
+   Review HUD (meta control · outside the product)
    ========================================================================= */
 .hud { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 100;
   display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 11px;
@@ -661,7 +661,7 @@ body {
 .hud .hgroup button:hover { color: var(--text-2); }
 .hud .hgroup button.on { background: var(--accent); color: #fff; }
 .hud .hsep { width: 1px; height: 22px; background: var(--line); }
-/* Toggle switch — GLOBAL (not just inside .hud) so the table-settings panel
+/* Toggle switch · GLOBAL (not just inside .hud) so the table-settings panel
    gets the real pill switch instead of an unstyled "dot". Clear off/on states:
    off = grey track, knob left; on = accent track, knob slid right. */
 .htoggle { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-2);

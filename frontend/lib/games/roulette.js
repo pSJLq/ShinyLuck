@@ -8,10 +8,11 @@
 //     chain-drawn number (the only source of an outcome - no client RNG)
 //   - RouletteRoundStarted → setRound(): roll the UI to the next open round
 //
-// Round lifecycle is driven entirely by the reveal-bot (ROUND_KEEPALIVE):
-// it keeps one roulette round open at all times and settles each once its
-// bet window + REVEAL_DELAY blocks have passed. So the wheel is continuous
-// and synchronized for everyone - this page just observes + bets.
+// Round lifecycle (on-demand since 2026-07-14): the wheel no longer burns gas
+// while empty. startRouletteRound() is permissionless, so when a CONNECTED
+// player is at the table and no round is open, this page opens the next one
+// itself (maybeStartRound below). While rounds keep receiving bets the house
+// bot chains them (ROUND_ON_DEMAND) and settles every round as before.
 
 import { ethers } from "/vendor/ethers.bundle.js";
 import { RouletteGame } from "./roulette-ui.js";
@@ -19,6 +20,7 @@ import { SL, connect } from "../wallet.js";
 import { CONFIG } from "../config.js";
 import { CHAINS } from "../shinyluck-sdk.js";
 import { provider, fetchRecentLogs } from "../rpc.js";
+import { whenAuthSettled } from "../auth-gate.js";
 
 // Shannon Explorer base for verify-links (same source the per-bet games use).
 function explorerTxUrl(hash) {
@@ -159,10 +161,19 @@ const placedRounds = new Set();// rounds where the local player placed a bet
 // catch the next round instead of firing a doomed tx.
 const PLACE_CUTOFF_MS = 3000;
 
+// The gate must never FLASH at a signed-in player while Privy restores the
+// session · it only appears once auth has actually settled as signed-out.
+let gateArmed = false;
 function setGate(connected) {
   const g = document.getElementById("roulette-gate");
-  if (g) g.style.display = connected ? "none" : "flex";
+  if (!g) return;
+  if (connected) { g.style.display = "none"; return; }
+  if (gateArmed) g.style.display = "flex";
 }
+whenAuthSettled().then((authed) => {
+  gateArmed = true;
+  setGate(authed || Boolean(SL.address));
+});
 
 async function refreshBalance() {
   try {
@@ -234,6 +245,34 @@ async function fetchFair(roundId) {
     }
   } catch (_) {}
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// On-demand round opener: with the house bot no longer idling the wheel, a
+// connected player at the table opens the next round when none is open. The
+// tx is tiny; races between two players are harmless (one lands, the other
+// reverts RoundClosed and we just reconcile).
+// ---------------------------------------------------------------------------
+let startingRound = false;
+let lastStartAttempt = 0;
+async function maybeStartRound() {
+  if (!game || resolving || awaitingResult) return;
+  if (!SL.address || !SL.signer) return;       // only a signed-in player can open
+  if (document.hidden) return;                 // and only while actually watching
+  if (startingRound || Date.now() - lastStartAttempt < 12_000) return;
+  startingRound = true;
+  try {
+    const cur = await readCurrentRound();
+    const stillOpen = cur && !cur.settled && Date.now() < bettingDeadlineMs(cur.betWindowEnd);
+    if (!stillOpen) {
+      lastStartAttempt = Date.now();
+      const c = new ethers.Contract(CONFIG.casino, ["function startRouletteRound()"], SL.signer);
+      const tx = await c.startRouletteRound();
+      await tx.wait();
+      tick();
+    }
+  } catch (_) { /* lost the open race / game paused · reconcile on next tick */ }
+  finally { startingRound = false; }
 }
 
 // One reconcile pass: (1) if the round we're showing has settled, spin it;
@@ -376,6 +415,8 @@ function mount() {
 
   // Poll fallback - keeps the wheel honest if a push is dropped.
   setInterval(tick, 3000);
+  // On-demand opener: kicks the wheel awake while a connected player watches.
+  setInterval(() => { maybeStartRound().catch(() => {}); }, 5000);
   // Keep the chain-clock skew fresh (clocks drift); cheap one-block read.
   refreshChainSkew();
   setInterval(refreshChainSkew, 15000);

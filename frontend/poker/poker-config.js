@@ -1,22 +1,25 @@
 // ShinyPoker frontend config. Addresses are auto-written by
-// scripts/deploy-poker.js — don't edit the address block by hand.
+// scripts/deploy-poker.js · don't edit the address block by hand.
 export const POKER_CONFIG = {
   network: "somniaTestnet",
   // --- deployed addresses (filled in on deploy) ---
   pokerRoom: "0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24",
   commitRevealDealer: "",
   pokerTournament: "0xf2d3785645985618b866594cE6e924Ae35608948",
-  playerProfile: "0x7364E1ED8a07b4659c059fa66D346c42907C3F14", // on-chain nicknames (PlayerProfile.sol) — filled on deploy
+  playerProfile: "0x7364E1ED8a07b4659c059fa66D346c42907C3F14", // on-chain nicknames (PlayerProfile.sol) · filled on deploy
   avatarStore: "0x20c39988b480485aD2a9715c32Ff1866Ea890Ec4", // on-chain uploaded avatars (AvatarStore.sol)
-  zkDealerV2: "0x292Ef0e15fC62613B00c55b0eEAC38279Efdb67D", // zkShuffle v2 on-chain verifier (ZkDealerV2.sol) — powers the zk-lab page
+  zkDealerV2: "0x292Ef0e15fC62613B00c55b0eEAC38279Efdb67D", // zkShuffle v2 on-chain verifier (ZkDealerV2.sol) · powers the zk-lab page
   zkTableDealer: "0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8", // v2 live card layer implementing IPokerDealer (ZkTableDealer.sol)
   // "zk" = the room's dealer is ZkTableDealer (mental poker; cards decrypted in
   // the player's browser). "v1" = commit-reveal. Written by the deploy script.
   cardLayer: "zk",
   // Off-chain dealer bot's hole-card API (serves each player only their cards).
-  dealerApiUrl: "https://shinia.mom/dealer",
+  // Same-origin path · works on any domain we serve from (shinyluck.win,
+  // shinia.mom, localhost) with no CORS and no redirect on POSTs.
+  dealerApiUrl: "/dealer",
   // Reciprocal link back to the ShinyLuck casino (Casino⇄Poker switcher).
-  casinoUrl: "https://shiny-luck.vercel.app/",
+  // Merged site: the casino now lives at the root of the same origin.
+  casinoUrl: "/",
   // Same Privy app as ShinyLuck → same embedded Somnia wallet across both
   // products (email login, headless txs, no popups). Published, not a secret.
   privyAppId: "cmp9pb26g01py0cjlks1njki1",

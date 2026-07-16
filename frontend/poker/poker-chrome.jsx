@@ -49,7 +49,7 @@ function TopBar({ scene, product, onProduct, onSettings, deckMode, balance, mode
         </button>
       )}
       {mode === "table" && (
-        <div className="session" data-anno="session" title="Table session active — fold/call/raise without a wallet popup">
+        <div className="session" data-anno="session" title="Table session active · fold/call/raise without a wallet popup">
           <span className="pulse" />
           <span className="lock">{I.lock}</span>
           <span>session active · cap 50</span>
@@ -90,9 +90,9 @@ function SideRail() {
         ))}
         {tab === "notes" && (
           <div>
-            <div className="hhrow"><span className="st" style={{ color: "var(--danger-soft)" }}>RED</span><span className="act">degenqueen.somi — <span className="dim">3-bets light, c-bets 80%+</span></span></div>
-            <div className="hhrow"><span className="st" style={{ color: "var(--win)" }}>GREEN</span><span className="act">nakamoto.somi — <span className="dim">tight / folds to aggression</span></span></div>
-            <div className="hhrow"><span className="st" style={{ color: "var(--accent-soft)" }}>NOTE</span><span className="act">blockwizard.somi — <span className="dim">straddles every BTN</span></span></div>
+            <div className="hhrow"><span className="st" style={{ color: "var(--danger-soft)" }}>RED</span><span className="act">degenqueen.somi · <span className="dim">3-bets light, c-bets 80%+</span></span></div>
+            <div className="hhrow"><span className="st" style={{ color: "var(--win)" }}>GREEN</span><span className="act">nakamoto.somi · <span className="dim">tight / folds to aggression</span></span></div>
+            <div className="hhrow"><span className="st" style={{ color: "var(--accent-soft)" }}>NOTE</span><span className="act">blockwizard.somi · <span className="dim">straddles every BTN</span></span></div>
             <div className="chatinput"><input placeholder="Add a note…" /></div>
           </div>
         )}
@@ -209,7 +209,7 @@ function WinBanner({ hand, won, lose, unit, name, pending }) {
 function RunItTwicePrompt({ onChoose }) {
   return (
     <div className="ritprompt">
-      <div className="q">Run it twice?<small>Deal the turn &amp; river on two boards — split the pot, reduce variance.</small></div>
+      <div className="q">Run it twice?<small>Deal the turn &amp; river on two boards · split the pot, reduce variance.</small></div>
       <div className="btns">
         <button className="pill" onClick={() => onChoose("once")}>Run once</button>
         <button className="pill primary" onClick={() => onChoose("twice")}>Run it twice ✓</button>
@@ -225,7 +225,7 @@ function DiscOverlay({ field }) {
         <div className="spin" />
         <div className="ttl">Reconnecting…</div>
         <div className="sub">Lost connection to the Somnia node. Re-subscribing to the table's live event stream.</div>
-        <div className="note">{I.lock} Your hand &amp; chips are safe — held on-chain. Time-bank auto-protects your action.</div>
+        <div className="note">{I.lock} Your hand &amp; chips are safe · held on-chain. Time-bank auto-protects your action.</div>
       </div>
     </div>
   );
@@ -247,7 +247,7 @@ const THEME_SWATCHES = [
   { k: "c", name: "Grid", bg: "linear-gradient(180deg,#0e0e11,#0a0a0c)", border: "1px solid rgba(255,255,255,0.1)", grid: true },
 ];
 
-function SettingsPanel({ t, set, dir, setDir, onClose, session, lang, setLang }) {
+function SettingsPanel({ t, set, dir, setDir, onClose, session }) {  // language moved to casino Settings
   const Row = ({ label, children }) => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "9px 0", borderBottom: "1px solid var(--hair)" }}>
       <span style={{ fontFamily: "var(--label)", fontSize: 12, color: "var(--text-2)" }}>{label}</span>{children}
@@ -263,48 +263,8 @@ function SettingsPanel({ t, set, dir, setDir, onClose, session, lang, setLang })
       boxShadow: "0 24px 70px rgba(0,0,0,0.6)", backdropFilter: "blur(10px)", maxHeight: "calc(100% - 70px)", overflowY: "auto" }}>
       <div className="tag" style={{ marginBottom: 8 }}>{SPT("table settings")}</div>
 
-      {/* Language (EN/RU) — the quiet switch the gear panel was made for */}
-      {setLang && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "2px 0 10px" }}>
-          <span style={{ fontFamily: "var(--label)", fontSize: 12, color: "var(--text-2)" }}>{SPT("Language")}</span>
-          <div style={{ display: "flex", gap: 6 }}>
-            {[["en", "EN"], ["ru", "RU"]].map(([k, l]) => (
-              <button key={k} onClick={() => setLang(k)} style={{
-                padding: "4px 12px", borderRadius: 7, cursor: "pointer", fontFamily: "var(--label)", fontSize: 11,
-                border: lang === k ? "1px solid var(--accent)" : "1px solid var(--line-2)",
-                background: lang === k ? "var(--accent-12)" : "transparent",
-                color: lang === k ? "var(--accent-soft)" : "var(--muted)",
-              }}>{l}</button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Table theme selector */}
-      <div style={{ fontFamily: "var(--label)", fontSize: 10.5, letterSpacing: "0.08em", textTransform: "uppercase",
-        color: "var(--muted)", marginBottom: 8 }}>{SPT("Table theme")}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 6 }}>
-        {THEME_SWATCHES.map(s => (
-          <button key={s.k} onClick={() => setDir(s.k)} style={{ background: "transparent", border: 0, padding: 0, cursor: "pointer" }}>
-            <div style={{ height: 46, borderRadius: 8, background: s.bg, border: dir === s.k ? "1px solid var(--accent)" : s.border,
-              boxShadow: dir === s.k ? "0 0 0 1px var(--accent), 0 0 14px rgba(217,171,74,0.35)" : "none",
-              position: "relative", overflow: "hidden", transition: ".15s" }}>
-              {s.grid && <div style={{ position: "absolute", inset: 0, backgroundImage: "linear-gradient(rgba(255,255,255,0.07) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.07) 1px,transparent 1px)", backgroundSize: "8px 8px" }} />}
-              <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: 18, height: 12, borderRadius: 2,
-                background: "#f3f3f7", boxShadow: "5px 0 0 #f3f3f7" }} />
-            </div>
-            <div style={{ fontFamily: "var(--label)", fontSize: 10, marginTop: 5, textAlign: "center",
-              color: dir === s.k ? "var(--accent-soft)" : "var(--muted)" }}>{s.name}{dir === s.k ? " ✓" : ""}</div>
-          </button>
-        ))}
-      </div>
-      <div style={{ height: 1, background: "var(--hair)", margin: "6px 0 2px" }} />
-
-      <Row label={SPT("Sound effects")}><Sw on={t.sound} onClick={() => set("sound", !t.sound)} /></Row>
       <Row label={SPT("4-color deck")}><Sw on={t.deck === "4"} onClick={() => set("deck", t.deck === "4" ? "2" : "4")} /></Row>
       <Row label={SPT("Stacks in big blinds")}><Sw on={t.bbstacks} onClick={() => set("bbstacks", !t.bbstacks)} /></Row>
-      <Row label={SPT("Turbo animations")}><Sw on={t.turbo} onClick={() => set("turbo", !t.turbo)} /></Row>
-      <Row label={SPT("Reduced motion")}><Sw on={t.reduced} onClick={() => set("reduced", !t.reduced)} /></Row>
       {session && (
         <div style={{ marginTop: 10, padding: "10px 11px", borderRadius: 8, border: "1px solid var(--accent-32)", background: "var(--accent-12)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: "var(--label)", fontSize: 11, color: "var(--accent-soft)" }}>

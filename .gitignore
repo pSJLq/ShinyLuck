@@ -38,6 +38,15 @@ agent-service/*.sqlite
 agent-service/*.db
 agent-service/data/
 
+# Context handoff & personal notes — local only, not for the public repo
+HANDOFF.md
+/промпт.txt
+
+# Design source material — large (ShinyPokerDesign ~52MB), not deployed
+/New design ShinyLuck final/
+/ShinyLuckDesign/
+/ShinyPokerDesign/
+
 # demo-bot wallets
 demo-bot/wallets.json
 

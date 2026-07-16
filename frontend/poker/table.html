@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ShinyPoker — Table</title>
+<title>ShinyPoker · Table</title>
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -17,7 +17,45 @@
     background: radial-gradient(120% 90% at 50% -10%, #0c0c11 0%, #070707 62%); overflow: hidden; }
   #bgcanvas { position: fixed; inset: 0; width: 100%; height: 100%; opacity: 0.26; pointer-events: none; }
   #root { position: relative; z-index: 2; }
+  /* Embedded in the merged shell (/poker?v=table&t=N): the shell owns the
+     site chrome · hide the duplicated branding + product switcher, keep the
+     functional pills (blinds / hand / chips). The table scales to fit BOTH
+     axes (see mountScale), so the stage never scrolls · no scrollbar. */
+  .sp-embed .topbar > .group:first-child { display: none !important; }
+  .sp-embed .topbar .switcher { display: none !important; }
+  .sp-embed #stage { overflow: hidden !important; place-items: center !important; padding-top: 0; }
 </style>
+<script>
+  // Embed mode: inside the merged-site shell (/poker?v=table&t=N).
+  (function () {
+    var inFrame = false;
+    try { inFrame = window.self !== window.top; } catch (e) { inFrame = true; }
+    var flagged = /(^|[?&])embed=1/.test(location.search);
+    if (!inFrame && !flagged) {
+      // Standalone visit (old links): the table now lives inside the shell.
+      var q = location.search.replace(/^\?/, "").replace(/(^|&)embed=1/, "");
+      location.replace("/poker?v=table" + (q ? "&" + q : ""));
+      return;
+    }
+    document.documentElement.classList.add("sp-embed");
+    // ONE SCROLLBAR: tell the shell how tall we are · it sizes the iframe to
+    // match, so this frame never grows its own scrollbar next to the page's.
+    var lastH = 0;
+    function reportH() {
+      var h = Math.ceil(Math.max(
+        document.documentElement.scrollHeight,
+        document.body ? document.body.scrollHeight : 0));
+      if (!h || Math.abs(h - lastH) < 2) return;
+      lastH = h;
+      try { window.parent.postMessage({ type: "sl-height", h: h }, "*"); } catch (e) {}
+    }
+    addEventListener("load", reportH);
+    addEventListener("resize", reportH);
+    setInterval(reportH, 1000);
+
+  })();
+</script>
+  <script type="module" src="/lib/i18n.js"></script>
 </head>
 <body>
 <canvas id="bgcanvas"></canvas>
@@ -26,6 +64,7 @@
 <!-- Privy (email → embedded Somnia wallet, headless). Same bundle/app as the casino. -->
 <script src="/vendor/privy.bundle.js"></script>
 <script src="poker-grid.js"></script>
+  <script src="poker-press.js"></script>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>

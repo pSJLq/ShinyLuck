@@ -339,17 +339,11 @@ function appendFeedRow(body, ev, animate) {
   // muted so the eye lands on game + P&L (the row's primary signal).
   tr.innerHTML =
     `<td><span class="game-tag g-${ev.game}">${gameName}</span></td>` +
-    `<td class="feed-dim"><a href="${accountUrlFor(ev.player)}" data-link style="color:inherit;">${fmtAddr(ev.player)}</a></td>` +
+    `<td class="feed-dim">${fmtAddr(ev.player)}</td>` +
     `<td class="feed-dim">${stakeText}</td>` +
     `<td class="feed-dim">${multText}</td>` +
     `<td class="${pnlCls}">${pnlText}</td>`;
   if (animate) body.prepend(tr); else body.appendChild(tr);
-}
-
-function accountUrlFor(addr) {
-  // Root-relative pretty URL - Vercel rewrites /u/:addr → /account.html and
-  // readViewAddress() in account.js parses the path. Works from any nesting.
-  return `/u/${addr.toLowerCase()}`;
 }
 
 /// Convert raw BetSettled events into renderable feed rows. `stakeMap` is

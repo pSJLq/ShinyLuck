@@ -128,6 +128,11 @@ export async function withRetry(fn, { attempts = 3, baseDelayMs = 1000 } = {}) {
 
 function toHex(n) { return "0x" + BigInt(n).toString(16); }
 
+// The Shannon Explorer pads a log's `topics` to 4 entries with nulls (events
+// with <3 indexed args come back like ["0x…", "0x…", null, null]) · ethers
+// parseLog throws INVALID_ARGUMENT on the nulls. Strip them before parsing.
+const cleanTopics = (topics) => (topics || []).filter((t) => t != null);
+
 /// Default chunk size for eth_getLogs. Somnia testnet caps individual
 /// requests at 1000 blocks → 900 with 100-block headroom. Override via the
 /// `chunkSize` argument or DEFAULT_CHUNK_SIZE export.
@@ -213,7 +218,7 @@ export async function fetchLogs(contract, eventName, fromBlock, toBlock, chunkSi
     const out = [];
     for (const r of raws) {
       try {
-        const parsed = contract.interface.parseLog({ topics: r.topics, data: r.data });
+        const parsed = contract.interface.parseLog({ topics: cleanTopics(r.topics), data: r.data });
         out.push({
           name: parsed.name,
           args: parsed.args,
@@ -249,7 +254,7 @@ export async function fetchLogs(contract, eventName, fromBlock, toBlock, chunkSi
     for (const raw of results) {
       for (const r of raw) {
         try {
-          const parsed = contract.interface.parseLog({ topics: r.topics, data: r.data });
+          const parsed = contract.interface.parseLog({ topics: cleanTopics(r.topics), data: r.data });
           collected.push({
             name: parsed.name,
             args: parsed.args,
@@ -311,7 +316,7 @@ export async function fetchRecentLogs(contract, eventName, opts = {}) {
     for (const r of raw) {
       let parsed;
       try {
-        parsed = contract.interface.parseLog({ topics: r.topics, data: r.data });
+        parsed = contract.interface.parseLog({ topics: cleanTopics(r.topics), data: r.data });
       } catch (_) { continue; }
       const ev = {
         name: parsed.name,

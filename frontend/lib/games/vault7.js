@@ -1,4 +1,4 @@
-// VAULT.7 — on-chain slot frontend.
+// VAULT.7 · on-chain slot frontend.
 //
 // The reel animation, ticker, particles & big-win overlay are unchanged from
 // the original `slots/game.js` design. The only swap: instead of an in-memory
@@ -11,7 +11,7 @@
 //              uint256 scatterPayX100, bool isFreeSpin)
 //
 //   grid[col * 3 + row] = symbol ID:
-//     0=E, 1=D, 2=F, 3=A (low) — 4=COIN, 5=BOLT (mid) — 6=CRYS, 7=DIAM (high)
+//     0=E, 1=D, 2=F, 3=A (low) · 4=COIN, 5=BOLT (mid) · 6=CRYS, 7=DIAM (high)
 //     8=WILD, 9=SCAT
 
 import { ethers } from "/vendor/ethers.bundle.js";
@@ -109,7 +109,7 @@ function sizeReels() {
   if (!reels.length) return;
   let w = reels[0].clientWidth;
   // First-paint guard: clientWidth can be 0 if the reels container hasn't
-  // been laid out yet. Wait one frame and retry — without this the strip
+  // been laid out yet. Wait one frame and retry · without this the strip
   // heights collapse and the symbols end up at wildly different scales,
   // which is the "reels are scattered" bug.
   if (w === 0) { requestAnimationFrame(sizeReels); return; }
@@ -204,7 +204,7 @@ async function refreshLoyalty() {
     lastFreeSpinsAvailable = Number(free);
     setText("#freeSpinsCount", String(lastFreeSpinsAvailable));
     const totalSpins = Number(tot);
-    // Loyalty bar — fills with each paid spin. No numbers exposed to the
+    // Loyalty bar · fills with each paid spin. No numbers exposed to the
     // player; the reward is a surprise drop when the bar completes.
     const progress = (totalSpins % 150) / 150 * 100;
     const bar = $("#loyaltyBar");
@@ -219,7 +219,7 @@ async function refreshLoyalty() {
     if (fsBtn) {
       fsBtn.classList.toggle("active", lastFreeSpinsAvailable > 0);
       fsBtn.title = lastFreeSpinsAvailable > 0
-        ? "Free spin available — click SPIN to use it"
+        ? "Free spin available · click SPIN to use it"
         : "Keep playing to unlock free spins";
     }
   } catch (e) { console.warn("[vault7] loyalty:", e.message); }
@@ -238,7 +238,7 @@ async function refreshGameMeta() {
 }
 
 async function refreshBalance() {
-  if (!SL.address) { setText("#balance", "—"); return; }
+  if (!SL.address) { setText("#balance", "-"); return; }
   try {
     const bal = await provider().getBalance(SL.address);
     setText("#balance", fmtSTT(bal));
@@ -565,7 +565,7 @@ async function doSpin() {
     const settled = await pollForSettle(betId);
     if (!settled || settled.refunded) {
       $("#stagePill").querySelector("span:last-child").textContent = settled?.refunded ? "REFUNDED" : "TIMED OUT";
-      setText("#lastWin", settled?.refunded ? "— refunded" : "— timed out");
+      setText("#lastWin", settled?.refunded ? "- refunded" : "- timed out");
       $("#lastWin").classList.add("zero");
       return;
     }
@@ -585,10 +585,10 @@ async function doSpin() {
       $("#lastWin").classList.remove("zero");
       if (decoded.scatCount >= 3) {
         await sleep(500);
-        // refresh loyalty (scatter doesn't grant FS on-chain — loyalty does)
+        // refresh loyalty (scatter doesn't grant FS on-chain · loyalty does)
       }
     } else {
-      setText("#lastWin", "— no win");
+      setText("#lastWin", "- no win");
       $("#lastWin").classList.add("zero");
     }
 

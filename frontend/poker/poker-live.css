@@ -24,7 +24,7 @@
   padding: 22px; width: min(380px, 92vw); font-family: var(--label, monospace);
   scrollbar-width: thin; scrollbar-color: var(--line-2, #3a3a48) transparent; }
 /* the default white/system scrollbar on the scrolling create-tournament modal
-   looked jarring against the matte-black chrome — theme it to the gold-line UI */
+   looked jarring against the matte-black chrome · theme it to the gold-line UI */
 .lt-modal::-webkit-scrollbar { width: 9px; }
 .lt-modal::-webkit-scrollbar-track { background: transparent; }
 .lt-modal::-webkit-scrollbar-thumb { background: var(--line-2, #3a3a48); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
@@ -73,12 +73,12 @@
 /* top-half seats open DOWNWARD (under the seat card) */
 .seatreveal.below { bottom: auto; top: calc(100% - 2px); }
 /* the 0.62-scaled cards leave dead space in their layout box on the side away
-   from the transform origin — pull the combo badge back over it */
+   from the transform origin · pull the combo badge back over it */
 .seatreveal.below .hole { margin-bottom: -40px; }
 .combobadge { display: inline-block; padding: 2px 9px; border-radius: 6px; border: 1px solid transparent;
   font-family: var(--label, monospace); font-size: 10px; white-space: nowrap; }
 
-/* fold fade is a state change, not a glitch — ease it in */
+/* fold fade is a state change, not a glitch · ease it in */
 .seat .seatcard { transition: opacity .3s ease, filter .3s ease; }
 
 /* settling spinner inside the win banner */
@@ -99,7 +99,27 @@
 .heroinfo { position: relative; }
 .heroinfo .actchip { top: -16px; }
 
-/* ---- gold rebrand (SparkLogo palette): dark ink on gold surfaces — the old
+/* Sitting out reads as "why is nothing happening?" · dim the seat so the state
+   is visible at a glance, and put the way back on the seat itself. */
+.heroinfo.sitout { opacity: .58; }
+.heroinfo .sitinseat {
+  position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
+  z-index: 4; opacity: 1;
+  font-family: var(--label); font-size: 10px; letter-spacing: .1em;
+  padding: 4px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  background: var(--accent); border: 1px solid var(--accent); color: #1b1407;
+  box-shadow: 0 3px 12px rgba(0,0,0,.5);
+}
+.heroinfo.sitout .sitinseat { animation: sitinpulse 2s ease-in-out infinite; }
+.heroinfo .sitinseat:hover { filter: brightness(1.09); }
+.heroinfo .sitinseat:disabled { opacity: .5; cursor: default; animation: none; }
+@keyframes sitinpulse {
+  0%, 100% { box-shadow: 0 3px 12px rgba(0,0,0,.5); }
+  50%      { box-shadow: 0 3px 12px rgba(0,0,0,.5), 0 0 0 5px rgba(232,193,90,.16); }
+}
+@media (prefers-reduced-motion: reduce) { .heroinfo.sitout .sitinseat { animation: none; } }
+
+/* ---- gold rebrand (SparkLogo palette): dark ink on gold surfaces · the old
    white-on-purple text is unreadable on gold ---- */
 .switcher button.on, .btnmark.bb, .quickchips button.on, .pill.primary,
 .hud .hgroup button.on, .chipset button.on, .cta, .btn-sm.join, .spinbtn, .regbtn { color: #1b1407 !important; }
@@ -121,3 +141,40 @@
 .stat .v { font-family: "Bricolage Grotesque", var(--mono), monospace !important; font-weight: 800; }
 .avatar.deco { color: #fff; overflow: hidden; border: 0; text-shadow: 0 1px 3px rgba(0,0,0,.45); }
 .avatar.deco svg { pointer-events: none; }
+
+/* ─────────── Button press feedback (poker-press.js) ───────────
+   An on-chain button is silent for the 1-2s the tx flies, which reads as a
+   missed click · so the press lands instantly and the spinner then says WHICH
+   button owns the wait. Overlaid, never inline: swapping a label for a spinner
+   would resize the button and shift the row under the player's cursor. */
+
+/* `scale`, not `transform`: measured on the live page, transform is inert on
+   these buttons (even inline, even with transitions off) while scale lands
+   fine · and scale cannot fight the transform some buttons already use to
+   centre themselves. brightness carries the press on its own regardless. */
+button { transition: scale .08s ease, filter .08s ease; }
+button[data-sp-press] { scale: .955; filter: brightness(.88); }
+button[data-sp-busy] { cursor: progress; pointer-events: none; position: relative; }
+
+/* scrim dims whatever the button holds (text nodes, spans, icons alike)
+   without touching color, so every button style survives it */
+button[data-sp-busy]::before {
+  content: ""; position: absolute; inset: 0;
+  border-radius: inherit; background: rgba(12, 10, 6, .45);
+}
+button[data-sp-busy]::after {
+  content: ""; position: absolute; top: 50%; left: 50%;
+  width: 14px; height: 14px; margin: -7px 0 0 -7px;
+  border: 2px solid rgba(232, 193, 90, .28);
+  border-top-color: var(--accent, #e8c15a);
+  border-radius: 50%;
+  animation: sp-press-spin .6s linear infinite;
+}
+@keyframes sp-press-spin { to { transform: rotate(360deg); } }
+
+/* Reduced motion: keep the state legible, drop the spin */
+@media (prefers-reduced-motion: reduce) {
+  button { transition: none; }
+  button[data-sp-press] { scale: 1; filter: brightness(.8); }
+  button[data-sp-busy]::after { animation: none; border-top-color: var(--accent, #e8c15a); }
+}

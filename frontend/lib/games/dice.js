@@ -34,7 +34,7 @@ function recalcSummary() {
 
   const placeBtn = $("[data-sl-place]");
   if (placeBtn && !placeBtn.dataset.locked) {
-    placeBtn.textContent = `Place bet — ${fmtSTTfromString(stakeStr)} STT`;
+    placeBtn.textContent = `Place bet · ${fmtSTTfromString(stakeStr)} STT`;
   }
   refreshEV(DICE).catch(() => {});
 }
@@ -94,7 +94,7 @@ async function onPlaceBet() {
   }
   const t = Math.max(2, Math.min(98, target));
 
-  // INSTANT UX: dice starts shaking the moment user clicks — the chain
+  // INSTANT UX: dice starts shaking the moment user clicks · the chain
   // tx happens silently in the background. Whether Sequence (~27s) or
   // MetaMask (~3s), the user sees a continuous rolling animation, not a
   // "submitting…" spinner. Result fades in when the chain reveals it.
@@ -106,9 +106,9 @@ async function onPlaceBet() {
   diceAnimStart();
 
   try {
-    // Connect silently if needed — no UI for "Connecting".
+    // Connect silently if needed · no UI for "Connecting".
     await connect();
-    // Clamp stake to live maxBet (defense in depth — Casino will revert with
+    // Clamp stake to live maxBet (defense in depth · Casino will revert with
     // BetTooLarge if bankroll drops further between this read and submit).
     const finalStake = await clampStakeStr(stake, "dice");
     if (finalStake == null) {
@@ -158,7 +158,7 @@ async function onPlaceBet() {
   } catch (e) {
     diceAnimStop(null);
     const msg = friendlyError(e);
-    // User rejected the tx? Quiet error — no scary banner.
+    // User rejected the tx? Quiet error · no scary banner.
     if (/rejected|user cancelled/i.test(msg)) {
       setStagePill("ready", "READY");
     } else {

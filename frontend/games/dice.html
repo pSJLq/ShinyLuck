@@ -4,117 +4,161 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Dice · ShinyLuck</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../styles.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../v2.css">
 <script src="../lib/console-filter.js"></script>
 <script src="../partials.js" defer></script>
 <script src="../vendor/privy.bundle.js"></script>
 <script type="module" src="../lib/wallet.js"></script>
 <script type="module" src="../lib/livedata.js"></script>
 <script type="module" src="../lib/games/dice.js"></script>
+  <script type="module" src="/lib/i18n.js"></script>
 </head>
-<body data-active-page="games">
+<body data-active-page="lobby">
 <div data-page-shell>
 <div data-mount="nav"></div>
 
-<div class="game-page">
-  <div class="crumb">
-    <a href="../SomniaLuck.html#games" data-link>Games</a><span class="sep">/</span><span class="here">Dice</span>
-  </div>
+<div style="display:flex;align-items:flex-start">
+  <div data-mount="side"></div>
 
-  <div class="game-hero">
-    <div>
-      <h1>D<span class="accent">i</span>ce.</h1>
-      <p class="lede">Set the threshold. The agent commits a hash, you reveal a number from 0 to 100. Pure probability - no patterns, no edge beyond the house.</p>
-    </div>
-    <div class="game-hero-meta">
-      <div class="m">House Edge<b class="cyan" data-sl="houseEdge" data-game="dice">1.00%</b></div>
-      <div class="m">Max Bet<b data-sl="maxBet" data-game="dice">10 STT</b></div>
-      <div class="m">Max Win<b>49.5×</b></div>
-      <div class="m">Agent quorum<b class="purple" data-sl-quorum>-</b></div>
-    </div>
-  </div>
+  <main data-r-padb-m style="flex:1;min-width:0">
+    <section class="gp-wrap" data-r-pad-m>
 
-  <div class="game-layout">
-    <div class="stage">
-      <div class="stage-head">
+      <div class="gp-head" data-r-wrap-m>
+        <a class="back" href="/" data-link>← Lobby</a>
+        <span class="vsep"></span>
+        <h1>Dice</h1>
+        <span style="flex:1"></span>
         <span class="live-pill" data-sl-stage-pill><span class="dot"></span> READY</span>
-        <span class="round" data-sl-round-info>-</span>
-      </div>
-      <div class="stage-body">
-        <div class="dice-big dice-num-mode" data-sl-dice-big>
-          <span class="dice-num">-</span>
-        </div>
-        <div style="margin-top: 32px; width: 100%; max-width: 560px;">
-          <div style="display:flex; justify-content:space-between; align-items:baseline; font-size: 11px; letter-spacing: 2px; color: var(--fg-mute); text-transform: uppercase; margin-bottom: 10px;">
-            <span>ROLL OVER</span>
-            <span data-sl-target style="color:var(--cyan); font-size: 28px; letter-spacing:0; text-transform:none; font-weight: 500;">50</span>
-            <span>WIN CHANCE <b data-sl-winchance>50%</b></span>
-          </div>
-          <input type="range" min="2" max="98" value="50" data-sl-targetinput style="width:100%; margin: 8px 0 4px;" />
-          <div class="slider-marks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
-        </div>
-        <div style="margin-top: 24px; display: flex; gap: 32px; font-family: var(--mono); font-size: 12px; flex-wrap: wrap;">
-          <span style="color: var(--fg-mute);">PAYOUT <b data-sl-payout style="color:var(--cyan); margin-left: 6px;">-</b></span>
-          <span style="color: var(--fg-mute);">EV <b data-sl-ev style="color:var(--red); margin-left: 6px;">-</b></span>
-          <span style="color: var(--fg-mute);">RESULT <b data-sl-result style="color:var(--fg); margin-left: 6px;">-</b></span>
-        </div>
-      </div>
-      <div class="stage-foot">
-        <span>RECENT ROLLS</span>
-        <div class="recent-mults" data-sl-dice-recent>
-          <span class="m" style="opacity:.4;">loading…</span>
-        </div>
-      </div>
-    </div>
-
-    <aside>
-      <div class="panel">
-        <h3>Place Bet</h3>
-        <div class="bet-row">
-          <label>Stake</label>
-          <div class="bet-input">
-            <input type="text" value="0.1" data-sl-stake />
-            <span class="suffix">STT</span>
-          </div>
-          <div class="preset-row">
-            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.05'">0.05</button>
-            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.1'">0.1</button>
-            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='0.5'">0.5</button>
-            <button class="preset" onclick="document.querySelector('[data-sl-stake]').value='1'">1</button>
-          </div>
-        </div>
-        <div class="bet-row">
-          <label>Direction</label>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-            <button class="preset" data-sl-direction data-value="under" style="padding: 12px;">ROLL UNDER</button>
-            <button class="preset active" data-sl-direction data-value="over" style="padding: 12px;">ROLL OVER</button>
-          </div>
-        </div>
-        <button class="btn-bet" data-hover data-sl-place>Place bet</button>
-        <div class="summary">
-          <div><div class="l">Profit on win</div><div class="v green" data-sl-profit>-</div></div>
-          <div><div class="l">Win chance</div><div class="v cyan" data-sl-winchance-right>-</div></div>
-        </div>
-        <div data-sl-result-banner style="display:none; margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--cyan); font-family: var(--mono); font-size: 12px; letter-spacing: 1px;"></div>
       </div>
 
-      <div class="panel">
-        <h3>Provably fair</h3>
-        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">CLIENT SEED</div>
-        <div data-sl-fairclient style="font-size: 12px; color: var(--cyan); word-break: break-all; margin-bottom: 16px;">-</div>
-        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">BET ID / NONCE</div>
-        <div data-sl-fairnonce style="font-size: 12px; color: var(--fg); margin-bottom: 16px;">-</div>
-        <div style="font-size:11px; color: var(--fg-mute); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;">SERVER SEED (after reveal)</div>
-        <div data-sl-fairserver style="font-size: 12px; color: var(--purple-2); word-break: break-all; margin-bottom: 16px;">-</div>
-        <a data-sl-explorer-link href="#" target="_blank" rel="noopener" style="display:none; font-size: 11px; letter-spacing: 1.5px; color: var(--cyan); text-transform: uppercase; margin-bottom: 8px;">verify on explorer ↗</a>
-        <a href="../fair.html" data-link style="display:block; margin-top: 8px; font-size: 11px; letter-spacing: 1.5px; color: var(--cyan); text-transform: uppercase;">How it works →</a>
+      <div class="gp-grid" data-r-grid-m1>
+        <!-- ================= STAGE ================= -->
+        <div class="gp-stage">
+          <div style="display:flex;flex-direction:column;flex:1;padding:28px 30px">
+            <div style="text-align:center;padding:26px 0 10px">
+              <div class="dice-big dice-num-mode" data-sl-dice-big><span class="dice-num">-</span></div>
+              <div style="margin-top:12px;font:600 10px var(--mono);letter-spacing:.3em;color:var(--fg-faint);min-height:14px" data-sl-result></div>
+            </div>
+            <div style="margin-top:auto;max-width:560px;width:100%;margin-left:auto;margin-right:auto">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+                <span class="k-label">Target</span>
+                <span data-sl-target style="font:600 15px var(--mono);color:var(--fg-strong)">50</span>
+                <span style="flex:1"></span>
+                <span style="font:500 10px var(--mono);color:var(--fg-faint);letter-spacing:.14em">WIN CHANCE <b data-sl-winchance style="color:var(--fg)">50%</b></span>
+              </div>
+              <input type="range" min="2" max="98" value="50" data-sl-targetinput aria-label="Dice target" style="width:100%;--p:50%">
+              <div style="display:flex;justify-content:space-between;margin-top:6px;font:600 8.5px var(--mono);letter-spacing:.16em;color:var(--fg-ghost)"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+              <div style="display:flex;gap:22px;margin-top:16px;flex-wrap:wrap">
+                <span style="font:500 10px var(--mono);color:var(--fg-faint);letter-spacing:.14em">PAYOUT <b data-sl-payout style="color:var(--gold)">-</b></span>
+                <span style="font:500 10px var(--mono);color:var(--fg-faint);letter-spacing:.14em">EV <b data-sl-ev style="color:var(--red)">-</b></span>
+              </div>
+            </div>
+          </div>
+          <div class="gp-stage-foot">
+            <span>RECENT ROLLS</span>
+            <div class="recent-mults" data-sl-dice-recent><span class="m" style="opacity:.4">loading…</span></div>
+          </div>
+        </div>
+
+        <!-- ================= BET PANEL ================= -->
+        <div>
+          <div class="gp-panel" data-r-full-m>
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <span class="k-label">Balance</span>
+              <span style="flex:1"></span>
+              <span style="font:600 13px var(--mono);color:#E8E2D6"><span data-stt-balance>-</span> <span style="font:400 9.5px var(--mono);color:var(--fg-ghost)">STT</span></span>
+            </div>
+            <div style="margin-top:14px">
+              <div class="k-label" style="margin-bottom:7px">Amount</div>
+              <div class="stepper2">
+                <button type="button" data-stake-dn aria-label="Lower stake">−</button>
+                <span class="val">
+                  <input value="0.1" data-sl-stake inputmode="decimal" aria-label="Bet amount">
+                  <span class="u">STT</span>
+                </span>
+                <button type="button" data-stake-up aria-label="Raise stake">+</button>
+              </div>
+            </div>
+            <div style="margin-top:14px">
+              <div class="k-label" style="margin-bottom:7px">Direction</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                <button class="preset" data-sl-direction data-value="under" style="height:40px;font:600 9.5px var(--mono);letter-spacing:.14em">ROLL UNDER</button>
+                <button class="preset active" data-sl-direction data-value="over" style="height:40px;font:600 9.5px var(--mono);letter-spacing:.14em">ROLL OVER</button>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;padding-top:13px;border-top:1px solid var(--line)">
+              <div><div class="k-label" style="font-size:8px;margin-bottom:3px">Profit on win</div><div style="font:600 12.5px var(--mono);color:var(--green)" data-sl-profit>-</div></div>
+              <div><div class="k-label" style="font-size:8px;margin-bottom:3px">Win chance</div><div style="font:600 12.5px var(--mono);color:#E8E2D6" data-sl-winchance-right>-</div></div>
+            </div>
+            <button class="btn-bet" data-sl-place>Place bet</button>
+            <div data-sl-result-banner></div>
+          </div>
+
+          <div class="fair-box">
+            <h3>Provably fair</h3>
+            <div class="fl">Client seed</div>
+            <div class="fv" data-sl-fairclient style="color:var(--gold)">-</div>
+            <div class="fl">Bet ID / Nonce</div>
+            <div class="fv" data-sl-fairnonce>-</div>
+            <div class="fl">Server seed (after reveal)</div>
+            <div class="fv" data-sl-fairserver style="color:var(--gold-mid)">-</div>
+            <a data-sl-explorer-link href="#" target="_blank" rel="noopener" style="display:none;font:600 10px var(--mono);letter-spacing:.14em;color:var(--gold);text-transform:uppercase;margin-bottom:8px">verify on explorer ↗</a>
+            <a href="/fair" data-link style="display:block;margin-top:8px;font:600 10px var(--mono);letter-spacing:.14em;color:var(--gold);text-transform:uppercase">How it works →</a>
+          </div>
+        </div>
       </div>
-    </aside>
-  </div>
+
+      <div class="gp-statstrip" data-r-grid-t2>
+        <div><div class="l">RTP</div><div class="v gold" data-sl="rtp" data-game="dice">99.0%</div></div>
+        <div><div class="l">House edge</div><div class="v" data-sl="houseEdge" data-game="dice">1.00%</div></div>
+        <div><div class="l">Max bet</div><div class="v"><span data-sl="maxBet" data-game="dice">-</span> <span class="u">STT</span></div></div>
+        <div><div class="l">Max win</div><div class="v">49.5<span class="u">×</span></div></div>
+      </div>
+
+    </section>
+    <div data-mount="footer"></div>
+  </main>
+</div>
 </div>
 
-<div data-mount="footer"></div>
-</div>
+<script>
+/* keep the gold range-fill in sync with the slider position (visual only) */
+(function () {
+  const s = document.querySelector('[data-sl-targetinput]');
+  if (!s) return;
+  const paint = () => { s.style.setProperty('--p', s.value + '%'); };
+  s.addEventListener('input', paint);
+  paint();
+})();
+
+/* stake stepper · walks a 1-2-5 ladder (0.01 → 0.02 → 0.05 → 0.1 …) and stops
+   at the live max the contract allows (livedata pins it on the input's max). */
+(function () {
+  const inp = document.querySelector('[data-sl-stake]');
+  if (!inp) return;
+  const LADDER = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100];
+  const cap = () => parseFloat(inp.max) || Infinity;
+  const cur = () => parseFloat(inp.value) || 0;
+  const emit = (v) => {
+    const max = cap();
+    inp.value = String(Math.min(v, max)).replace(/\.?0+$/, '') || '0.01';
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const step = (dir) => {
+    const v = cur();
+    const next = dir > 0
+      ? (LADDER.find((x) => x > v + 1e-9) ?? v * 2)
+      : ([...LADDER].reverse().find((x) => x < v - 1e-9) ?? Math.max(0.01, v / 2));
+    emit(next);
+  };
+  document.querySelector('[data-stake-up]')?.addEventListener('click', () => step(1));
+  document.querySelector('[data-stake-dn]')?.addEventListener('click', () => step(-1));
+})();
+</script>
 </body>
 </html>

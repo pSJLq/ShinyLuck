@@ -1,5 +1,5 @@
 /* =========================================================================
-   ShinyPoker — mobile layout (≤760px).
+   ShinyPoker · mobile layout (≤760px).
    Desktop is a fixed 1600×1000 stage scaled to fit; on phones the mountScale
    functions skip scaling entirely and this sheet reflows the app into a
    fluid column: compact top bar, full-width felt, the side rail as a
@@ -85,7 +85,7 @@
 
   /* ---- lobby: rows become wrapped cards ---- */
   /* the .lobby grid's implicit column sizes to the widest item's MIN-CONTENT
-     (the tab strip ≈ 530px) and every section stretches to it — clamp the
+     (the tab strip ≈ 530px) and every section stretches to it · clamp the
      track to the viewport instead; the tab strip already scrolls */
   .lobby { grid-template-columns: minmax(0, 1fr); }
   .lobby > * { min-width: 0; }

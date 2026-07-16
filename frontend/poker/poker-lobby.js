@@ -1,4 +1,4 @@
-// ShinyPoker — lobby: list live cash tables, link into each.
+// ShinyPoker · lobby: list live cash tables, link into each.
 import { ShinyPoker, fmt } from "./poker-sdk.js";
 import { POKER_CONFIG, NETWORK } from "./poker-config.js";
 
@@ -40,7 +40,7 @@ async function boot() {
   document.body.append(main);
 
   if (!POKER_CONFIG.pokerRoom) {
-    main.append(el("p", { class: "sub" }, "No deployment yet — run scripts/deploy-poker.js, then reload."));
+    main.append(el("p", { class: "sub" }, "No deployment yet · run scripts/deploy-poker.js, then reload."));
     return;
   }
 
@@ -66,7 +66,7 @@ async function boot() {
       el("td", { class: "mono" }, `${fmt(cfg.smallBlind)}/${fmt(cfg.bigBlind)} ${NETWORK.currency.symbol}`),
       el("td", {}, `NLHE ${cfg.maxSeats}-max`),
       el("td", {}, [seatsDots(filled, cfg.maxSeats), el("span", { class: "sub" }, ` ${filled}/${cfg.maxSeats}`)]),
-      el("td", { class: "mono" }, hand.inProgress ? `${fmt(hand.pot)}` : "—"),
+      el("td", { class: "mono" }, hand.inProgress ? `${fmt(hand.pot)}` : "-"),
       el("td", {}, el("a", { class: "btn btn-primary", href: `table?t=${t}` }, filled >= cfg.maxSeats ? "Observe" : "Join →")),
     ]));
   }

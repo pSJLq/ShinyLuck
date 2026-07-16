@@ -1,4 +1,4 @@
-/* ShinyPoker — marketing shared chrome (vanilla). Injects header + footer,
+/* ShinyPoker · marketing shared chrome (vanilla). Injects header + footer,
    ambient grid, FAQ toggles, zkShuffle scramble viz. */
 (function () {
   "use strict";
@@ -41,7 +41,7 @@
       '<a class="btn primary" href="lobby">Connect Wallet &amp; Play</a>' +
     '</div></header>';
 
-  // Real community links — used by BOTH footers.
+  // Real community links · used by BOTH footers.
   var LINKS = {
     telegram: "https://t.me/ShinyLuck1",
     x: "https://x.com/ShinyLuck_",
@@ -153,7 +153,7 @@
       it.addEventListener("click", function () { it.classList.toggle("open"); });
     });
 
-    // LIVE landing data from the public dealer feed (same one the lobby uses) —
+    // LIVE landing data from the public dealer feed (same one the lobby uses) -
     // the hero stats and "featured" lists are real chain state, not decor.
     liveLanding();
 
@@ -176,7 +176,7 @@
     });
   }
 
-  var DEALER_URL = "https://shinia.mom/dealer"; // public feed, CORS-open — works from dev too
+  var DEALER_URL = "/dealer"; // same-origin public feed · domain-agnostic
   var ZERO_ADDR = "0x0000000000000000000000000000000000000000";
   var stt = function (wei) { var v = Number(BigInt(wei || 0)) / 1e18; return v >= 100 ? Math.round(v).toLocaleString("en-US") : +v.toFixed(v >= 1 ? 2 : 4); };
 
@@ -195,7 +195,7 @@
       set("ls-players", String(seated));
       set("ls-tables", String(tables.length));
       set("ls-hands", String(inHand));
-      set("ls-pot", pot > 0 ? (+pot.toFixed(2)) + " STT" : "—");
+      set("ls-pot", pot > 0 ? (+pot.toFixed(2)) + " STT" : "-");
 
       var fc = document.getElementById("feat-cash");
       if (fc) {
@@ -217,14 +217,14 @@
             '<div class="ft">' + esc(t.maxPlayers + "-max " + (cost === 0n ? "freeroll" : "tournament") + " #" + t.id) + "</div>" +
             '<div class="fm secure">✓ ' + stt(t.pool) + " STT secured on-chain · " + esc(st) + "</div></div>" +
             '<div class="fval tnum">' + (cost === 0n ? "FREE" : stt(cost.toString()) + '<span class="u"> STT</span>') + "</div></a>";
-        }).join("") || '<div class="fitem"><div class="fmain"><div class="fm">No open events — start one in the lobby.</div></div></div>';
+        }).join("") || '<div class="fitem"><div class="fmain"><div class="fm">No open events · start one in the lobby.</div></div></div>';
       }
     }
     fetch(DEALER_URL + "/lobby").then(function (r) { return r.json(); }).then(apply).catch(function () {
       var fc = document.getElementById("feat-cash");
-      if (fc) fc.innerHTML = '<div class="fitem"><div class="fmain"><div class="fm">Live feed warming up — open the lobby for tables.</div></div></div>';
+      if (fc) fc.innerHTML = '<div class="fitem"><div class="fmain"><div class="fm">Live feed warming up · open the lobby for tables.</div></div></div>';
       var ftr = document.getElementById("feat-trn");
-      if (ftr) ftr.innerHTML = '<div class="fitem"><div class="fmain"><div class="fm">Live feed warming up — open the lobby for events.</div></div></div>';
+      if (ftr) ftr.innerHTML = '<div class="fitem"><div class="fmain"><div class="fm">Live feed warming up · open the lobby for events.</div></div></div>';
     });
   }
 

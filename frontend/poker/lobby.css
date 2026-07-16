@@ -1,5 +1,5 @@
 /* =========================================================================
-   ShinyPoker — Lobby styles. Extends styles.css tokens.
+   ShinyPoker · Lobby styles. Extends styles.css tokens.
    ========================================================================= */
 
 .lobby { display: grid; grid-template-rows: 56px auto auto 1fr; }
@@ -117,7 +117,7 @@
 .seatdots .lbl { font-family: var(--mono); font-weight: 600; font-size: 12px; color: var(--white); margin-left: 6px; }
 .seatdots .lbl.full { color: var(--danger-soft); }
 
-/* SECONDARY: avg pot / players-per-flop / waitlist — dimmer, lighter */
+/* SECONDARY: avg pot / players-per-flop / waitlist · dimmer, lighter */
 .numcell { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; }
 .numcell .u { font-size: 9px; color: var(--muted); opacity: 0.7; margin-left: 2px; }
 .ppfbar { display: flex; flex-direction: column; gap: 3px; align-items: flex-end; }

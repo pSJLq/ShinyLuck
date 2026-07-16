@@ -9,8 +9,27 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <!-- Absolute paths so the page works even when http-server serves index.html
      without redirecting `/games/sugar` → `/games/sugar/` (trailing slash). -->
-<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/v2.css">
 <link rel="stylesheet" href="/games/sugar/styles.css">
+<style>
+  /* Merged-site re-tint: base surfaces follow the gold/matte design system.
+     Game feedback colors (win/lose, candy art, reel symbols) stay untouched. */
+  :root {
+    --bg-0: #0A0A0B; --bg-1: #0A0A0C; --bg-2: #101014;
+    --line: #17171C; --line-2: #24242A;
+    --violet: #D9B970; --purple: #C9A961;
+    --gold: #D9B970; --amber: #E9CC85;
+  }
+  .ambient {
+    background:
+      radial-gradient(60% 50% at 50% -10%, rgba(217,185,112,.10), transparent 70%),
+      linear-gradient(180deg, #0B0A08 0%, #0A0A0B 50%, #070708 100%) !important;
+  }
+  .ambient-orb, .ambient-stars { display: none !important; }
+  /* fit the whole machine on one screen (desktop) */
+  @media (min-width: 861px) { .sugar-shell { zoom: .85; } }
+</style>
+
 
 <!-- Critical-path: ESM modules are otherwise discovered only after the inline
      <script type="module"> below starts evaluating. Preloading them in <head>
@@ -41,7 +60,6 @@
   /* Custom cursor is back - partials.js now throttles its RAF to mouse-
      active periods only, so the previous laggy feel is gone. We keep the
      native cursor hidden in favour of the dot+ring composite. */
-  html, body { cursor: none !important; }
   .sugar-shell .ambient,
   .sugar-shell .ambient-orb { display: none !important; }
   .sugar-shell .marquee .scroll,
@@ -149,35 +167,40 @@
   .sl-connect-prompt {
     position: fixed; inset: 0; display: flex; align-items: center;
     justify-content: center; padding: 24px; z-index: 50;
-    background: radial-gradient(ellipse at center, rgba(124,58,237,0.08), rgba(8,10,18,0.94));
+    background: radial-gradient(ellipse at center, rgba(217,185,112,0.08), rgba(7,7,8,0.94));
     backdrop-filter: blur(6px);
     font-family: 'JetBrains Mono', monospace;
   }
   .sl-connect-prompt .card {
     text-align: center; padding: 36px 44px; max-width: 460px;
-    border: 1px solid rgba(255,255,255,0.08); border-radius: 18px;
-    background: linear-gradient(135deg, #1a1830, #0e0d20);
-    box-shadow: 0 24px 80px rgba(124,58,237,0.18);
+    border: 1px solid rgba(217,185,112,0.18); border-radius: 18px;
+    background: linear-gradient(135deg, #14110B, #0A0A0C);
+    box-shadow: 0 24px 80px rgba(217,185,112,0.14);
   }
-  .sl-connect-prompt h2 { margin: 0 0 12px; font-size: 24px; color: #fff; letter-spacing: 1px; }
-  .sl-connect-prompt p  { color: #b6b0c8; margin: 0 0 18px; line-height: 1.55; font-size: 13px; }
+  .sl-connect-prompt h2 { margin: 0 0 12px; font-size: 24px; color: #F6F1E7; letter-spacing: 1px; }
+  .sl-connect-prompt p  { color: #A5A29B; margin: 0 0 18px; line-height: 1.55; font-size: 13px; }
   .sl-connect-prompt small { color: #6b6b75; font-size: 11px; }
 </style>
+  <script type="module" src="/lib/i18n.js"></script>
 </head>
 <body data-active-page="games">
 <div data-page-shell>
 
 <div data-mount="nav"></div>
 
-<div id="slot-root"></div>
-
-<div data-mount="footer"></div>
+<div style="display:flex;align-items:flex-start">
+  <div data-mount="side"></div>
+  <main data-r-padb-m style="flex:1;min-width:0">
+    <div id="slot-root"></div>
+    <div data-mount="footer"></div>
+  </main>
+</div>
 
 </div>
 
 <!-- Pre-connect overlay. Slot does NOT mount until wallet is connected.
      Hidden as soon as `shinyluck:connected` fires. -->
-<div class="sl-connect-prompt" id="connect-prompt">
+<div class="sl-connect-prompt" id="connect-prompt" style="display:none">
   <div class="card">
     <h2>SUGAR.LAB · Cluster Cascade</h2>
     <p>Sign in to play on Somnia Testnet. Bets settle on-chain - every
@@ -433,8 +456,9 @@
         }
       } catch (e) { console.warn('[sugar] realtime WS sub failed:', e?.message || e); }
 
-      // Live RTP from contract - Sugar's hero/marquee shows 92% by default
-      // but the LLM agent flexes it via casino.adjustSlotRTP. Pull once on
+      // Live RTP from the contract · the markup ships a placeholder, but the
+      // real number is whatever adjustSlotRTP set (the payout boost, not a
+      // label), so it is always read from chain. Pull once on
       // mount + subscribe to RtpAdjusted so any agent-driven change shows
       // up without a refresh. Cluster = game id 6.
       async function refreshRtp() {
@@ -501,6 +525,12 @@
       document.dispatchEvent(new CustomEvent('shinyluck:slot-mounted'));
     }
   });
+
+  // Reveal the connect card ONLY once Privy has actually settled as signed-out ·
+  // showing it during session restore made it flash at players already logged in.
+  import('/lib/auth-gate.js').then(({ whenAuthSettled }) => whenAuthSettled()).then((authed) => {
+    if (!authed && !currentSlot && !SL.address) prompt.style.display = '';
+  }).catch(() => {});
 
   // Mount-trigger is a polling loop instead of a single event listener.
   // Rationale: when navigating from another page, Privy bootstraps + restores

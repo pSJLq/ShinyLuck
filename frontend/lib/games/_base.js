@@ -20,7 +20,7 @@ import { friendlyError } from "../errors.js";
 export { friendlyError };
 
 export const ZERO = "0x0000000000000000000000000000000000000000";
-// Drop poll cadence — fast settle was bottlenecked here, not on-chain.
+// Drop poll cadence · fast settle was bottlenecked here, not on-chain.
 // Frontend now subscribes to WS first; this fallback fires every 750ms.
 export const SETTLE_POLL_MS = 750;
 export const SETTLE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -119,7 +119,7 @@ export function populateFairPanel({ clientSeed, betId, nonce, serverSeed, txHash
 }
 
 export function clearFairServer() {
-  setText("[data-sl-fairserver]", "—");
+  setText("[data-sl-fairserver]", "-");
   const link = $("[data-sl-explorer-link]");
   if (link) link.style.display = "none";
 }
@@ -145,7 +145,7 @@ export async function refreshFairFromPlayer(gameId) {
 }
 
 // ---------------------------------------------------------------------
-// Settle polling — waits for BetSettled or BetRefunded for `betId`.
+// Settle polling · waits for BetSettled or BetRefunded for `betId`.
 // ---------------------------------------------------------------------
 
 export async function pollForSettle(betId) {
@@ -193,11 +193,11 @@ export async function pollForSettle(betId) {
   }
 
   const start = Date.now();
-  // Tight initial polling — first check immediately (no startup delay), then
+  // Tight initial polling · first check immediately (no startup delay), then
   // every SETTLE_POLL_MS (750ms) so total reveal-to-UI latency stays under
   // ~1s once the reveal-bot lands its settle tx.
   let scanFrom = await provider().getBlockNumber();
-  // Initial check before sleeping — in case settle already happened during
+  // Initial check before sleeping · in case settle already happened during
   // the placement round-trip (Sequence + chain mining).
   try {
     const back = await fetchRecentLogs(c, "BetSettled", {
@@ -242,7 +242,7 @@ export async function pollForSettle(betId) {
 }
 
 // ---------------------------------------------------------------------
-// Recent events strip (last N for a given game) — caller provides the
+// Recent events strip (last N for a given game) · caller provides the
 // label/className decoder for each event.
 // ---------------------------------------------------------------------
 
@@ -295,7 +295,7 @@ export function readStakeStr() {
 //
 // Casino is transparent about its math: every game page renders the
 // per-bet expected value alongside the upside in STT + %. Most casinos
-// hide this — we surface it as a feature.
+// hide this · we surface it as a feature.
 //
 //   ev_per_bet = − stake × houseEdge
 //
@@ -334,7 +334,7 @@ export async function refreshEV(gameId) {
   return { evSTT, bps };
 }
 
-// CSS keyframes used by all game pages — injected once.
+// CSS keyframes used by all game pages · injected once.
 export function injectKeyframes() {
   if (document.getElementById("sl-game-kf")) return;
   const s = document.createElement("style");

@@ -1,7 +1,7 @@
 // Plinko integration on top of _base.js.
 //
 // Animation: the ball's path is encoded in the lower 16 bits of `randomness`
-// emitted by Casino — bit k indicates which way the ball bounced off row k
+// emitted by Casino · bit k indicates which way the ball bounced off row k
 // (0 = left, 1 = right). The contract already enforces this mapping, so we
 // can replay it deterministically on the frontend and watch the ball drop.
 
@@ -35,11 +35,11 @@ function recalcSummary() {
   const table = PAYOUT_TABLES[risk] || PAYOUT_TABLES[0];
   const maxPay = Math.max(...table) / 100;
   $$("[data-sl-profit]").forEach((el) => {
-    el.textContent = stakeNum > 0 ? `up to + ${(stakeNum * (maxPay - 1)).toFixed(2)} STT` : "—";
+    el.textContent = stakeNum > 0 ? `up to + ${(stakeNum * (maxPay - 1)).toFixed(2)} STT` : "-";
   });
   const placeBtn = $("[data-sl-place]");
   if (placeBtn && !placeBtn.dataset.locked) {
-    placeBtn.textContent = `Drop ball — ${fmtSTTfromString(stake)} STT`;
+    placeBtn.textContent = `Drop ball · ${fmtSTTfromString(stake)} STT`;
   }
   refreshEV(PLINKO).catch(() => {});
 }
@@ -53,7 +53,7 @@ function decodePlinko(resultData) {
 }
 
 // ---------------------------------------------------------------------
-// Canvas animation — pegs in a triangle, ball drops, bounces left/right
+// Canvas animation · pegs in a triangle, ball drops, bounces left/right
 // per encoded path. ~3s total. requestAnimationFrame loop, no deps.
 // ---------------------------------------------------------------------
 
@@ -206,7 +206,7 @@ async function onPlaceBet() {
   }
 
   // INSTANT UX: button says "Dropping…", chain tx happens silently in the
-  // background. When chain reveals the path, the ball animation plays — the
+  // background. When chain reveals the path, the ball animation plays · the
   // user sees a continuous "drop" visual, not a "submitting…" wait.
   clearResultBanner();
   clearFairServer();

@@ -93,6 +93,22 @@ function roundGameDisabled(gid) {
   return (gid === 1 && !ROUND_GAMES.has("crash")) || (gid === 5 && !ROUND_GAMES.has("roulette"));
 }
 
+// ON-DEMAND round games (ROUND_ON_DEMAND=roulette): the bot only opens the
+// NEXT round when the previous one actually had bettors — an idle wheel stops
+// burning gas. The FIRST round after an idle stretch is opened by the game UI
+// itself (startRouletteRound is permissionless; the player at the table pays
+// the tiny open tx). Settle/refund/self-heal for these games stay fully on.
+const ROUND_ON_DEMAND = new Set(
+  (process.env.ROUND_ON_DEMAND ?? "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean),
+);
+
+// Games pinned paused on-chain by the operator (KEEP_PAUSED=1,3,4 → crash,
+// mines, plinko). The circuit-recovery below must NOT read a deliberate pause
+// as a tripped breaker and reopen them.
+const KEEP_PAUSED = new Set(
+  (process.env.KEEP_PAUSED ?? "").split(",").map(s => parseInt(s.trim(), 10)).filter(Number.isFinite),
+);
+
 function makeSeedStore({ initialSeedsFile, poolFile, masterKey }) {
   const initial = initialSeedsFile && fs.existsSync(initialSeedsFile)
     ? JSON.parse(fs.readFileSync(initialSeedsFile, "utf8")).seeds || []
@@ -785,6 +801,11 @@ async function main() {
         if (round && Number(round.betWindowEnd) > 0 && nowSec < Number(round.betWindowEnd) + ROUND_GAP_S) {
           return; // still inside the post-round gap - open on a later tick
         }
+        // ON-DEMAND: don't chain a new round after an EMPTY one — the wheel
+        // idles gas-free until a player's UI opens the next round themselves.
+        if (ROUND_ON_DEMAND.has(gameLabel) && (!round || Number(round.bettorCount ?? 0) === 0)) {
+          return;
+        }
         if (Date.now() < seedEmptyBackoffUntil) return; // empty-pool backoff: don't storm startRound
         try {
           const startFn = gameLabel === "crash" ? "startCrashRound" : "startRouletteRound";
@@ -1060,7 +1081,7 @@ async function main() {
     // Skip intentionally-disabled round games (e.g. crash off on testnet): a
     // deliberate pause there must NOT look like a tripped circuit breaker, or
     // the bot would report a perpetual "CIRCUIT HALT".
-    for (let g = 0; g < 6; g++) { if (roundGameDisabled(g)) continue; try { if (await casino.gamePaused(g)) { anyPaused = true; break; } } catch {} }
+    for (let g = 0; g < 6; g++) { if (roundGameDisabled(g) || KEEP_PAUSED.has(g)) continue; try { if (await casino.gamePaused(g)) { anyPaused = true; break; } } catch {} }
     if (!anyPaused) { haltSince = 0; return; }
     const free = await casino.freeBankroll().catch(() => 0n);
     if (haltSince === 0) {
@@ -1074,7 +1095,7 @@ async function main() {
     const healthy = free >= MIN_HEALTHY_BANKROLL;
     if (cooled && stabilized && healthy) {
       for (let g = 0; g < 7; g++) {
-        if (roundGameDisabled(g)) continue; // leave intentionally-off round games (crash/roulette) paused
+        if (roundGameDisabled(g) || KEEP_PAUSED.has(g)) continue; // leave intentionally-off games paused
         try { if (await casino.gamePaused(g)) { const tx = await casino.unpauseGame(g); await tx.wait(); } }
         catch (e) { console.warn(`[reveal-bot] reopen game ${g}: ${e.shortMessage || e.message}`); }
       }

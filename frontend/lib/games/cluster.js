@@ -1,4 +1,4 @@
-// SUGAR.LAB — on-chain cluster-pays slot frontend.
+// SUGAR.LAB · on-chain cluster-pays slot frontend.
 //
 // resultData (from Casino + ClusterLib):
 //   abi.encode(uint8[49] finalGrid, uint256 totalPayoutX100,
@@ -10,7 +10,7 @@
 // The contract does all the cascade math; this file is responsible for
 // visualising "initial → final" with a quick tumble-style animation. A full
 // per-cascade replay (each step animated) needs the contract randomness
-// re-played in JS — that's a follow-up; for now the result lands with a
+// re-played in JS · that's a follow-up; for now the result lands with a
 // satisfying tumble + cluster-highlight pass.
 
 import { ethers } from "/vendor/ethers.bundle.js";
@@ -186,7 +186,7 @@ async function refreshGameMeta() {
 }
 
 async function refreshBalance() {
-  if (!SL.address) { setText("#balance", "—"); return; }
+  if (!SL.address) { setText("#balance", "-"); return; }
   try {
     const bal = await provider().getBalance(SL.address);
     setText("#balance", fmtSTT(bal));
@@ -291,14 +291,14 @@ async function doSpin() {
     const settled = await pollForSettle(betId);
     clearInterval(shuffleHandle);
     if (!settled || settled.refunded) {
-      setText("#lastWin", settled?.refunded ? "— refunded" : "— timed out");
+      setText("#lastWin", settled?.refunded ? "- refunded" : "- timed out");
       $("#lastWin").classList.add("zero");
       return;
     }
     const decoded = decodeResult(settled.args.resultData);
     if (!decoded) return;
 
-    // Animate "settling" — tumble grid down, then highlight clusters.
+    // Animate "settling" · tumble grid down, then highlight clusters.
     setGrid(decoded.grid, true);
     await sleep(700);
     highlightClusters(decoded.grid);
@@ -314,7 +314,7 @@ async function doSpin() {
       $("#lastWin").classList.remove("zero");
       setTimeout(() => { $("#winHud").style.display = "none"; }, 3500);
     } else {
-      setText("#lastWin", "— no cluster");
+      setText("#lastWin", "- no cluster");
       $("#lastWin").classList.add("zero");
     }
     populateFairPanel({

@@ -9,6 +9,26 @@ import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect, shortAddr } from "./wallet.js";
 import { CONFIG } from "./config.js";
 import { provider, fetchLogs, fetchRecentLogs, fetchDeploymentBlock } from "./rpc.js";
+import { POKER_CONFIG } from "/poker/poker-config.js";
+
+// Poker rake + tournament fees live on contracts owned by the POKER deployer
+// key (a different account than the casino owner), so the console gates on
+// "either owner" and each card checks its own.
+const ROOM_ADMIN_ABI = [
+  "function owner() view returns (address)",
+  "function rakeCollected() view returns (uint256)",
+  "function withdrawRake(address to, uint256 amount) external",
+];
+const TRN_ADMIN_ABI = [
+  "function owner() view returns (address)",
+  "function feeCollected() view returns (uint256)",
+  "function withdrawFees(address to, uint256 amount) external",
+];
+let _room = null, _trn = null;
+function room() { return _room || (_room = new ethers.Contract(POKER_CONFIG.pokerRoom, ROOM_ADMIN_ABI, provider())); }
+function trn() { return _trn || (_trn = new ethers.Contract(POKER_CONFIG.pokerTournament, TRN_ADMIN_ABI, provider())); }
+let pokerOwner = null;
+let isPokerOwner = false;
 
 const GAME_NAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.LAB"];
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -84,16 +104,23 @@ async function gateAccess() {
     try { casinoOwner = (await casino().owner()).toLowerCase(); }
     catch (e) { console.warn("[admin] owner read:", e.message); return; }
   }
-  $("[data-sl-adm-owner]").textContent = shortAddr(casinoOwner);
+  if (!pokerOwner && POKER_CONFIG.pokerRoom) {
+    try { pokerOwner = (await room().owner()).toLowerCase(); } catch (_) {}
+  }
+  $("[data-sl-adm-owner]").textContent = shortAddr(casinoOwner) + (pokerOwner && pokerOwner !== casinoOwner ? " · poker " + shortAddr(pokerOwner) : "");
   if (SL.address) {
     $("[data-sl-adm-connected]").textContent = shortAddr(SL.address);
     isOwner = SL.address.toLowerCase() === casinoOwner;
+    isPokerOwner = !!pokerOwner && SL.address.toLowerCase() === pokerOwner;
   } else {
     $("[data-sl-adm-connected]").textContent = "-";
     isOwner = false;
+    isPokerOwner = false;
   }
-  $("[data-sl-adm-denied]").style.display = isOwner ? "none" : "block";
-  $("[data-sl-adm-main]").classList.toggle("on", isOwner);
+  // Either key opens the console; each card still enforces its own owner.
+  const allowed = isOwner || isPokerOwner;
+  $("[data-sl-adm-denied]").style.display = allowed ? "none" : "block";
+  $("[data-sl-adm-main]").classList.toggle("on", allowed);
 }
 
 async function refreshTreasury() {
@@ -308,6 +335,25 @@ async function refreshStats() {
 }
 
 function bindActions() {
+  const pokerWithdraw = async (which) => {
+    const toast = (m, kind = "error") => import("./ui.js").then(({ toast: t }) => t(m, { kind, ttl: 6000 }));
+    if (!isPokerOwner) return toast("Connect the POKER deployer account to withdraw poker funds", "warn");
+    await connect();
+    const dest = ($("[data-sl-adm-poker-to]")?.value || "").trim() || SL.address;
+    if (!ethers.isAddress(dest)) return toast("Enter a valid destination address", "warn");
+    try {
+      const c = which === "rake" ? room() : trn();
+      const amount = which === "rake" ? await c.rakeCollected() : await c.feeCollected();
+      if (!(amount > 0n)) return toast("Nothing to withdraw", "warn");
+      const w = c.connect(SL.signer);
+      const tx = which === "rake" ? await w.withdrawRake(dest, amount) : await w.withdrawFees(dest, amount);
+      await tx.wait();
+      toast(`Sent ${ethers.formatEther(amount)} STT to ${shortAddr(dest)}`, "success");
+      refreshPoker();
+    } catch (e) { toast(e.shortMessage || e.message); }
+  };
+  $("[data-sl-adm-rake-withdraw]")?.addEventListener("click", () => pokerWithdraw("rake"));
+  $("[data-sl-adm-trnfees-withdraw]")?.addEventListener("click", () => pokerWithdraw("fees"));
   $("[data-sl-adm-schedule]")?.addEventListener("click", async () => {
     if (!isOwner) return;
     await connect();
@@ -386,10 +432,18 @@ async function refreshWindows() {
   } catch (e) { console.warn("[admin] windows:", e.message); }
 }
 
+async function refreshPoker() {
+  const fmt = (v) => Number(ethers.formatEther(v)).toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+  try { $("[data-sl-adm-rake]").textContent = fmt(await room().rakeCollected()); } catch (_) {}
+  try { $("[data-sl-adm-trnfees]").textContent = fmt(await trn().feeCollected()); } catch (_) {}
+}
+
 async function refreshAll() {
   await gateAccess();
-  if (!isOwner) return;
-  await Promise.all([refreshTreasury(), refreshBonus(), refreshGames(), refreshWindows(), refreshReasoning(), refreshAgents(), refreshStats()]);
+  if (!isOwner && !isPokerOwner) return;
+  await Promise.all([refreshPoker().catch(() => {})].concat(
+    isOwner ? [refreshTreasury(), refreshBonus(), refreshGames(), refreshWindows(), refreshReasoning(), refreshAgents(), refreshStats()] : [],
+  ));
 }
 
 document.addEventListener("DOMContentLoaded", () => {

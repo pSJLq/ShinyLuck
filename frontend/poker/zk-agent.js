@@ -1,10 +1,10 @@
-// zkShuffle v2 browser agent — the player's side of the mental-poker protocol.
+// zkShuffle v2 browser agent · the player's side of the mental-poker protocol.
 // Runs silently in the table page: generates the per-hand key, shuffles the
 // encrypted deck on its turn, provides decryption shares when the protocol
 // needs them, and decrypts the player's OWN hole cards locally. The secret
 // never leaves this tab (sessionStorage keeps it across F5 mid-hand), no
 // wallet popups (messages are signed by the session key / headless signer),
-// and the player pays zero gas — the coordinator posts everything, and the
+// and the player pays zero gas · the coordinator posts everything, and the
 // CONTRACT verifies every card cryptographically.
 //
 // Trust hygiene (what we re-check instead of believing the bot):
@@ -40,7 +40,7 @@ const ZKD_ABI = [
   "function boardRevealedCount(uint256 dealId) view returns (uint8)",
 ];
 // Self-rescue path: read the accusation straight from the chain (NOT via the
-// bot — a malicious coordinator is exactly the threat model here) and answer it.
+// bot · a malicious coordinator is exactly the threat model here) and answer it.
 const ROOM_ZK_ABI = [
   "function accusationOf(uint256 t) view returns (bool active, uint8 offenderSeat, uint16 cardIdx, uint64 handId, uint64 deadline, (uint256,uint256) ctA, (uint256,uint256) ctB)",
   "function seatOf(uint256 t, address player) view returns (uint8)",
@@ -58,10 +58,10 @@ export function startZkAgent(sdk, getTableId) {
   const sigCache = new Map(); // dealId -> signature
   const secKey = (t, dealId) => `spzk:${sdk.cfg.pokerRoom.slice(2, 10)}:${t}:${dealId}`;
   const shufKey = (t, dealId) => `spzksh:${sdk.cfg.pokerRoom.slice(2, 10)}:${t}:${dealId}`;
-  // dealId -> { ok, hash } — verdict of my own verification of the full shuffle
+  // dealId -> { ok, hash } · verdict of my own verification of the full shuffle
   // chain. I contribute NO decryption share until every stage is proven.
   const chainVerdict = new Map();
-  // dealId -> Map(stage -> {inH,outH,prfH,aggH}) — stages already proven during
+  // dealId -> Map(stage -> {inH,outH,prfH,aggH}) · stages already proven during
   // the shuffle phase (incremental pre-verification). Keyed by content hashes:
   // the final verifyChain only skips a stage if the transcript it is looking at
   // is byte-identical to what was proven, so a coordinator that swaps data
@@ -79,13 +79,13 @@ export function startZkAgent(sdk, getTableId) {
 
   // SECRECY GATE: may I release a decryption share for in-play index `idx`,
   // given my participant index, the deal's k, and the ON-CHAIN hand street
-  // (street = -1 when this deal isn't the live hand yet — pre-collect phase)?
-  //   - another player's hole card: always safe — the coordinator still lacks
+  // (street = -1 when this deal isn't the live hand yet · pre-collect phase)?
+  //   - another player's hole card: always safe · the coordinator still lacks
   //     the OWNER's own share, so k−1 shares decrypt nothing;
   //   - my OWN hole cards: only at showdown (street 4; all-in runout also lands
-  //     the engine on street 4) — earlier would hand the coordinator the last
+  //     the engine on street 4) · earlier would hand the coordinator the last
   //     share it needs to read my hand;
-  //   - a board card: only once its street has opened on-chain — otherwise a
+  //   - a board card: only once its street has opened on-chain · otherwise a
   //     malicious coordinator could ask for the whole board during preflop.
   // This never trusts task.idxs. Canonical copy: poker-zk-dealer.mayReleaseShare
   // (kept in sync); also mirrors on-chain ZkTableDealer.accusationAllowed.
@@ -111,7 +111,7 @@ export function startZkAgent(sdk, getTableId) {
   /// verify the already-posted stages so the expensive MSMs don't all land in
   /// the holeshares window (at a 6-max table that's ~2s of proofs + a ~0.5MB
   /// transcript fetch that used to stall the deal right before hole cards).
-  /// Purely an optimization — verifyChain re-checks anything not byte-matched.
+  /// Purely an optimization · verifyChain re-checks anything not byte-matched.
   async function preverifyChain(t, dealId, signature) {
     if (chainVerdict.has(dealId) || preverifyBusy || Date.now() - preverifyAt < 900) return;
     preverifyBusy = true;
@@ -134,12 +134,12 @@ export function startZkAgent(sdk, getTableId) {
         if (!zk.verifyShuffle(`SPZK:${dealId}:shuffle:${i}`, inDeck, outDeck, X, prf)) return; // final pass will re-check & refuse
         prog.set(i, stageSig(ch, i, X));
       }
-    } catch (_) { /* best-effort — the authoritative pass is verifyChain */ }
+    } catch (_) { /* best-effort · the authoritative pass is verifyChain */ }
     finally { preverifyBusy = false; }
   }
 
   /// Fetch the full shuffle transcript and verify EVERY stage's Wikström proof
-  /// myself — the coordinator's word is not a trust point. Also pins my own
+  /// myself · the coordinator's word is not a trust point. Also pins my own
   /// shuffle: the chain must contain the exact deck I produced at my turn.
   /// Returns { ok, hash } and caches per deal.
   async function verifyChain(t, dealId, signature, myTurn, myX) {
@@ -148,13 +148,13 @@ export function startZkAgent(sdk, getTableId) {
     if (!ch || !Array.isArray(ch.decks) || !Array.isArray(ch.proofs) || ch.decks.length !== ch.k ||
         ch.proofs.length !== ch.k || !Array.isArray(ch.pubkeys) || ch.pubkeys.length !== ch.k ||
         !Array.isArray(ch.keySigs) || !Array.isArray(ch.seats) || ch.pubkeys.some((p) => !p) || ch.proofs.some((p) => !p)) {
-      return { ok: false, hash: null }; // incomplete — retry next poll, no verdict cached
+      return { ok: false, hash: null }; // incomplete · retry next poll, no verdict cached
     }
     try {
       // 1. KEY-SUBSTITUTION DEFENCE: recompute the aggregate from the posted
       //    pubkeys and verify each pubkey is bound BY ITS SEAT'S OCCUPANT.
       //    A coordinator that swaps in its own key for a seat can't forge that
-      //    seat's signature, so the swap is caught here and we never share —
+      //    seat's signature, so the swap is caught here and we never share -
       //    which is what denies the coordinator the shares it would need to
       //    decrypt that seat's cards. This is the "not even the house sees your
       //    cards" guarantee, enforced client-side, not trusted from the bot.
@@ -163,7 +163,7 @@ export function startZkAgent(sdk, getTableId) {
       for (const P of pubkeys) X = X.add(P);
       // my own key must be present at my index (else my card isn't under my key)
       if (myX && !pubkeys[myTurn].equals(myX)) {
-        console.error("[zk-agent] my own per-hand key is NOT in the aggregate — refusing");
+        console.error("[zk-agent] my own per-hand key is NOT in the aggregate · refusing");
         return cacheBad(dealId);
       }
       // what I shuffled under must equal the real aggregate. The pin is
@@ -181,14 +181,14 @@ export function startZkAgent(sdk, getTableId) {
         } catch (_) {}
       }
       // I shuffled (I'm a participant reaching the share gate), so I MUST be
-      // able to confirm my own contribution — refuse to share blind if the pin
+      // able to confirm my own contribution · refuse to share blind if the pin
       // is unrecoverable rather than risk sharing on a chain missing my shuffle.
       if (myX && !pin) {
-        console.error("[zk-agent] cannot confirm my own shuffle is in the chain — refusing");
+        console.error("[zk-agent] cannot confirm my own shuffle is in the chain · refusing");
         return cacheBad(dealId);
       }
       if (pin && !pin.aggKey.equals(X)) {
-        console.error("[zk-agent] aggregate key I shuffled under ≠ Σ posted pubkeys — refusing");
+        console.error("[zk-agent] aggregate key I shuffled under ≠ Σ posted pubkeys · refusing");
         return cacheBad(dealId);
       }
       for (let i = 0; i < ch.k; i++) {
@@ -203,7 +203,7 @@ export function startZkAgent(sdk, getTableId) {
         if (player === ethers.ZeroAddress) { console.error(`[zk-agent] key binding ${i}: empty seat`); return cacheBad(dealId); }
         const sk = (await roomZk.sessionKeyOf(occ.player)).toLowerCase();
         if (recovered !== player && recovered !== sk) {
-          console.error(`[zk-agent] key binding ${i}: pubkey NOT signed by seat ${seat}'s occupant — refusing`);
+          console.error(`[zk-agent] key binding ${i}: pubkey NOT signed by seat ${seat}'s occupant · refusing`);
           return cacheBad(dealId);
         }
       }
@@ -213,7 +213,7 @@ export function startZkAgent(sdk, getTableId) {
       const decks = [zk.initialDeck(zk.deckPoints()), ...ch.decks.map((d) => d.map(parseCt))];
       const proofs = ch.proofs.map((w) => zk.shuffleProofFromWire(w, parsePt));
       if (pin && deckHashHex(ch.decks[myTurn]) !== pin.outHash) {
-        console.error("[zk-agent] chain does NOT contain my own shuffle output — refusing");
+        console.error("[zk-agent] chain does NOT contain my own shuffle output · refusing");
         return cacheBad(dealId);
       }
       const prog = chainProg.get(dealId);
@@ -226,7 +226,7 @@ export function startZkAgent(sdk, getTableId) {
           if (cached.inH === sig.inH && cached.outH === sig.outH && cached.prfH === sig.prfH && cached.aggH === sig.aggH) continue;
         }
         if (!zk.verifyShuffle(`SPZK:${dealId}:shuffle:${i}`, decks[i], decks[i + 1], X, proofs[i])) {
-          console.error(`[zk-agent] shuffle proof ${i} FAILED verification — refusing`);
+          console.error(`[zk-agent] shuffle proof ${i} FAILED verification · refusing`);
           return cacheBad(dealId);
         }
       }
@@ -243,18 +243,18 @@ export function startZkAgent(sdk, getTableId) {
       console.log(`[zk-agent] chain verified: ${ch.k} bound keys + ${ch.k} shuffle proofs ok (deal ${dealId})`);
       return verdict;
     } catch (e) {
-      console.error("[zk-agent] chain verification error — refusing:", e.message || e);
+      console.error("[zk-agent] chain verification error · refusing:", e.message || e);
       return cacheBad(dealId);
     }
   }
   const cacheBad = (dealId) => { const v = { ok: false, hash: null, bad: true }; chainVerdict.set(dealId, v); return v; };
 
   // If an on-chain accusation names MY seat, compute the demanded share from the
-  // ciphertext embedded in the accusation and post proveResponsive — this both
+  // ciphertext embedded in the accusation and post proveResponsive · this both
   // clears the (false or late) accusation and delivers the share, so an honest
   // player can never be penalized while their client is alive. Own-hole shares
   // are only ever surrendered once the board is complete (showdown/runout);
-  // the contract enforces that too — this is defense in depth.
+  // the contract enforces that too · this is defense in depth.
   async function selfRescue(t) {
     if (rescueBusy) return;
     const acc = await roomZk.accusationOf(t);
@@ -272,7 +272,7 @@ export function startZkAgent(sdk, getTableId) {
     const idx = Number(acc.cardIdx);
     if ((idx === 2 * p || idx === 2 * p + 1) && Number(await zkd.boardRevealedCount(dealId)) < 5) return;
     // if this accusation names ONE OF MY OWN hole cards and I FOLDED, my cards
-    // stay hidden even at showdown — refuse to rescue (mirrors the shares-path
+    // stay hidden even at showdown · refuse to rescue (mirrors the shares-path
     // fold gate). The coordinator holds k-1 of my hole shares from the pre-hand
     // collect; delivering the last one here would hand it my folded hand. Letting
     // the accusation expire → cancelHandPenalized against my seat is the correct
@@ -280,7 +280,7 @@ export function startZkAgent(sdk, getTableId) {
     if (idx === 2 * p || idx === 2 * p + 1) {
       let inHand;
       try { inHand = (await roomZk.getSeatHand(t, mySeat)).inHand; } catch (_) { return; }
-      if (!inHand) { console.warn("[zk-agent] refusing own-hole rescue — I folded"); return; }
+      if (!inHand) { console.warn("[zk-agent] refusing own-hole rescue · I folded"); return; }
     }
     const sec = secretFor(t, dealId, "");
     const ct = {
@@ -344,7 +344,7 @@ export function startZkAgent(sdk, getTableId) {
     if (!zs || !zs.dealId) return;
     await runDeal(t, zs.dealId);
     // pre-deal: while the live hand shows down, the bot runs the NEXT hand's
-    // setup under a second dealId — same protocol, same secrecy gates (that
+    // setup under a second dealId · same protocol, same secrecy gates (that
     // deal has no live hand yet, so the street gate reads -1: own-hole and
     // board shares stay locked; only the harmless others'-holes pre-collect
     // and the shuffle itself go out early).
@@ -368,7 +368,7 @@ export function startZkAgent(sdk, getTableId) {
 
     if (task.do === "key") {
       const sec = secretFor(t, dealId, task.domain);
-      // PoK might be missing when the secret was restored from storage — redo it
+      // PoK might be missing when the secret was restored from storage · redo it
       let pok = sec.pok;
       if (!pok) {
         const k = zk.randScalar();
@@ -394,7 +394,7 @@ export function startZkAgent(sdk, getTableId) {
 
     if (task.do === "shuffle") {
       const deck = task.deck.map(parseCt);
-      // first shuffler sees the plaintext deck — verify it's the canonical one
+      // first shuffler sees the plaintext deck · verify it's the canonical one
       if (task.first) {
         const pts = zk.deckPoints();
         for (let j = 0; j < 52; j++) {
@@ -406,7 +406,7 @@ export function startZkAgent(sdk, getTableId) {
       const wireDeck = out.deck.map(serCt);
       const outHash = deckHashHex(wireDeck);
       // secret + PIN survive F5 so that after a reload I can still (a) produce
-      // the proof and (b) verify the served chain actually contains MY shuffle —
+      // the proof and (b) verify the served chain actually contains MY shuffle -
       // without the persisted pin, a fully-colluding table + coordinator could
       // drop a refreshed player's shuffle and learn their cards.
       try {
@@ -418,18 +418,18 @@ export function startZkAgent(sdk, getTableId) {
       myShuffle.set(dealId, { outHash, aggKey: X });
       // deck goes out FIRST (the next shuffler proceeds immediately); the
       // Wikström proof of this shuffle is computed right after and streams in
-      // behind it — proving pipelines with the next player's shuffle.
+      // behind it · proving pipelines with the next player's shuffle.
       await post("/zk/shuffle", { tableId: t, dealId, signature, deck: wireDeck });
       const prf = zk.proveShuffle(`SPZK:${dealId}:shuffle:${task.participant}`, deck, out.deck, X, out.secret);
       await post("/zk/shuffleproof", { tableId: t, dealId, signature, turn: task.participant, proof: zk.shuffleProofToWire(prf) });
       return;
     }
 
-    // F5-recovery: deck already posted, proof still owed — decks come from the
+    // F5-recovery: deck already posted, proof still owed · decks come from the
     // task, the secret {perm, rho} from sessionStorage.
     if (task.do === "shuffleproof") {
       const saved = sessionStorage.getItem(shufKey(t, dealId));
-      if (!saved) return; // secret lost with the tab — the deadline will strike us
+      if (!saved) return; // secret lost with the tab · the deadline will strike us
       const sec = JSON.parse(saved);
       if (Number(sec.turn) !== Number(task.turn)) return;
       const inDeck = task.inDeck.map(parseCt);
@@ -445,7 +445,7 @@ export function startZkAgent(sdk, getTableId) {
       // HARD GATE: not a single decryption share leaves this tab until I have
       // verified the ENTIRE shuffle chain myself. A deck that isn't a proven
       // permutation could have my own card's ciphertext planted in another
-      // player's slot — my share would then help decrypt MY card to them.
+      // player's slot · my share would then help decrypt MY card to them.
       // (an incomplete chain isn't cached → retried next poll; a verified-BAD
       // verdict is cached → this deal is dead to us permanently)
       const secForGate = secretFor(t, dealId, "");
@@ -455,12 +455,12 @@ export function startZkAgent(sdk, getTableId) {
       // read the hand street FROM CHAIN (never the bot) to gate share release
       const hand = await roomZk.getHand(t);
       const street = (hand.inProgress && String(hand.dealId) === String(dealId)) ? Number(hand.street) : -1;
-      // if I FOLDED, my hole cards are never shown — refuse own-hole shares even
+      // if I FOLDED, my hole cards are never shown · refuse own-hole shares even
       // at showdown (a malicious bot must not harvest folded players' cards).
       // k and my seat come from the VERIFIED chain (verdict), never from the task:
       // an inflated task.k would reclassify a board ciphertext as "someone else's
       // hole" (unconditionally releasable), and a task.mySeat pointed at a still-
-      // live seat would defeat the fold gate below. task.participant is safe — it
+      // live seat would defeat the fold gate below. task.participant is safe · it
       // was pinned to my own key inside verifyChain.
       const k = verdict.k;
       const mySeat = verdict.seats[task.participant];
@@ -472,10 +472,10 @@ export function startZkAgent(sdk, getTableId) {
       const items = [];
       for (const idx of task.idxs) {
         const own = idx < 2 * k && Math.floor(idx / 2) === task.participant;
-        if (own && amFolded) { console.warn(`[zk-agent] refusing own-hole share idx ${idx} — I folded`); continue; }
+        if (own && amFolded) { console.warn(`[zk-agent] refusing own-hole share idx ${idx} · I folded`); continue; }
         if (!mayRelease(idx, k, task.participant, street)) {
           console.warn(`[zk-agent] refusing to release share idx ${idx} at street ${street} (secrecy gate)`);
-          continue; // the coordinator asked too early — never comply
+          continue; // the coordinator asked too early · never comply
         }
         const ct = parseCt(task.cts[idx]);
         const sh = zk.decryptionShare(ct, sec.x, G1.BASE.multiply(sec.x), task.domains[idx]);
@@ -487,12 +487,12 @@ export function startZkAgent(sdk, getTableId) {
     // my own hole cards: verify everything, then decrypt locally
     if (task.myHoles && !window.__SPZK.holes[String(dealId)]) {
       // the deal the room bound on-chain must commit to the EXACT proof chain
-      // I verified — otherwise the coordinator swapped decks after the proofs
+      // I verified · otherwise the coordinator swapped decks after the proofs
       const verdict = chainVerdict.get(dealId);
       if (verdict && verdict.ok) {
         const onchain = await zkd.proofHash(dealId);
         if (onchain !== ethers.ZeroHash && onchain !== verdict.hash) {
-          console.error("[zk-agent] on-chain proofHash mismatch — refusing this deal");
+          console.error("[zk-agent] on-chain proofHash mismatch · refusing this deal");
           chainVerdict.set(dealId, { ok: false, hash: verdict.hash });
           return;
         }
@@ -538,7 +538,7 @@ export function startZkAgent(sdk, getTableId) {
     try { await iteration(); } catch (e) {
       if (!/stale dealId|not collecting|not your|snapshot/i.test(e.message || "")) console.warn("[zk-agent]", e.message || e);
     } finally { running = false; }
-    // Accusation watch runs on the CHAIN, not the bot relay, every ~3.5s — the
+    // Accusation watch runs on the CHAIN, not the bot relay, every ~3.5s · the
     // 45s rescue window leaves plenty of margin even with a couple of misses.
     if (++ticks % 10 === 0 && sdk.address) {
       const t = Number(getTableId());
@@ -557,7 +557,7 @@ export function autoStart(SP) {
   const tryStart = () => {
     if (started || !SP || !SP.sdk || !SP.sdk.address) return;
     started = startZkAgent(SP.sdk, getT);
-    console.log("[zk-agent] active — your cards are decrypted locally, only by you");
+    console.log("[zk-agent] active · your cards are decrypted locally, only by you");
   };
   tryStart();
   window.addEventListener("shinyluck:auth-state", tryStart);

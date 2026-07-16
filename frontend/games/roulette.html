@@ -6,53 +6,60 @@
 <title>Roulette · ShinyLuck</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Source+Code+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../styles.css">
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Source+Code+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../v2.css">
 <!-- Canvas roulette component styles (scoped under .rl-root). -->
 <link rel="stylesheet" href="roulette.css">
 <style>
-  /* The roulette app is a full-bleed canvas experience: it owns the area
-     under the nav. The mount gets a viewport-bounded box so the design's
-     internal grid fills it on desktop and scrolls within it on mobile. */
+  /* The roulette app owns the viewport-sized box inside the shared shell;
+     the footer sits below it · scroll down to reach it. */
   .rl-stage-wrap { position: relative; width: 100%; }
-  #roulette-root  { position: relative; width: 100%; height: calc(100dvh - 58px); min-height: 560px; }
+  #roulette-root  { position: relative; width: 100%; height: calc(100dvh - 64px); min-height: 540px; }
+  /* inside the shell's game iframe the frame IS the viewport · no 64px offset */
+  html.sl-embed #roulette-root { height: 100dvh; }
 
-  /* Connect gate - the wheel + table stay alive behind it (real on-chain
-     rounds spin even before sign-in); only betting is gated. RouletteGame
-     paints into #roulette-root and wipes its innerHTML, so the gate lives as
-     a sibling overlay anchored to .roulette-stage. */
+  /* Connect gate - the wheel + table stay alive behind it; betting is gated. */
   .rl-connect-gate {
     position: absolute; inset: 0; z-index: 60; display: flex;
     align-items: center; justify-content: center; padding: 24px;
-    background: radial-gradient(ellipse at center, rgba(124,32,240,0.12), rgba(7,7,7,0.84));
+    background: radial-gradient(ellipse at center, rgba(217,185,112,0.10), rgba(7,7,7,0.84));
     backdrop-filter: blur(3px); font-family: "Source Code Pro", monospace;
   }
   .rl-connect-gate .card {
-    text-align: center; max-width: 460px; padding: 32px 38px; border-radius: 6px;
-    border: 1px solid #1c1c24; background: linear-gradient(180deg, #101015, #0a0a0d);
-    box-shadow: 0 24px 80px rgba(124,32,240,0.22);
+    text-align: center; max-width: 460px; padding: 32px 38px; border-radius: 14px;
+    border: 1px solid #1C1C22; background: linear-gradient(180deg, #101014, #0A0A0C);
+    box-shadow: 0 24px 80px rgba(217,185,112,0.14);
   }
-  .rl-connect-gate h2 { margin: 0 0 12px; font-size: 20px; letter-spacing: 1px; color: #fff; }
-  .rl-connect-gate p  { margin: 0; color: #b9b9c4; font-size: 12.5px; line-height: 1.65; }
-  .rl-connect-gate b  { color: #fafafa; }
+  .rl-connect-gate h2 { margin: 0 0 12px; font-size: 20px; letter-spacing: 1px; color: #F6F1E7; }
+  .rl-connect-gate p  { margin: 0; color: #A5A29B; font-size: 12.5px; line-height: 1.65; }
+  .rl-connect-gate b  { color: #F2EEE6; }
 </style>
+  <script type="module" src="/lib/i18n.js"></script>
 </head>
-<body data-active-page="games">
+<body data-active-page="lobby">
 <div data-page-shell>
 
 <div data-mount="nav"></div>
 
-<div class="rl-stage-wrap">
-  <div id="roulette-root"></div>
-  <div class="rl-connect-gate" id="roulette-gate">
-    <div class="card">
-      <h2>American Roulette · on-chain</h2>
-      <p>One wheel, one result - every player is on the <b>same round</b>. The
-         winning number is drawn by the contract and the server seed is
-         revealed after each spin, so every outcome is verifiable. Use the
-         <b>Connect Wallet</b> button (top right) to place chips.</p>
+<div style="display:flex;align-items:flex-start">
+  <div data-mount="side"></div>
+
+  <main data-r-padb-m style="flex:1;min-width:0">
+    <div class="rl-stage-wrap">
+      <div id="roulette-root"></div>
+      <div class="rl-connect-gate" id="roulette-gate">
+        <div class="card">
+          <h2>American Roulette · on-chain</h2>
+          <p>One wheel, one result - every player is on the <b>same round</b>. The
+             winning number is drawn by the contract and the server seed is
+             revealed after each spin, so every outcome is verifiable. Use the
+             <b>Connect Wallet</b> button (top right) to place chips.</p>
+        </div>
+      </div>
     </div>
-  </div>
+    <div data-mount="footer"></div>
+  </main>
 </div>
 
 </div>

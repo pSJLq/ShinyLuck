@@ -1,8 +1,8 @@
-// ShinyPoker — zkShuffle v2 core on BN254 (alt_bn128 G1), the ON-CHAIN-verifiable
+// ShinyPoker · zkShuffle v2 core on BN254 (alt_bn128 G1), the ON-CHAIN-verifiable
 // variant of zk-poker.js. Same Barnett–Smart mental poker, but on the curve the
 // EVM has native precompiles for (ecAdd 0x06, ecMul 0x07), so every Schnorr and
 // Chaum–Pedersen proof this file produces is verified BY THE CONTRACT
-// (ZkDealerV2.sol) during the hand — not just re-checked in JS.
+// (ZkDealerV2.sol) during the hand · not just re-checked in JS.
 //
 // The Fiat–Shamir challenge is hashed byte-for-byte the way Solidity's
 // abi.encodePacked lays it out: utf8(domain) ‖ 32-byte-BE x ‖ 32-byte-BE y …
@@ -113,7 +113,7 @@ export function decryptWithShares(ct, shares, ownX) {
 }
 
 // ============================================================================
-// Verifiable shuffle — Wikström's proof of a re-encryption shuffle, implemented
+// Verifiable shuffle · Wikström's proof of a re-encryption shuffle, implemented
 // LINE-BY-LINE from the published pseudo-code in Haenni, Locher, Koenig, Dubuis,
 // "Pseudo-Code Algorithms for Verifiable Re-encryption Mix-Nets" (FC'17 Voting;
 // Algorithms 4.3–4.6), the same construction deployed in the CHVote /
@@ -122,8 +122,8 @@ export function decryptWithShares(ct, shares, ownX) {
 //   maps to the paper's e=(a,b)=(m·pk^ρ, g^ρ) as a↔B, b↔A, pk↔X.
 // Every shuffler proves its output deck is a permutation + re-encryption of its
 // input deck WITHOUT revealing the permutation. With every participant (and the
-// coordinator) verifying every proof in the chain, a malicious shuffler — even
-// the last one, even with every OTHER shuffler colluding — cannot substitute,
+// coordinator) verifying every proof in the chain, a malicious shuffler · even
+// the last one, even with every OTHER shuffler colluding · cannot substitute,
 // duplicate or bias a single ciphertext: the deck any honest player is dealt
 // from is provably a permutation of the canonical 52-card deck that includes
 // that player's OWN secret shuffle.
@@ -165,7 +165,7 @@ export function shuffleGens() {
   const H = [];
   for (let i = 0; i < 52; i++) H.push(numsPoint("SHINYPOKER/wikstrom/h" + i));
   const h0 = numsPoint("SHINYPOKER/wikstrom/h");
-  // fixed for the process lifetime — window tables make them ~10× faster
+  // fixed for the process lifetime · window tables make them ~10× faster
   try { for (const g of H) g.precompute(8); h0.precompute(8); } catch (_) {}
   _sg = { H, h0 };
   return _sg;
@@ -178,7 +178,7 @@ function mulSafe(P, s) {
   return P.multiply(s);
 }
 
-/// Multi-scalar multiplication Σ s_i·P_i — Pippenger when the bundle has it.
+/// Multi-scalar multiplication Σ s_i·P_i · Pippenger when the bundle has it.
 function msm(points, scalars) {
   const ps = [], ss = [];
   for (let i = 0; i < points.length; i++) {
@@ -217,7 +217,7 @@ function shuffleChallenge(baseHex, cHat, X, t) {
 }
 
 /// GenProof (Alg 4.3). `secret` is shuffleRemask's {perm, rho}: output slot
-/// `pos` holds remask(prevDeck[perm[pos]], rho[pos]) — i.e. the paper's
+/// `pos` holds remask(prevDeck[perm[pos]], rho[pos]) · i.e. the paper's
 /// ψ = (j_1..j_N) with j_pos = perm[pos], and r'_{j_pos} = rho[pos].
 export function proveShuffle(domain, prevDeck, newDeck, X, secret) {
   const { H, h0 } = shuffleGens();
@@ -314,7 +314,7 @@ export function verifyShuffle(domain, prevDeck, newDeck, X, prf) {
   if (!msm(B2, prf.sP).subtract(mulSafe(X, prf.s4)).subtract(mulSafe(bTil, c)).equals(prf.t41)) return false;
   if (!msm(A2, prf.sP).subtract(mulSafe(G1.BASE, prf.s4)).subtract(mulSafe(aTil, c)).equals(prf.t42)) return false;
 
-  // t̂ chain: ŝ_i·G + s'_i·ĉ_{i-1} − c·ĉ_i == t̂_i for all i — batched into one
+  // t̂ chain: ŝ_i·G + s'_i·ĉ_{i-1} − c·ĉ_i == t̂_i for all i · batched into one
   // MSM with verifier-local random 128-bit weights λ_i (standard small-exponent
   // batching; a single forged equation survives with probability ~2⁻¹²⁸).
   const lam = Array.from({ length: n }, () => BigInt(toHex(rnd(16))) | 1n);
@@ -357,7 +357,7 @@ export function shuffleProofFromWire(w, parsePoint) {
 
 /// keccak commitment to the WHOLE shuffle transcript (each stage's output deck
 /// + its proof). The coordinator posts this in prepareDeal, so the on-chain
-/// deal permanently commits to the exact proof chain behind its deck — anyone
+/// deal permanently commits to the exact proof chain behind its deck · anyone
 /// holding the transcript can re-verify the shuffle years later.
 export function shuffleTranscriptHash(domainPrefix, stages) {
   const parts = [utf8(domainPrefix)];

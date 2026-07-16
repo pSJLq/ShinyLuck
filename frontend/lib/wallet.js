@@ -30,7 +30,13 @@ import { PrivySigner } from "./privy-signer.js";
 function devWalletEnabled() {
   try {
     const p = new URLSearchParams(window.location.search);
-    return p.get("devWallet") === "metamask";
+    if (p.get("devWallet") === "metamask") return true;
+    // The owner console is the ONE page where a browser-extension wallet is
+    // the right tool: contract ownership lives on the deployer key (the bots
+    // sign with it, so it can't move to a Privy account), and the operator
+    // imports that key into MetaMask to run owner-only calls. Players never
+    // land here · the page itself gates on casino.owner().
+    return /^\/admin(\.html)?\/?$/.test(location.pathname);
   } catch (_) { return false; }
 }
 

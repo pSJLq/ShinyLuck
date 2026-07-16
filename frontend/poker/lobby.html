@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ShinyPoker — Lobby</title>
+<title>ShinyPoker · Lobby</title>
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -17,7 +17,78 @@
   #stage { position: fixed; inset: 0 0 38px 0; display: grid; place-items: center; background: radial-gradient(120% 90% at 50% -10%, #0c0c11 0%, #070707 62%); overflow: hidden; }
   #root { position: relative; z-index: 2; }
   #app-footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; }
+  /* Embedded in the merged site's Poker tab: the shell owns nav/footer. */
+  .sp-embed .topbar { display: none !important; }
+  .sp-embed #app-footer { display: none !important; }
+  /* Embedded: the stage joins the normal flow so the document has a real
+     height · the shell then sizes the iframe to it and only the page
+     scrolls (one scrollbar, footer still reachable below). */
+  .sp-embed #stage { position: static !important; inset: auto !important; overflow: visible !important;
+    display: block !important; height: auto !important; padding: 6px 0 0; }
+  .sp-embed #scaler { margin: 0 auto; }
+  /* dark scrollbars inside the embedded stage (no white OS bar) */
+  .sp-embed #stage { scrollbar-color: #20202A transparent; scrollbar-width: thin; }
+  .sp-embed #stage::-webkit-scrollbar { width: 10px; height: 8px; }
+  .sp-embed #stage::-webkit-scrollbar-thumb { background: #20202A; border-radius: 10px; border: 2px solid #050506; }
+  .sp-embed #stage::-webkit-scrollbar-track { background: transparent; }
+  /* ONE SCROLLBAR, cont'd -- the feedback loop that kept a second one alive:
+     mobile.css pins `.app` to 100dvh, i.e. to THIS frame's viewport. But the
+     shell sizes the frame to whatever height we report, so `#stage`'s 6px of
+     padding made us report dvh+6 -> shell grows the frame -> dvh grows -> we
+     report +6 again. One poll per second, forever, and the frame sat ~6px
+     overflowed the whole time: that overflow is the second scrollbar (native
+     and white, because it belongs to the frame's own <html>).
+     Embedded, the shell owns the viewport · we are only content, so size to it. */
+  @media (max-width: 760px) {
+    .sp-embed .app { height: auto !important; min-height: 0 !important; }
+  }
 </style>
+<script>
+  // Embed mode: inside the merged-site Poker tab (poker.html iframe).
+  (function () {
+    var inFrame = false;
+    try { inFrame = window.self !== window.top; } catch (e) { inFrame = true; }
+    var flagged = /(^|[?&])embed=1/.test(location.search);
+    if (!inFrame && !flagged) {
+      // Standalone visit (old links, "Back to lobby" from a table): the lobby
+      // now lives inside the merged site's Poker tab · go there, keep params.
+      var q = location.search.replace(/^\?/, "");
+      location.replace("/poker" + (q ? "?" + q : ""));
+      return;
+    }
+    document.documentElement.classList.add("sp-embed");
+    // ONE SCROLLBAR: tell the shell how tall we are · it sizes the iframe to
+    // match, so this frame never grows its own scrollbar next to the page's.
+    var lastH = 0;
+    function reportH() {
+      var h = Math.ceil(Math.max(
+        document.documentElement.scrollHeight,
+        document.body ? document.body.scrollHeight : 0));
+      if (!h || Math.abs(h - lastH) < 2) return;
+      lastH = h;
+      try { window.parent.postMessage({ type: "sl-height", h: h }, "*"); } catch (e) {}
+    }
+    addEventListener("load", reportH);
+    addEventListener("resize", reportH);
+    setInterval(reportH, 1000);
+
+    // Table/tournament links become shell routes (the shell keeps its chrome
+    // and swaps the iframe) - forwarded up via postMessage.
+    document.addEventListener("click", function (e) {
+      var a = e.target && e.target.closest && e.target.closest("a[href]");
+      if (!a) return;
+      var href = a.getAttribute("href") || "";
+      var mt = href.match(/^table(?:\.html)?\?t=(\d+)/);
+      var mn = href.match(/^tournament(?:\.html)?\?id=(\d+)/);
+      var target = mt ? "/poker?v=table&t=" + mt[1] : (mn ? "/poker?v=tournament&id=" + mn[1] : null);
+      if (!target) return;
+      e.preventDefault(); e.stopPropagation();
+      try { window.parent.postMessage({ type: "sl-nav", href: target }, "*"); return; } catch (_) {}
+      (window.top || window).location.href = target;
+    }, true);
+  })();
+</script>
+  <script type="module" src="/lib/i18n.js"></script>
 </head>
 <body>
 <div id="stage"><div id="root"></div></div>
@@ -33,6 +104,7 @@
 
 <script src="/vendor/privy.bundle.js"></script>
 <script src="poker-grid.js"></script>
+  <script src="poker-press.js"></script>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>

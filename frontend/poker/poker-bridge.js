@@ -10,7 +10,7 @@ const SUITS = ["c", "d", "h", "s"];
 const intToCardStr = (c) => (c == null || c === 255 ? null : RANKS[Math.floor(c / 4)] + SUITS[c % 4]);
 
 // Human-readable best hand from 2..7 card ints (hole + visible board).
-// Plain TIER names only ("Pair", "Full House") — the rank details ("Pair of
+// Plain TIER names only ("Pair", "Full House") · the rank details ("Pair of
 // Sevens") read as noise at the table; the highlighted cards say the rest.
 function handName(cards) {
   const ev = handEval(cards);
@@ -33,7 +33,7 @@ function handEval(cards) {
   };
   const kick = (n, skip) => { const out = []; for (let r = 12; r >= 0 && out.length < n; r--) if ((mask & (1 << r)) && skip.indexOf(r) < 0) out.push(r); return out; };
   const S = (cat, ks) => { let v = cat; for (let i = 0; i < 5; i++) v = v * 16 + (ks[i] != null ? ks[i] + 1 : 0); return v; };
-  // `used` — the exact five card ints forming the best hand, so the UI can
+  // `used` · the exact five card ints forming the best hand, so the UI can
   // highlight the combination itself (and dim the cards that play no part)
   const ofRank = (r, n, suit) => {
     const src = suit == null ? byRank[r] : byRank[r].filter((c) => c % 4 === suit);
@@ -76,8 +76,8 @@ window.SP = {
 };
 // Globals the design's SideRail expects (live feeds can replace these later).
 window.CHAT = [{ dealer: true, t: window.SP.sdk.zkLayer
-  ? "Welcome — this table runs zkShuffle v2: the deck is shuffled by the players' own browsers and every card is proven on-chain. Nobody, not even our dealer bot, can see your hole cards."
-  : "Welcome — this table is live on Somnia testnet. Provably-fair commit-reveal dealing." }];
+  ? "Welcome · this table runs zkShuffle v2: the deck is shuffled by the players' own browsers and every card is proven on-chain. Nobody, not even our dealer bot, can see your hole cards."
+  : "Welcome · this table is live on Somnia testnet. Provably-fair commit-reveal dealing." }];
 window.HISTORY = [];
 
 // zkShuffle v2: start the background protocol agent (keygen/shuffle/decryption

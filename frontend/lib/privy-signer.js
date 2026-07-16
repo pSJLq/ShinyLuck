@@ -50,12 +50,14 @@ export class PrivySigner extends ethers.AbstractSigner {
     // under the hood. Returns gasPrice, maxFeePerGas, maxPriorityFeePerGas
     // bigints, baseFee included in maxFeePerGas calc.
     const fd = await this.provider.getFeeData();
-    // Apply a 2× headroom on maxFeePerGas vs what ethers calculated, so
-    // a base fee bump between the populate-step and the inclusion block
-    // doesn't bounce us with "gas price below base fee". The tip
-    // (priority fee) stays as-returned so we don't overpay validators.
+    // maxFeePerGas is a CEILING, never the price paid (that is baseFee+tip) ·
+    // but a wallet must hold `gasLimit × maxFeePerGas` before it will send, so
+    // padding it raises the balance a player needs to keep just sitting there.
+    // Somnia's base fee is a flat 6 gwei (measured: unchanged across 200 blocks,
+    // every receipt settles at 6), and ethers already returns 2× baseFee + tip.
+    // That is the headroom · doubling it again only inflated the reserve.
     const tip = fd.maxPriorityFeePerGas != null ? BigInt(fd.maxPriorityFeePerGas) : 1_000_000n;
-    const max = fd.maxFeePerGas != null ? BigInt(fd.maxFeePerGas) * 2n
+    const max = fd.maxFeePerGas != null ? BigInt(fd.maxFeePerGas)
               : (fd.gasPrice != null ? BigInt(fd.gasPrice) * 2n : tip * 2n + 2_000_000n);
     this._feeData = { maxPriorityFeePerGas: tip, maxFeePerGas: max };
     this._feeFetchedAt = Date.now();
@@ -138,6 +140,37 @@ export class PrivySigner extends ethers.AbstractSigner {
     return new PrivySigner(this._address, provider);
   }
 
+  /// GAS PRE-FLIGHT. A node accepts a tx only if the sender can cover
+  /// `gas × maxFeePerGas + value` UP FRONT · not the amount actually spent.
+  /// A brand-new Privy wallet holds 0 STT, so without this the signer just
+  /// fails deep in the stack (or the iframe silently refuses) and the player
+  /// sees a button that "does nothing". Throw one clear, typed error instead.
+  async _assertGasBudget(populated, tx) {
+    let need, bal;
+    try {
+      const gas = BigInt(populated.gas || 0);
+      const maxFee = BigInt(populated.maxFeePerGas || 0);
+      if (gas === 0n || maxFee === 0n) return;      // nothing to check against
+      need = gas * maxFee + (tx.value != null ? BigInt(tx.value) : 0n);
+      bal = await this.provider.getBalance(this.address);
+    } catch (_) {
+      return; // couldn't read the chain · let the node be the judge
+    }
+    if (bal >= need) return;
+    const fmt = (v) => {
+      const n = Number(ethers.formatEther(v));
+      if (n === 0) return "0";
+      if (n < 0.0001) return "<0.0001";
+      return String(Math.round(n * 1e4) / 1e4);
+    };
+    const err = new Error(
+      `Not enough STT for gas · this action needs about ${fmt(need)} STT in the wallet, you have ${fmt(bal)} STT`,
+    );
+    err.code = "INSUFFICIENT_GAS";
+    err.shortMessage = err.message;
+    throw err;
+  }
+
   async sendTransaction(tx) {
     if (!window.ShinyLuckAuth || !window.ShinyLuckAuth.ready) {
       throw new Error("Privy not ready - call login first");
@@ -163,6 +196,7 @@ export class PrivySigner extends ethers.AbstractSigner {
       try {
         populated = await this._populateFor(tx);
         stamp(`populate done (nonce=${populated.nonce}, gas=${populated.gas})`);
+        await this._assertGasBudget(populated, tx);
         signed = await Promise.race([
           window.ShinyLuckAuth.signTransaction({
             to: tx.to,
@@ -188,10 +222,10 @@ export class PrivySigner extends ethers.AbstractSigner {
         // local nonce and the gap grows.
         this._lastChainSyncAt = 0;
         // A REVERT (bad params, buy-in out of range, insufficient balance) will
-        // fail on the legacy path too — surface the REAL reason now instead of
+        // fail on the legacy path too · surface the REAL reason now instead of
         // masking it as a 10s "timeout". Only genuine sign/network hiccups fall through.
         const m = (e && (e.shortMessage || e.message)) || "";
-        if (e && (e.code === "CALL_EXCEPTION" || e.action === "estimateGas" || /revert|out ?of ?range|insufficient/i.test(m))) {
+        if (e && (e.code === "INSUFFICIENT_GAS" || e.code === "CALL_EXCEPTION" || e.action === "estimateGas" || /revert|out ?of ?range|insufficient/i.test(m))) {
           throw e;
         }
       }

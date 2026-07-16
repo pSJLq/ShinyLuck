@@ -17,7 +17,7 @@ function Marker({ kind }) {
 }
 
 /* Combo badge palette by hand strength: pale for weak hands, gold/premium for
-   monsters — so a beginner instantly reads how big the hand is. Index = the
+   monsters · so a beginner instantly reads how big the hand is. Index = the
    evaluator's category (0 high card … 8 straight flush / royal). */
 const COMBO_TIERS = [
   { bg: "rgba(255,255,255,.05)", bd: "rgba(255,255,255,.16)", fg: "var(--muted, #9a9aa8)" },
@@ -40,7 +40,7 @@ function TimerRing({ seconds = 18 }) {
 }
 
 /* Compact chip amounts: 1500 → "1.5k", 2100000 → "2.1M". Values past the T
-   range only exist on blind-overflow debris events — show short scientific
+   range only exist on blind-overflow debris events · show short scientific
    ("1.5e24") instead of a 17-digit smear. */
 function fmtChips(n) {
   n = Number(n) || 0;
@@ -71,10 +71,13 @@ function Seat({ player, data, pos, active, marker, deckMode, revealCards, reveal
         <AvatarIcon av={player.avId} img={player.avImg} name={name} />
         <div className="seatinfo">
           <div className="nm">{player.hero ? SPT("YOU") : name}</div>
+          {/* One number, never two: the "Stacks in big blinds" toggle PICKS the
+              unit · off = the plain stack, on = big blinds. Showing chips and
+              "· Nbb" side by side was just clutter. */}
           {data.bbstacks && data.bbval != null
             ? <div className="stack tnum">{data.bbval}<span className="bbcount"> BB</span></div>
             : chipMode
-              ? <div className="stack tnum">{fmtChips(data.chips)}<span className="bbcount"> · {data.bb}bb</span></div>
+              ? <div className="stack tnum">{fmtChips(data.chips)}</div>
               : <div className="stack tnum">{data.stack.toFixed(1)}<span className="u">SOMI</span></div>}
           <div className="status">{data.status}</div>
         </div>
@@ -83,7 +86,7 @@ function Seat({ player, data, pos, active, marker, deckMode, revealCards, reveal
       </div>
       {revealCards && (
         /* revealed cards always open toward the TABLE CENTER: above the seat
-           for bottom-half seats, below it for top-half seats — otherwise the
+           for bottom-half seats, below it for top-half seats · otherwise the
            top opponent's cards slide off-screen under the HUD */
         <div className={"seatreveal" + (pos.y < 50 ? " below" : "")}>
           <div className="hole" style={{ justifyContent: "center", transform: "scale(0.62)", transformOrigin: pos.y < 50 ? "top center" : "bottom center" }}>

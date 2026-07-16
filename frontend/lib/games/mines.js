@@ -65,7 +65,7 @@ function recalcSummary() {
   const stake = readStakeStr();
   const placeBtn = $("[data-sl-place]");
   if (placeBtn && !placeBtn.dataset.locked && activeBetId === null) {
-    placeBtn.textContent = `Start round — ${fmtSTTfromString(stake)} STT`;
+    placeBtn.textContent = `Start round · ${fmtSTTfromString(stake)} STT`;
   }
   setText("[data-sl-minecount-display]", String(mineCount));
   refreshEV(MINES).catch(() => {});

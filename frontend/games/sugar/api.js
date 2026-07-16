@@ -345,26 +345,6 @@ export class SugarSlot {
 
   <div class="cl-layout">
     <div class="cab">
-      <div class="marquee">
-        <div class="badge">★ FEATURED</div>
-        <div class="scroll">
-          <div class="track" data-marquee-track>
-            <span class="item">RTP <b data-sl-cluster-rtp>92%</b> · LLM agent live-adjusted hourly · published on-chain</span>
-            <span class="item">Every bet verifiable · <b>Shannon Explorer</b> · finality ~1s</span>
-            <span class="item">Vault Charge - hidden threshold · cycle resets each prize</span>
-            <span class="item">All seeds verifiable post-spin</span>
-            <span class="item">RTP <b data-sl-cluster-rtp>92%</b> · LLM agent live-adjusted hourly · published on-chain</span>
-            <span class="item">Every bet verifiable · <b>Shannon Explorer</b> · finality ~1s</span>
-            <span class="item">Vault Charge - hidden threshold · cycle resets each prize</span>
-            <span class="item">All seeds verifiable post-spin</span>
-          </div>
-        </div>
-        <div class="jp" style="display:none">
-          <span class="lbl">CASINO JACKPOT</span>
-          <span class="v" data-jp>$0.00</span>
-        </div>
-      </div>
-
       <div class="charge-rail">
         <div class="ico">⚡</div>
         <div class="col">
@@ -421,7 +401,7 @@ export class SugarSlot {
           <div class="lbl">BALANCE</div>
           <div class="balance"><span class="cur">STT</span><span data-balance>1,000.00</span></div>
           <div class="last-win zero" data-last-win>- no win yet</div>
-          <div class="ev-note" data-ev-note><span data-sl-cluster-rtp>92.00%</span> RTP - autonomously adjusted by LLM agent</div>
+          <div class="ev-note" data-ev-note><span data-sl-cluster-rtp>96.44%</span> RTP - the real payout ratio, published on-chain</div>
         </div>
       </div>
     </div>

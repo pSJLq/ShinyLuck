@@ -1,4 +1,4 @@
-// Crash — round-based integration.
+// Crash · round-based integration.
 //
 // Round phases:
 //   PHASE 1 (BETTING)   block.timestamp < r.betWindowEnd
@@ -23,7 +23,7 @@ import { validateStake, validateAutoCashout } from "../errors.js";
 import { clampStakeStr, applyMaxToInput } from "../casino-limits.js";
 
 const CRASH = 1;
-// Was 1000ms — caused 1 RPC/s contract reads even when the round hadn't
+// Was 1000ms · caused 1 RPC/s contract reads even when the round hadn't
 // changed. WS subscriptions below catch real state changes instantly; this
 // poll is just a fallback for missed events. 3s gives smooth UX without
 // hammering RPC + freeing the main thread for cursor / animations.
@@ -108,7 +108,7 @@ function predictedMultiplier(roundStartSec, nowSec) {
 /// that starts at 0.00× at round start and climbs as the curve rises. Display
 /// semantics: "1.50×" on screen ≡ 2.50× actual cashout payout (the bet returns
 /// stake + 1.50× stake). Auto-cashout input is still entered as the actual
-/// cashout multiplier — the slider label conversion happens at render time.
+/// cashout multiplier · the slider label conversion happens at render time.
 function toDisplayMult(actualMult) {
   return Math.max(0, actualMult - 1);
 }
@@ -119,7 +119,7 @@ function toDisplayMult(actualMult) {
 /// curve climbs logarithmically toward y=20 (the 50× ceiling).
 function _updateCrashSvg(elapsedSec, actualMult) {
   // Guard against NaN / negative / zero inputs. predictedMultiplier can yield
-  // 0 or NaN if a round is between phases or roundStartSec is bogus — without
+  // 0 or NaN if a round is between phases or roundStartSec is bogus · without
   // this guard, Math.log(0)=-Infinity → y=NaN → SVG d-string contains "NaN"
   // and the browser logs an attribute-parse warning every animation frame.
   if (!Number.isFinite(elapsedSec) || elapsedSec < 0) return;
@@ -290,7 +290,7 @@ async function renderBettors(roundId) {
 
 function renderMyBet() {
   if (!myBet || myBet.amount === 0n) {
-    setText("[data-sl-crash-mybet]", "—");
+    setText("[data-sl-crash-mybet]", "-");
     const co = $("[data-sl-cashout]");
     if (co) co.style.display = "none";
     return;

@@ -1,7 +1,7 @@
-// ShinyPoker — in-browser deal verifier (provably-fair page).
+// ShinyPoker · in-browser deal verifier (provably-fair page).
 // Re-derives the committed deck for any deal ENTIRELY IN YOUR BROWSER and
 // checks it against the chain: the seed commitment, the posted board, and the
-// contract's own recomputeDeck. No wallet, no trust in our servers — the RPC
+// contract's own recomputeDeck. No wallet, no trust in our servers · the RPC
 // reads are the only dependency, and you can swap the RPC in devtools.
 import { ethers } from "/vendor/ethers.bundle.js";
 import { POKER_CONFIG, NETWORK } from "./poker-config.js";
@@ -25,7 +25,7 @@ const card = (c) => {
 };
 
 /// Byte-for-byte port of CommitRevealDealer._deriveDeck (pinned by the
-/// on-chain recomputeDeck cross-check below — if this drifts, the ✗ shows).
+/// on-chain recomputeDeck cross-check below · if this drifts, the ✗ shows).
 function deriveDeck(serverSeed, entropy, handId, tableId) {
   const deck = Array.from({ length: 52 }, (_, i) => i);
   let r = ethers.keccak256(CODER.encode(["bytes32", "bytes32", "uint64", "uint64"], [serverSeed, entropy, BigInt(handId), BigInt(tableId)]));
@@ -49,14 +49,14 @@ async function verify(dealId) {
   out.innerHTML = `<div class="vd">Reading deal #${dealId} from the chain…</div>`;
   let d;
   try { d = await dealer.dealInfo(dealId); } catch (e) { out.innerHTML = row(false, "Could not read this deal", e.shortMessage || e.message); return; }
-  if (Number(d.handId) === 0 && d.seedHash === ethers.ZeroHash) { out.innerHTML = row(false, `Deal #${dealId} does not exist`, "deal ids start at 1 — try the finder below"); return; }
+  if (Number(d.handId) === 0 && d.seedHash === ethers.ZeroHash) { out.innerHTML = row(false, `Deal #${dealId} does not exist`, "deal ids start at 1 · try the finder below"); return; }
 
   const head = `<div class="vhead">Deal <b>#${dealId}</b> · table <b>${d.tableId}</b> · hand <b>#${d.handId}</b> · ${Number(d.playerCount)} players · entropy block ${d.commitBlock}</div>`;
   const rows = [];
-  rows.push(row(true, "Seed commitment found on-chain", `${d.seedHash.slice(0, 18)}… — posted before any card existed`));
+  rows.push(row(true, "Seed commitment found on-chain", `${d.seedHash.slice(0, 18)}… · posted before any card existed`));
 
   if (!d.revealed) {
-    rows.push(row(null, "Seed not revealed yet", "the hand is still live (or was cancelled) — verification completes at showdown"));
+    rows.push(row(null, "Seed not revealed yet", "the hand is still live (or was cancelled) · verification completes at showdown"));
     out.innerHTML = head + rows.join("");
     return;
   }
@@ -74,7 +74,7 @@ async function verify(dealId) {
     const oc = (await dealer.recomputeDeck(d.serverSeed, d.entropy, d.handId, d.tableId)).map(Number);
     onchainSame = oc.length === 52 && oc.every((c, i) => c === deck[i]);
   } catch {}
-  rows.push(row(onchainSame, "Browser shuffle == contract recomputeDeck()", onchainSame === null ? "RPC call failed — the local derivation below still stands" : "the same 52-card order, derived twice independently"));
+  rows.push(row(onchainSame, "Browser shuffle == contract recomputeDeck()", onchainSame === null ? "RPC call failed · the local derivation below still stands" : "the same 52-card order, derived twice independently"));
 
   // 4. the board that was posted street-by-street must sit exactly where the
   //    derived deck says it should
@@ -96,7 +96,7 @@ async function verify(dealId) {
   out.innerHTML = head + rows.join("");
 }
 
-/// Find a deal by table + hand — scans recent deal ids (they're sequential).
+/// Find a deal by table + hand · scans recent deal ids (they're sequential).
 async function findDeal(tableId, handId) {
   const out = $("fair-result");
   out.style.display = "block";

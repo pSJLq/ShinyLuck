@@ -1,5 +1,5 @@
 /* ============================================================================
- * vault7/styles.css — VAULT.7 visual system
+ * vault7/styles.css · VAULT.7 visual system
  * Shares ambient + chrome with sugar but has its own reel & cabinet styles.
  * ============================================================================ */
 
@@ -46,7 +46,7 @@ body { font-family: var(--mono); color: var(--ink-0); background: var(--bg-0); m
 }
 @keyframes star-drift { to { background-position: 800px 800px; } }
 
-/* shell + nav + hero — same as sugar */
+/* shell + nav + hero · same as sugar */
 .vault-shell { max-width:1480px; margin:0 auto; padding:22px 32px 64px; }
 .nav-bar {
   display:flex; align-items:center; gap:32px; padding:14px 22px;
@@ -163,7 +163,7 @@ body { font-family: var(--mono); color: var(--ink-0); background: var(--bg-0); m
   position:relative; display:grid;
   /* CRITICAL: `repeat(5, 1fr)` is implicitly `minmax(auto, 1fr)`. With
      the responsive `font-size: clamp(36px, 4.2vw, 64px)` on .cell, one
-     column's content can demand more than its 1fr share — the grid
+     column's content can demand more than its 1fr share · the grid
      accommodates by stealing width from the other columns until they
      collapse to ~0. Result: only one column shows cells, the rest look
      empty. `minmax(0, 1fr)` forces every column to its exact 1fr share
@@ -309,7 +309,7 @@ body { font-family: var(--mono); color: var(--ink-0); background: var(--bg-0); m
 .buy-bonus .price small { font-size:11px; color:var(--ink-2); margin-left:4px; }
 .buy-bonus .sub { font-size:9px; letter-spacing:1.5px; color:var(--ink-2); text-transform:uppercase; }
 
-/* CONTROL BAR — same shape as sugar */
+/* CONTROL BAR · same shape as sugar */
 .control-bar {
   display:grid; grid-template-columns:1fr auto 1fr; gap:18px; align-items:center;
   margin-top:14px; padding:14px 18px; border-radius:10px;

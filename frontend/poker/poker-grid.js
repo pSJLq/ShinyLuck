@@ -2,7 +2,7 @@
    Renders the brand's animated pixel/dot-matrix field: dim cells on black with
    moving diagonal bands of accent light. Powers ambient backgrounds, the felt
    texture, the zkShuffle "scramble" reveal, and glow pulses.
-   Vanilla JS — instantiate with new GridField(canvas, opts). */
+   Vanilla JS · instantiate with new GridField(canvas, opts). */
 (function () {
   "use strict";
 

@@ -1,4 +1,4 @@
-/* Playing cards — suit glyphs + Card component. Exports to window. */
+/* Playing cards · suit glyphs + Card component. Exports to window. */
 const SUIT_PATHS = {
   s: "M12 2C12 2 4 8.5 4 14.2 4 17.4 6.4 19.6 9.2 19.6 10.3 19.6 11.2 19.2 12 18.5 12.8 19.2 13.7 19.6 14.8 19.6 17.6 19.6 20 17.4 20 14.2 20 8.5 12 2 12 2ZM10.6 18.5C10.6 20.4 9.8 21.6 8.5 22.4L15.5 22.4C14.2 21.6 13.4 20.4 13.4 18.5Z",
   h: "M12 21.4C12 21.4 2.5 14.9 2.5 8.6 2.5 5.5 4.9 3.2 7.8 3.2 9.6 3.2 11.2 4.2 12 5.6 12.8 4.2 14.4 3.2 16.2 3.2 19.1 3.2 21.5 5.5 21.5 8.6 21.5 14.9 12 21.4 12 21.4Z",
@@ -16,7 +16,7 @@ function Suit({ s, size }) {
   );
 }
 
-/* card string like "As", "Kh", "Td", "9c"  — or {back:true} */
+/* card string like "As", "Kh", "Td", "9c"  · or {back:true} */
 function Card({ c, back, folded, dealing, dim, className, style, delay }) {
   if (back || !c) {
     return (
@@ -44,7 +44,7 @@ function Card({ c, back, folded, dealing, dim, className, style, delay }) {
 }
 
 /* Deterministic avatar look: a warm two-tone gradient + tilt derived from the
-   player's name/address — kills the "letter in a gray box" placeholder feel. */
+   player's name/address · kills the "letter in a gray box" placeholder feel. */
 function avatarColors(seed) {
   let h = 0; const s = String(seed || "?").toLowerCase();
   for (let i = 0; i < s.length; i++) h = ((h * 31 + s.charCodeAt(i)) & 0xffffffff) >>> 0;
@@ -57,7 +57,7 @@ function avatarColors(seed) {
   return { a: p[0], b: p[1], rot: (h >>> 4) % 360 };
 }
 
-/* Minimal sparkle mark (card backs, small accents) — single-path currentColor. */
+/* Minimal sparkle mark (card backs, small accents) · single-path currentColor. */
 function SparkMark({ className, style }) {
   return (
     <svg className={className} style={style} viewBox="0 0 64 64" fill="none" aria-hidden="true">
@@ -66,7 +66,7 @@ function SparkMark({ className, style }) {
   );
 }
 
-/* ShinyPoker brand mark — the "shiny card" sparkle from ShinyPokerDesign/Logo:
+/* ShinyPoker brand mark · the "shiny card" sparkle from ShinyPokerDesign/Logo:
    a card bent into a four-point star, white core, gold rim, sparkle dust. */
 function SparkLogo({ size = 22 }) {
   const star = (x, y, r) => `M ${x} ${y - r} L ${x + r * 0.28} ${y - r * 0.28} L ${x + r} ${y} L ${x + r * 0.28} ${y + r * 0.28} L ${x} ${y + r} L ${x - r * 0.28} ${y + r * 0.28} L ${x - r} ${y} L ${x - r * 0.28} ${y - r * 0.28} Z`;
@@ -106,7 +106,7 @@ function BraceMark({ className, style }) {
   );
 }
 
-/* The {s} composed logo — braces with a mono s centered */
+/* The {s} composed logo · braces with a mono s centered */
 function BraceLogo({ size = 20, withS = true }) {
   return (
     <span className="brace-logo" style={{ fontSize: size + "px" }}>
@@ -138,7 +138,7 @@ function SomiIcon({ className, style }) {
 /* ------------------------------------------------------------------------
    On-chain avatars. PlayerProfile.avatar is a uint16 stored with the nickname;
    0 = "auto" (gradient + initial derived from the name hash), 1..N = curated
-   looks below. IDs live on-chain — only APPEND to this list, never reorder.
+   looks below. IDs live on-chain · only APPEND to this list, never reorder.
    ------------------------------------------------------------------------ */
 const SP_AVATARS = [
   null, // 0 = auto
@@ -153,7 +153,7 @@ const SP_AVATARS = [
 function AvatarIcon({ av, img, name, size, style }) {
   const box = size ? { width: size, height: size, fontSize: Math.round(size * 0.38) } : undefined;
   if (img) {
-    // an uploaded photo shows as-is — no dot overlay on the user's own picture
+    // an uploaded photo shows as-is · no dot overlay on the user's own picture
     return (
       <div className="avatar deco" style={{ background: `url("${img}") center/cover no-repeat, #15151c`, ...box, ...style }} />
     );
@@ -192,7 +192,7 @@ function SPCompressAvatar(file, maxBytes = 7800) {
         const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
         if (bytes.length <= maxBytes) return resolve({ bytes, dataUri: uri });
       }
-      reject(new Error("image won't compress under the on-chain cap — try a simpler picture"));
+      reject(new Error("image won't compress under the on-chain cap · try a simpler picture"));
     };
     im.onerror = () => { URL.revokeObjectURL(url); reject(new Error("could not read that image")); };
     im.src = url;
@@ -212,21 +212,21 @@ const SP_I18N_RU = {
   "Fold": "Фолд", "Check": "Чек", "Call": "Колл", "Raise to": "Рейз до", "Bet": "Бет",
   "Min": "Мин", "Pot": "Банк", "All-in": "Олл-ин", "Best": "Комбо", "Pot odds": "Шансы банка",
   "You win": "Вы выиграли", "You lose": "Вы проиграли", "wins": "выигрывает",
-  "paid out on-chain": "— выплата он-чейн", "pot settled on-chain": "банк рассчитан он-чейн",
+  "paid out on-chain": "- выплата он-чейн", "pot settled on-chain": "банк рассчитан он-чейн",
   "Winning hand": "Победная рука", "Settling pot on-chain…": "Банк рассчитывается он-чейн…",
   "Action sent": "Действие отправлено", "Confirming on-chain…": "Подтверждаем он-чейн…",
-  "Dealer button": "Баттон (дилер) — раздача идёт от него", "Small blind": "Малый блайнд", "Big blind": "Большой блайнд",
+  "Dealer button": "Баттон (дилер) · раздача идёт от него", "Small blind": "Малый блайнд", "Big blind": "Большой блайнд",
   "Sign in to play": "Войдите, чтобы играть",
   "Email login → instant Somnia wallet, no popups": "Вход по email → мгновенный кошелёк Somnia, без попапов",
   "Take an empty seat to join": "Сядьте на свободное место",
   "Click a “+ Sit” spot around the table": "Нажмите «+ Sit» на свободном месте за столом",
-  "Tournament table — you're observing": "Турнирный стол — вы наблюдаете",
-  "Seats are assigned by the tournament; register on its page to play": "Места раздаёт турнир — зарегистрируйтесь на его странице, чтобы играть",
-  "Showdown — settling on-chain": "Шоудаун — расчёт он-чейн",
+  "Tournament table · you're observing": "Турнирный стол · вы наблюдаете",
+  "Seats are assigned by the tournament; register on its page to play": "Места раздаёт турнир · зарегистрируйтесь на его странице, чтобы играть",
+  "Showdown · settling on-chain": "Шоудаун · расчёт он-чейн",
   "Waiting for your turn": "Ожидание вашего хода",
   "Waiting for the next hand": "Ожидание следующей руки",
   "Your chips & action are safe on-chain": "Ваши фишки и действия защищены он-чейн",
-  "Pre-action armed — fires instantly on your turn": "Пре-действие взведено — сработает в ваш ход",
+  "Pre-action armed · fires instantly on your turn": "Пре-действие взведено · сработает в ваш ход",
   "TOURNAMENT": "ТУРНИР", "Level": "Уровень", "Blinds": "Блайнды", "ante": "анте",
   "Next level": "След. уровень", "Final level": "Финальный уровень", "Players": "Игроки",
   "Prize": "Приз", "Split": "Сплит", "FINISHED": "ЗАВЕРШЁН",
@@ -239,20 +239,75 @@ const SP_I18N_RU = {
   "chat": "чат", "hands": "руки", "notes": "заметки",
   "provably fair · commit-reveal": "честная раздача · commit-reveal",
   "provably fair · zkShuffle": "честная раздача · zkShuffle",
-  "Welcome — live on Somnia. zkShuffle dealing: only your browser can see your cards.": "Добро пожаловать — мы на Somnia. Раздача zkShuffle: ваши карты видит только ваш браузер.",
-  "Welcome — live on Somnia. Provably-fair commit-reveal dealing.": "Добро пожаловать — мы на Somnia. Честная раздача commit-reveal.",
-  "shuffling — commitment sealed on-chain": "тасуем — коммит колоды запечатан он-чейн",
+  "Welcome · live on Somnia. zkShuffle dealing: only your browser can see your cards.": "Добро пожаловать · мы на Somnia. Раздача zkShuffle: ваши карты видит только ваш браузер.",
+  "Welcome · live on Somnia. Provably-fair commit-reveal dealing.": "Добро пожаловать · мы на Somnia. Честная раздача commit-reveal.",
+  "shuffling · commitment sealed on-chain": "тасуем · коммит колоды запечатан он-чейн",
   "table settings": "настройки стола", "Table theme": "Тема стола", "Sound effects": "Звуки",
   "4-color deck": "4-цветная колода", "Turbo animations": "Турбо-анимации", "Reduced motion": "Меньше анимаций",
   "Stacks in big blinds": "Стеки в блайндах (BB)",
   "Language": "Язык", "Close": "Закрыть",
   "Sit at seat": "Сесть на место", "Buy-in": "Бай-ин", "Cancel": "Отмена", "Take seat": "Сесть",
   "Leave table": "Покинуть стол", "Back to tournament": "К турниру", "Settings": "Настройки",
-  "Sit out": "Сит-аут", "Sit in": "Вернуться в игру", "Sit": "Сесть", "Connect": "Войти",
+  "Sit out": "Сит-аут", "Sit in": "Вернуться в игру",
+  // ---- poker lobby (terms like NLHE / rake / Sit & Go stay English) ----
+  "Players seated": "Игроков за столами",
+  "Tables": "Столы",
+  "Hands in play": "Раздач идёт",
+  "Stakes": "Ставки",
+  "Size": "Размер",
+  "Scheduled tournaments": "Турниры по расписанию",
+  "Cash NLHE is live now.": "Кэш NLHE уже работает.",
+  "Loading tables…": "Загрузка столов…",
+  "No tables match your filters.": "Нет столов под ваши фильтры.",
+  "Full · watch": "Занято · смотреть",
+  "Loading tournaments…": "Загрузка турниров…",
+  "No tournaments yet": "Турниров пока нет",
+  "Tournament": "Турнир",
+  "Prize pool": "Призовой фонд",
+  "Entrants": "Участники",
+  "Status": "Статус",
+  "Action": "Действие",
+  "View": "Открыть",
+  "Apply": "Подать заявку",
+  "Register": "Зарегистрироваться",
+  "Unregister": "Отменить регистрацию",
+  "Start": "Запустить",
+  "Blind structure": "Структура блайндов",
+  "Save structure": "Сохранить структуру",
+  "Create tournament": "Создать турнир",
+  "Create": "Создать",
+  "Table size": "Размер стола",
+  "Custom": "Свой",
+  "View / edit": "Открыть / изменить",
+  "Seats": "Места",
+  "Open seats · join now": "Свободные места · заходите",
+  "Pick a time at least a minute in the future.": "Выберите время хотя бы на минуту вперёд.",
+  "hand in play": "раздача идёт",
+  "Format": "Формат",
+  "You're sitting out": "Вы вне игры (сит-аут)",
+  "You won't be dealt into hands until you sit back in": "Карты вам не раздаются, пока вы не вернётесь в игру",
+  "SIT IN": "ВЕРНУТЬСЯ", "Sit": "Сесть", "Connect": "Войти",
 };
-window.__SPLANG = (function () { try { return localStorage.getItem("sp_lang") || "en"; } catch (e) { return "en"; } })();
+// Language is a SITE preference owned by the casino's Settings (lib/i18n.js,
+// key "sl-lang") · poker used to keep its own switch in the table's gear panel,
+// where it could only ever reach this one page. `sp_lang` is still read as a
+// fallback so anyone who set it there before keeps their choice.
+window.__SPLANG = (function () {
+  try { return localStorage.getItem("sl-lang") || localStorage.getItem("sp_lang") || "en"; }
+  catch (e) { return "en"; }
+})();
 window.SPT = (s) => (window.__SPLANG === "en" ? s : (SP_I18N_RU[s] != null ? SP_I18N_RU[s] : s));
-window.SPLangSet = (l) => { window.__SPLANG = l; try { localStorage.setItem("sp_lang", l); } catch (e) {} };
+window.SPLangSet = (l) => { window.__SPLANG = l; try { localStorage.setItem("sl-lang", l); } catch (e) {} };
+// The casino broadcasts into this iframe when the switch is used · adopt it and
+// let listeners re-render. Same channel the sound pref rides on.
+if (typeof document !== "undefined") {
+  document.addEventListener("shinyluck:lang", (e) => {
+    const l = e && e.detail && e.detail.lang;
+    if (!l || l === window.__SPLANG) return;
+    window.__SPLANG = l;
+    try { window.dispatchEvent(new CustomEvent("sp-lang-changed", { detail: { lang: l } })); } catch (_) {}
+  });
+}
 
 /* Hand-name translator: maps the evaluator's English combos ("Pair of Nines",
    "Flush, King high"…) to Russian poker terms. EN → passthrough. */
@@ -280,6 +335,6 @@ window.SPTHand = (name) => {
   if ((m = name.match(/^Three of a Kind, (\w+)$/))) return "Сет из " + spRuPl(m[1]);
   if ((m = name.match(/^Two Pair, (\w+) & (\w+)$/))) return "Две пары: " + spRuPl(m[1]) + " и " + spRuPl(m[2]);
   if ((m = name.match(/^Pair of (\w+)$/))) return "Пара " + spRuPl(m[1]);
-  if ((m = name.match(/^(\w+) high$/))) return "Старшая карта — " + spRuHigh(m[1]);
+  if ((m = name.match(/^(\w+) high$/))) return "Старшая карта · " + spRuHigh(m[1]);
   return name;
 };
