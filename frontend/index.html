@@ -331,7 +331,10 @@ initWins().catch((e) => console.warn("[lobby] wins:", e.message));
     }
     if (isGame) {
       const f = document.getElementById('game-frame');
-      const target = GAME_SRC[p] + '?embed=1';
+      // Forward the page's own query params (e.g. /fair?betId=N pins one
+      // bet on the fair page) - they used to be dropped here.
+      const gq = location.search.replace(/^\?/, '');
+      const target = GAME_SRC[p] + '?' + (gq ? gq + '&' : '') + 'embed=1';
       if (f.dataset.target !== target) { f.src = target; f.dataset.target = target; f.style.height = ''; }
     }
     window.scrollTo(0, 0);

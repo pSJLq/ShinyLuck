@@ -480,3 +480,22 @@ table.t2 tr:last-child td { border-bottom: none; }
 .bw-pgbtn { height: 32px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--bd); background: none; color: var(--fg-dim); font: 600 11px var(--sans); cursor: pointer; transition: all .2s; }
 .bw-pgbtn:hover:not(:disabled) { border-color: rgba(217,185,112,.4); color: var(--gold-hi); }
 .bw-pgbtn:disabled { opacity: .35; cursor: default; }
+
+/* ─── live-feed entries (wins.js) ───
+   A new win slides in; rebuilt-but-old rows stay static (wins.js keys rows and
+   only tags unseen ones). Table rows animate opacity+background only - TR
+   transforms are unreliable across engines. */
+.sl-win-new { animation: sl-win-in .5s cubic-bezier(.22,.61,.2,1) both; }
+@keyframes sl-win-in {
+  from { opacity: 0; transform: translateY(-10px) scale(.97); }
+  to   { opacity: 1; transform: none; }
+}
+tr.sl-win-new { animation: sl-row-in .7s ease-out both; }
+@keyframes sl-row-in {
+  from { opacity: 0; background: rgba(217,185,112,.16); }
+  55%  { opacity: 1; background: rgba(217,185,112,.09); }
+  to   { opacity: 1; background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sl-win-new, tr.sl-win-new { animation: none; }
+}

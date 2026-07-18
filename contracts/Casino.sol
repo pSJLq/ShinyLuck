@@ -1623,7 +1623,12 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
             ? _maxPayoutOf(bet)
             : _maxPayoutOf(bet) - bet.amount;
         lockedReserve -= reserveRelease;
-        if (won && payout > 0) {
+        // Credit EVERY non-zero payout. `won` is a display flag (slots/plinko
+        // mark payout >= stake) - gating the credit on it kept every sub-stake
+        // return for the house: a 0.5x line hit paid the player nothing while
+        // BetSettled honestly published the payout. Measured before the fix:
+        // 77 of 300 settles shorted, 3.55 STT withheld across two players.
+        if (payout > 0) {
             pendingWithdrawals[bet.player] += payout;
             totalPendingWithdrawals += payout;
             emit WithdrawalCredited(bet.player, payout);

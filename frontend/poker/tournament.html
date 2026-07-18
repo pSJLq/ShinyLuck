@@ -38,9 +38,10 @@
      report +6 again. One poll per second, forever, and the frame sat ~6px
      overflowed the whole time: that overflow is the second scrollbar (native
      and white, because it belongs to the frame's own <html>).
-     Embedded, the shell owns the viewport · we are only content, so size to it. */
+     THIS page's content is one absolutely-positioned div, so height:auto (the
+     lobby's cure) collapses everything to 0 here -- drop the padding instead. */
   @media (max-width: 760px) {
-    .sp-embed .app { height: auto !important; min-height: 0 !important; }
+    .sp-embed #stage { padding: 0; }
   }
 </style>
 <script>

@@ -59,6 +59,13 @@ const CASINO_ABI = [
   "function buyBonusVault7(bytes32 clientSeed) payable returns (uint256)",
   "function claimChargeReward() external",
   "function getChargeMeter(address) view returns (uint256 current, uint256 threshold, uint256 pendingReward, uint8 cycle)",
+  // Live RTP display. Missing from this ABI for a while - both slot pages
+  // call SL.casino.getReportedRTP() in their refreshRtp(), which threw
+  // "not a function" into a silent catch: VAULT.7 was rescued by
+  // livedata.js (its own ABI has the method and its selector matches that
+  // page), SUGAR.LAB just showed the baked-in 92% placeholder forever.
+  "function getReportedRTP(uint8) view returns (uint16)",
+  "event RtpAdjusted(uint8 indexed game, uint16 oldRtpBps, uint16 newRtpBps, string reasoning)",
   "event BuyBonusPlaced(uint256 indexed betId, address indexed player, uint8 game, uint256 totalStake, uint256 unitStake)",
   "event ChargeMeterBumped(address indexed player, uint256 newCharge, uint256 threshold)",
   "event ChargeMeterTriggered(address indexed player, uint8 rewardId, uint256 amount, uint8 cycle)",

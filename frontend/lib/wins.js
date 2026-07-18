@@ -135,7 +135,11 @@ function casinoRow(ev, stake) {
   const g = GAME_META[Number(ev.args.game)] || { name: "?", art: null };
   const payout = ev.args.payout;
   return {
-    key: "c:" + ev.transactionHash + ":" + ev.logIndex,
+    // Content key, identical however the log arrived (WS / poll / cold
+    // start). tx+betId also stays unique when one roulette settle tx
+    // emits many BetSettled logs. ev.logIndex was a trap: raw logs have
+    // it, ethers-v6 WS Logs call it .index -> "NaN" keys -> duplicates.
+    key: "c:" + ev.transactionHash + ":" + ev.args.betId.toString(),
     betId: ev.args.betId.toString(),
     src: "casino", gameName: g.name, art: g.art,
     player: ev.args.player.toLowerCase(),
@@ -169,7 +173,7 @@ function pokerRow(ev, seat, amount) {
   const player = seatOwnerAt(Number(ev.args.tableId), seat, ev.blockNumber);
   if (!player) return null; // seating unknown · skip rather than misattribute
   return {
-    key: "p:" + ev.transactionHash + ":" + ev.logIndex,
+    key: "p:" + ev.transactionHash + ":" + ev.name + ":" + seat,
     src: "poker", gameName: "Poker", art: null,
     player, stake: null, payout: amount, net: amount,
     block: ev.blockNumber,
@@ -258,7 +262,7 @@ let renderQueued = false;
 function queueRender() {
   if (renderQueued) return;
   renderQueued = true;
-  setTimeout(() => { renderQueued = false; renderAll(); }, 250); // coalesce bursts
+  setTimeout(() => { renderQueued = false; renderAll(); }, 120); // coalesce bursts
 }
 
 // The socket is disposable (rpc.js rebuilds dropped ones), so remember WHICH
@@ -276,7 +280,7 @@ function subscribeLive() {
       ws.on({ address: contract.target, topics: [topic] }, (log) => {
         try {
           const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-          const ev = { name: parsed.name, args: parsed.args, blockNumber: Number(log.blockNumber), transactionHash: log.transactionHash, logIndex: Number(log.logIndex) };
+          const ev = { name: parsed.name, args: parsed.args, blockNumber: Number(log.blockNumber), transactionHash: log.transactionHash, logIndex: Number(log.logIndex ?? log.index) };
           if (handler(ev)) { trim(); queueRender(); }
         } catch (_) {}
       });
@@ -322,6 +326,22 @@ const artCell = (r) => r.art
 const avaCell = (p, size = 22) =>
   `<img src="${p.avatar}" alt="" style="width:${size}px;height:${size}px;border-radius:999px;object-fit:cover;flex:none;border:1px solid #24242C;background:#0E0E11">`;
 
+// Rows that were already on screen must not replay an entry animation when a
+// re-render rebuilds the DOM around them - only genuinely NEW wins slide in.
+// The first paint after a cold start marks everything seen without animating.
+const _seenRowKeys = new Set();
+let _feedsPainted = false;
+const _rowKey = (r) => r.key;
+function _freshClass(r) {
+  if (!_feedsPainted || _seenRowKeys.has(_rowKey(r))) return "";
+  return " sl-win-new";
+}
+function _markSeen(list) {
+  for (const r of list) _seenRowKeys.add(_rowKey(r));
+  _feedsPainted = true;
+  if (_seenRowKeys.size > 4000) _seenRowKeys.clear(); // unbounded-set guard; worst case one replayed animation
+}
+
 async function renderStrip() {
   const mount = $("[data-wins-strip]");
   if (!mount) return;
@@ -332,7 +352,7 @@ async function renderStrip() {
     const p = profs.get(r.player) || { name: r.player.slice(0, 8), avatar: DEFAULT_AVATAR };
     const bgArt = r.art ? `url('${r.art}') center/cover` : `radial-gradient(120% 150% at 50% -20%,#2a2313,#0B0A08 75%)`;
     return `
-    <div style="flex:none;width:150px;border:1px solid #1C1C22;background:#0E0E11;border-radius:14px;overflow:hidden" class="hv-cardline">
+    <div style="flex:none;width:150px;border:1px solid #1C1C22;background:#0E0E11;border-radius:14px;overflow:hidden" class="hv-cardline${_freshClass(r)}">
       <div style="position:relative;height:78px;background:${bgArt}">
         ${r.art ? "" : `<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--gold);font-size:30px;opacity:.85">♠</span>`}
         <span style="position:absolute;left:0;right:0;bottom:0;height:40px;background:linear-gradient(180deg,transparent,rgba(5,5,6,.9))"></span>
@@ -401,7 +421,7 @@ async function renderBiggest() {
     body.innerHTML = slice.map((r) => {
       const p = profs.get(r.player) || { name: r.player.slice(0, 8), avatar: DEFAULT_AVATAR };
       const win = r.net == null ? r.payout > 0n : r.net > 0n;
-      return `<tr>
+      return `<tr class="${_freshClass(r).trim()}">
         <td><span style="display:inline-flex;align-items:center;gap:9px">${artCell(r)}<span style="font:500 12px var(--sans);color:var(--fg)">${r.gameName}</span></span></td>
         <td style="font:500 11.5px var(--mono);color:var(--fg-mute)">${r.stake != null ? fmtSTT(r.stake) + " STT" : "-"}</td>
         <td style="font:600 12px var(--mono);color:${win ? "var(--green)" : "var(--fg-mute)"}">${fmtSTT(r.payout)} STT</td>
@@ -419,6 +439,7 @@ async function renderBiggest() {
 }
 
 function renderAll() {
+  setTimeout(() => _markSeen(rows), 0); // after this pass painted
   renderStrip().catch(() => {});
   renderTopPlayers().catch(() => {});
   renderBiggest().catch(() => {});
@@ -459,5 +480,5 @@ export async function initWins() {
       if (added > 0) queueRender();
       subscribeLive();
     } catch (_) {}
-  }, 10_000);
+  }, 5_000);
 }

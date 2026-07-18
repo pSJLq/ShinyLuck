@@ -117,10 +117,19 @@
   // client seed the contract recorded, and the revealed server seed. This is
   // what makes the panel verifiable rather than a baked-in display.
   function updateFairPanel(settled, betId) {
+    // pin THIS spin on the fair page (it accepts ?betId=N) - new tab so
+    // the reels keep spinning behind
+    try {
+      const a = document.querySelector('[data-fair-page]');
+      if (a && betId != null) { a.href = '/fair?betId=' + betId; a.style.display = 'block'; }
+    } catch (_) {}
     try {
       if (betId != null) {
         const fn = document.querySelector('[data-fair-nonce]');
-        if (fn) fn.textContent = String(betId).padStart(6, '0');
+        // mark as chain-pinned: the engine's _updateUI repaints this field
+        // from its internal counter after every spin and would stomp the
+        // real bet id back to 000000
+        if (fn) { fn.textContent = String(betId).padStart(6, '0'); fn.dataset.pinned = '1'; }
       }
       const a = (settled && settled.args) ? settled.args : (settled || {});
       const cs = settled?.clientSeed || a.clientSeed;

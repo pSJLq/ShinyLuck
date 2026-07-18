@@ -276,7 +276,7 @@ function TournamentPage() {
                   </div>
                 )}
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                  <button className="btn-sm" onClick={() => { navigator.clipboard?.writeText(location.href); flash("Invite link copied"); }}>🔗 Copy invite link</button>
+                  <button className="btn-sm" onClick={() => { navigator.clipboard?.writeText(location.origin + "/poker?v=tournament&id=" + id); flash("Invite link copied"); }}>🔗 Copy invite link</button>
                   {info.status === 0 && info.registered >= 2 && <button className="btn-sm join" disabled={busy} onClick={() => run("Start", () => SP.sdk.startTournament(id))}>Start now</button>}
                   {info.status === 0 && <button className="btn-sm" disabled={busy} onClick={() => run("Cancelled", () => SP.sdk.cancelTournament(id))}>Cancel & refund</button>}
                   <span style={{ fontFamily: "var(--label)", fontSize: 12, color: "var(--muted)" }}>You're the host · share the link so players can apply.</span>
