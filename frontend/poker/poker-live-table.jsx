@@ -1260,12 +1260,20 @@ function Modal({ kind, close, sdk, tableId, cfg, bal, tx, refresh }) {
 }
 
 /* ---- scale-to-fit stage (from the design) ---- */
+// Bound once - see the same fix in poker-lobby-app.jsx. This one mattered most:
+// it is the screen people sit on for hours, so the leaked resize handlers piled
+// up the longest.
+let _tableScaleBound = false;
 function mountScale() {
   const scaler = document.getElementById("scaler");
   if (!scaler) return;
   const app = scaler.querySelector(".app");
   if (!app) return;
   function fit() {
+    const embedNow = document.documentElement.classList.contains("sp-embed");
+    const key = window.innerWidth + "x" + window.innerHeight + "|" + (embedNow ? 1 : 0);
+    if (app.dataset.slFit === key) return;   // remounted nodes carry no marker
+    app.dataset.slFit = key;
     if (window.innerWidth <= 760) { // fluid mobile layout (mobile.css) - no stage scaling
       app.style.transform = ""; app.style.position = ""; app.style.top = ""; app.style.left = "";
       scaler.style.width = ""; scaler.style.height = "";
@@ -1282,7 +1290,8 @@ function mountScale() {
     app.style.transform = `scale(${s})`; app.style.transformOrigin = "top left"; app.style.position = "absolute"; app.style.top = "0"; app.style.left = "0";
     scaler.style.width = 1600 * s + "px"; scaler.style.height = 1000 * s + "px";
   }
-  fit(); window.addEventListener("resize", fit);
+  fit();
+  if (!_tableScaleBound) { _tableScaleBound = true; window.addEventListener("resize", () => mountScale()); }
 }
 
 function boot() {

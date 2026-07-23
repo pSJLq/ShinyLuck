@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>InfoFi · ShinyLuck</title>
+<link rel="icon" href="/favicon.ico" />
+<link rel="stylesheet" href="/v2.css" />
+<link rel="stylesheet" href="/infofi.css" />
+<script src="/lib/console-filter.js"></script>
+<script src="/partials.js" defer></script>
+<script type="module" src="/lib/i18n.js"></script>
+</head>
+<body>
+  <div class="iw">
+    <div class="if-head">
+      <div class="if-title">Somnia <b>mindshare</b> on X · who owns the bubble's attention</div>
+      <div class="if-meta" id="ifMeta">loading…</div>
+    </div>
+
+    <svg id="tmap" height="460"></svg>
+    <div class="if-tip" id="ifTip"></div>
+
+    <div id="ifProjWrap" style="display:none">
+      <div class="if-board">Ecosystem projects <span id="ifProjCount"></span></div>
+      <div class="if-scroll">
+        <table class="if">
+          <thead><tr>
+            <th>Account</th><th>Posts</th><th>Comments</th><th>Likes</th><th>Reposts</th>
+            <th>Replies</th><th>Bookmarks</th><th>Views</th><th>Score</th><th>Share</th>
+          </tr></thead>
+          <tbody id="ifProjRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="ifVoiceWrap" style="display:none">
+      <div class="if-board voice">Community voices <span id="ifVoiceCount"></span></div>
+      <div class="if-scroll">
+        <table class="if">
+          <thead><tr>
+            <th>Account</th><th>Tagged posts</th><th>Comments</th><th>Likes</th><th>Reposts</th>
+            <th>Replies</th><th>Bookmarks</th><th>Views</th><th>Score</th><th>Share</th>
+          </tr></thead>
+          <tbody id="ifVoiceRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="if-note" id="ifNote"></div>
+  </div>
+
+  <script type="module" src="/lib/infofi.js"></script>
+</body>
+</html>

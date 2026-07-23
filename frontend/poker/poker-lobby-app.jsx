@@ -10,6 +10,27 @@ const Ln = (wei) => Number(SP.fmt(wei, 6));
 const lshort = (a) => (a && a !== "0x0000000000000000000000000000000000000000" ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const stakeOf = (bb) => (bb <= 0.05 ? "micro" : bb <= 1 ? "low" : bb <= 5 ? "mid" : "high");
 
+// Three separate components poll the tournament list on the same 4s cadence.
+// Un-shared, that is three independent chain reads per cycle - and each one
+// then fired one isRegisteredIn per tournament SEQUENTIALLY, so a connected
+// wallet looking at ten tournaments drove ~23 awaited reads every 4 seconds.
+// One in-flight read is shared for a beat; actions bust it so a freshly
+// created or joined tournament still shows up immediately.
+let _trnCache = { at: 0, p: null };
+function trnList() {
+  const now = Date.now();
+  if (_trnCache.p && now - _trnCache.at < 3000) return _trnCache.p;
+  _trnCache = { at: now, p: SP.sdk.tournaments().catch((e) => { _trnCache = { at: 0, p: null }; throw e; }) };
+  return _trnCache.p;
+}
+function bustTrnCache() { _trnCache = { at: 0, p: null }; }
+// registration lookups run together instead of one-at-a-time
+async function regMap(ts) {
+  const pairs = await Promise.all(ts.map(async (t) => [t.id, await SP.sdk.isRegisteredIn(t.id)]));
+  const m = {}; for (const [id, v] of pairs) m[id] = v;
+  return m;
+}
+
 function LobbyApp() {
   // Language is owned by the casino's Settings · repaint the WHOLE tree when it
   // changes so every SPT() below re-runs at once. It has to sit on the root:
@@ -39,16 +60,9 @@ function LobbyApp() {
   const [showCreate, setShowCreate] = uS(false);
   const [showCashier, setShowCashier] = uS(false);
   const [theme] = uS(() => localStorage.getItem("sp_theme") || "b");
-  const canvasRef = uR(null);
 
-  // ambient grid
-  uE(() => {
-    if (!canvasRef.current || !window.GridField) return;
-    const f = new GridField(canvasRef.current, { cell: 20, gap: 6, speed: 0.4, density: 0.5, accent: "#d9ab4a", accent2: "#f2d78a", maxAlpha: 0.7, minBright: 0.01, shape: "square" });
-    f.start();
-    const r = setTimeout(() => f._resize(), 300);
-    return () => { clearTimeout(r); f.destroy(); };
-  }, []);
+  // Ambient backdrop is poker-dust.js now (six composited sparks) instead of a
+  // GridField canvas repainting thousands of cells every frame at 16% opacity.
 
   // restore Privy session
   uE(() => {
@@ -97,7 +111,7 @@ function LobbyApp() {
         if (!stop) { setRows(out); setLoaded(true); }
         if (SP.sdk.hasTournaments()) {
           try {
-            const ts = await SP.sdk.tournaments();
+            const ts = await trnList();
             if (!stop) {
               setTrnCount(ts.filter((t) => t.status <= 1).length);
               setTrnSeated(ts.filter((t) => t.status === 1).reduce((a, t) => a + t.remaining, 0)); // tournament players count as seated
@@ -141,7 +155,6 @@ function LobbyApp() {
           )}
         </header>
 
-        <canvas className="lobbyfield" ref={canvasRef} />
         {showCashier && connected && <CashierModal close={() => setShowCashier(false)} addr={addr} bal={bal} refresh={refreshBal} />}
 
         <div className="lobbyhead">
@@ -257,14 +270,12 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
 
   async function load() {
     try {
-      const ts = await SP.sdk.tournaments();
+      const ts = await trnList();
       ts.reverse(); // newest first
       setList(ts);
       onCount(ts.filter((t) => t.status <= 1).length);
       if (SP.sdk.address) {
-        const m = {};
-        for (const t of ts) m[t.id] = await SP.sdk.isRegisteredIn(t.id);
-        setMine(m);
+        setMine(await regMap(ts));
       }
     } catch (e) { console.warn("trn load:", e.message); setList([]); }
   }
@@ -282,7 +293,7 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
     // the clicked button owns the spinner until this settles
     const done = SPPress.claim();
     setBusy(true);
-    try { await fn(); flash(label + " ✓"); await load(); }
+    try { await fn(); flash(label + " ✓"); bustTrnCache(); await load(); }
     catch (e) { flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 70)); console.error(e); }
     finally { setBusy(false); done(); }
   }
@@ -367,9 +378,9 @@ function SngTab({ connected, connect, addr }) {
 
   async function load() {
     try {
-      const ts = (await SP.sdk.tournaments()).filter((t) => t.status === 0).reverse();
+      const ts = (await trnList()).filter((t) => t.status === 0).reverse();
       setOpen(ts);
-      if (SP.sdk.address) { const m = {}; for (const t of ts) m[t.id] = await SP.sdk.isRegisteredIn(t.id); setMine(m); }
+      if (SP.sdk.address) setMine(await regMap(ts));
     } catch (e) { setOpen([]); }
   }
   uE(() => { load(); const iv = setInterval(load, 4000); return () => clearInterval(iv); }, [connected]);
@@ -389,7 +400,7 @@ function SngTab({ connected, connect, addr }) {
     // the clicked button owns the spinner until this settles
     const done = SPPress.claim();
     setBusy(true);
-    try { await fn(); flash(label + " ✓"); await load(); }
+    try { await fn(); flash(label + " ✓"); bustTrnCache(); await load(); }
     catch (e) { flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 70)); console.error(e); }
     finally { setBusy(false); done(); }
   }
@@ -624,10 +635,22 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
   );
 }
 
+// Bound once. This used to run `window.addEventListener("resize", fit)` on
+// every tick of a 400ms interval, so the handler list grew forever — an hour
+// on this screen left ~9000 live closures, and every one of them ran on each
+// resize. The interval stays (it is what re-fits the stage after React
+// remounts a tab), but `fit` now no-ops unless something actually changed, so
+// the idle cost is two property reads instead of a layout write 2.5x/second.
+let _lobbyScaleBound = false;
 function mountScaleLobby() {
   const scaler = document.getElementById("scaler"); if (!scaler) return;
   const app = scaler.querySelector(".app"); if (!app) return;
   const fit = () => {
+    const embedNow = document.documentElement.classList.contains("sp-embed");
+    const key = window.innerWidth + "x" + window.innerHeight + "|" + (embedNow ? 1 : 0);
+    // a freshly remounted .app carries no marker, so it always re-fits
+    if (app.dataset.slFit === key) return;
+    app.dataset.slFit = key;
     if (window.innerWidth <= 760) { // fluid mobile layout (mobile.css) - no stage scaling
       app.style.transform = ""; app.style.position = ""; app.style.top = ""; app.style.left = "";
       scaler.style.width = ""; scaler.style.height = "";
@@ -646,7 +669,11 @@ function mountScaleLobby() {
     app.style.transform = `scale(${s})`; app.style.transformOrigin = "top left"; app.style.position = "absolute"; app.style.top = "0"; app.style.left = "0";
     scaler.style.width = 1600 * s + "px"; scaler.style.height = 1000 * s + "px";
   };
-  fit(); window.addEventListener("resize", fit);
+  fit();
+  if (_lobbyScaleBound) return;
+  _lobbyScaleBound = true;
+  // re-enter through the mount fn so the handler always re-queries the DOM
+  window.addEventListener("resize", () => mountScaleLobby());
 }
 
 function bootLobby() { ReactDOM.createRoot(document.getElementById("root")).render(<LobbyApp />); setInterval(mountScaleLobby, 400); setTimeout(mountScaleLobby, 80); }

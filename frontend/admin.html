@@ -125,6 +125,45 @@
     </div>
 
     <div class="adm-card">
+      <h3>Predictions · revenue</h3>
+      <div class="adm-row"><span class="l">Platform accrued</span><span class="v cyan"><span data-sl-adm-pred-accrued>-</span> STT</span></div>
+      <div class="adm-row"><span class="l">Fee model</span><span class="v" data-sl-adm-pred-fees>-</span></div>
+      <div class="adm-row"><span class="l">Your pending (creator fees + bonds)</span><span class="v"><span data-sl-adm-pred-pending>-</span> STT</span></div>
+      <div class="adm-row"><span class="l">Markets created</span><span class="v" data-sl-adm-pred-markets>-</span></div>
+      <div class="adm-row">
+        <span class="l">Withdraw to</span>
+        <span style="flex:1"><input class="adm-input" style="width:100%" type="text" placeholder="0x… (blank = connected wallet)" data-sl-adm-pred-to /></span>
+      </div>
+      <div class="adm-row" style="border-bottom:none;">
+        <button class="adm-btn" data-sl-adm-pred-withdraw>Withdraw platform fees</button>
+        <button class="adm-btn" data-sl-adm-pred-claim>Claim creator fees + bonds</button>
+      </div>
+      <div class="m" style="opacity:.5; margin-top:10px; font-size:11px; line-height:1.5;">
+        Fees are carved from the LOSING pool only, so a winning bettor never receives less than their stake.
+        Owned by the PREDICTIONS deployer key · connect that account to withdraw.
+      </div>
+    </div>
+
+    <div class="adm-card">
+      <h3>Predictions · market creators</h3>
+      <div class="adm-row"><span class="l">Curated mode</span><span class="v amber" data-sl-adm-pred-curated>-</span></div>
+      <div class="adm-row">
+        <span class="l">Address</span>
+        <span style="flex:1"><input class="adm-input" style="width:100%" type="text" placeholder="0x…" data-sl-adm-pred-creator /></span>
+      </div>
+      <div class="adm-row">
+        <button class="adm-btn" data-sl-adm-pred-add>Allow creator</button>
+        <button class="adm-btn" data-sl-adm-pred-check>Check status</button>
+        <button class="adm-btn" data-sl-adm-pred-curated-toggle>-</button>
+      </div>
+      <div data-sl-adm-pred-creators style="margin-top:6px"></div>
+      <div class="m" style="opacity:.5; margin-top:10px; font-size:11px; line-height:1.5;">
+        With curated mode ON only the owner and whitelisted wallets can open markets. Each row shows the LIVE
+        on-chain flag; the address list itself is kept in this browser (the contract exposes no enumeration).
+      </div>
+    </div>
+
+    <div class="adm-card">
       <h3>Bonus mode</h3>
       <div class="adm-row"><span class="l">Status</span><span class="v cyan" data-sl-adm-bonus-status>-</span></div>
       <div class="adm-row"><span class="l">Until</span><span class="v" data-sl-adm-bonus-until>-</span></div>

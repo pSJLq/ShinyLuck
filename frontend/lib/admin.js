@@ -30,6 +30,34 @@ function trn() { return _trn || (_trn = new ethers.Contract(POKER_CONFIG.pokerTo
 let pokerOwner = null;
 let isPokerOwner = false;
 
+// Predictions runs on its own deployer key (a third account) - same "each card
+// enforces its own owner" rule as the poker cards.
+const PRED_MARKET = "0x8AA8E7D6D89b4D6a9C9a43C0f4Fa5a547a7974E5";
+const PRED_ABI = [
+  "function owner() view returns (address)",
+  "function platformAccrued() view returns (uint256)",
+  "function platformFeeBps() view returns (uint16)",
+  "function creatorFeeBps() view returns (uint16)",
+  "function curatedMode() view returns (bool)",
+  "function allowedCreators(address) view returns (bool)",
+  "function pendingFunds(address) view returns (uint256)",
+  "function marketCount() view returns (uint256)",
+  "function withdrawPlatform(address to, uint256 amount) external",
+  "function claimFunds() external",
+  "function setAllowedCreator(address who, bool ok) external",
+  "function setCuratedMode(bool on) external",
+];
+let _pred = null;
+function pred() { return _pred || (_pred = new ethers.Contract(PRED_MARKET, PRED_ABI, provider())); }
+let predOwner = null;
+let isPredOwner = false;
+
+// setAllowedCreator emits no event, so the panel keeps the roster locally and
+// shows each entry's LIVE on-chain flag - the chain stays the source of truth.
+const PRED_ROSTER_KEY = "shinyluck.pred.creators";
+const roster = () => { try { return JSON.parse(localStorage.getItem(PRED_ROSTER_KEY)) || []; } catch (_) { return []; } };
+const rosterSave = (l) => { try { localStorage.setItem(PRED_ROSTER_KEY, JSON.stringify([...new Set(l.map((a) => a.toLowerCase()))])); } catch (_) {} };
+
 const GAME_NAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.LAB"];
 const ZERO = "0x0000000000000000000000000000000000000000";
 const LOOKBACK = 20_000;
@@ -108,17 +136,22 @@ async function gateAccess() {
     try { pokerOwner = (await room().owner()).toLowerCase(); } catch (_) {}
   }
   $("[data-sl-adm-owner]").textContent = shortAddr(casinoOwner) + (pokerOwner && pokerOwner !== casinoOwner ? " · poker " + shortAddr(pokerOwner) : "");
+  if (!predOwner) {
+    try { predOwner = (await pred().owner()).toLowerCase(); } catch (_) {}
+  }
   if (SL.address) {
     $("[data-sl-adm-connected]").textContent = shortAddr(SL.address);
     isOwner = SL.address.toLowerCase() === casinoOwner;
     isPokerOwner = !!pokerOwner && SL.address.toLowerCase() === pokerOwner;
+    isPredOwner = !!predOwner && SL.address.toLowerCase() === predOwner;
   } else {
     $("[data-sl-adm-connected]").textContent = "-";
     isOwner = false;
     isPokerOwner = false;
+    isPredOwner = false;
   }
-  // Either key opens the console; each card still enforces its own owner.
-  const allowed = isOwner || isPokerOwner;
+  // Any of the three keys opens the console; each card still enforces its own owner.
+  const allowed = isOwner || isPokerOwner || isPredOwner;
   $("[data-sl-adm-denied]").style.display = allowed ? "none" : "block";
   $("[data-sl-adm-main]").classList.toggle("on", allowed);
 }
@@ -354,6 +387,57 @@ function bindActions() {
   };
   $("[data-sl-adm-rake-withdraw]")?.addEventListener("click", () => pokerWithdraw("rake"));
   $("[data-sl-adm-trnfees-withdraw]")?.addEventListener("click", () => pokerWithdraw("fees"));
+
+  // ---- predictions ----
+  const ptoast = (m, kind = "error") => import("./ui.js").then(({ toast: t }) => t(m, { kind, ttl: 6000 }));
+  $("[data-sl-adm-pred-withdraw]")?.addEventListener("click", async () => {
+    if (!isPredOwner) return ptoast("Connect the PREDICTIONS deployer account", "warn");
+    await connect();
+    const dest = ($("[data-sl-adm-pred-to]")?.value || "").trim() || SL.address;
+    if (!ethers.isAddress(dest)) return ptoast("Enter a valid destination address", "warn");
+    try {
+      const amount = await pred().platformAccrued();
+      if (!(amount > 0n)) return ptoast("Nothing to withdraw", "warn");
+      const tx = await pred().connect(SL.signer).withdrawPlatform(dest, amount);
+      await tx.wait();
+      ptoast(`Sent ${ethers.formatEther(amount)} STT to ${shortAddr(dest)}`, "success");
+      refreshPredictions();
+    } catch (e) { ptoast(e.shortMessage || e.message); }
+  });
+  $("[data-sl-adm-pred-claim]")?.addEventListener("click", async () => {
+    await connect();
+    try {
+      const tx = await pred().connect(SL.signer).claimFunds();
+      await tx.wait();
+      ptoast("Creator fees + bonds claimed", "success");
+      refreshPredictions();
+    } catch (e) { ptoast(e.shortMessage || e.message); }
+  });
+  $("[data-sl-adm-pred-add]")?.addEventListener("click", () => {
+    const a = ($("[data-sl-adm-pred-creator]")?.value || "").trim();
+    setCreator(a, true);
+  });
+  $("[data-sl-adm-pred-check]")?.addEventListener("click", async () => {
+    const a = ($("[data-sl-adm-pred-creator]")?.value || "").trim();
+    if (!ethers.isAddress(a)) return ptoast("Invalid address", "warn");
+    try {
+      const on = await pred().allowedCreators(a);
+      const l = roster(); if (!l.includes(a.toLowerCase())) { l.push(a.toLowerCase()); rosterSave(l); }
+      ptoast(`${shortAddr(a)} is ${on ? "ALLOWED" : "not allowed"}`, on ? "success" : "warn");
+      refreshPredictions();
+    } catch (e) { ptoast(e.shortMessage || e.message); }
+  });
+  $("[data-sl-adm-pred-curated-toggle]")?.addEventListener("click", async () => {
+    if (!isPredOwner) return ptoast("Connect the PREDICTIONS deployer account", "warn");
+    await connect();
+    try {
+      const cur = await pred().curatedMode();
+      const tx = await pred().connect(SL.signer).setCuratedMode(!cur);
+      await tx.wait();
+      ptoast(`Curated mode ${!cur ? "ON" : "OFF"}`, "success");
+      refreshPredictions();
+    } catch (e) { ptoast(e.shortMessage || e.message); }
+  });
   $("[data-sl-adm-schedule]")?.addEventListener("click", async () => {
     if (!isOwner) return;
     await connect();
@@ -438,10 +522,64 @@ async function refreshPoker() {
   try { $("[data-sl-adm-trnfees]").textContent = fmt(await trn().feeCollected()); } catch (_) {}
 }
 
+async function refreshPredictions() {
+  const c = pred();
+  try {
+    const [accrued, pf, cf, curated, count] = await Promise.all([
+      c.platformAccrued(), c.platformFeeBps(), c.creatorFeeBps(), c.curatedMode(), c.marketCount(),
+    ]);
+    $("[data-sl-adm-pred-accrued]").textContent = fmtSTT(accrued);
+    $("[data-sl-adm-pred-fees]").textContent = `${Number(pf) / 100}% platform + ${Number(cf) / 100}% creator`;
+    $("[data-sl-adm-pred-markets]").textContent = count.toString();
+    const cur = $("[data-sl-adm-pred-curated]");
+    if (cur) { cur.textContent = curated ? "ON · whitelist only" : "OFF · anyone can create"; cur.className = "v " + (curated ? "amber" : "cyan"); }
+    const btn = $("[data-sl-adm-pred-curated-toggle]");
+    if (btn) btn.textContent = curated ? "Open to everyone" : "Restrict to whitelist";
+  } catch (_) {}
+  if (SL.address) {
+    try { $("[data-sl-adm-pred-pending]").textContent = fmtSTT(await c.pendingFunds(SL.address)); } catch (_) {}
+  }
+  // roster with live on-chain status
+  const root = $("[data-sl-adm-pred-creators]");
+  if (!root) return;
+  const list = roster();
+  if (!list.length) { root.innerHTML = `<div class="m" style="opacity:.45">no creators added yet</div>`; return; }
+  const flags = await Promise.all(list.map((a) => c.allowedCreators(a).catch(() => null)));
+  root.innerHTML = "";
+  list.forEach((addr, i) => {
+    const on = flags[i];
+    const row = document.createElement("div");
+    row.className = "adm-row";
+    row.innerHTML = `<span class="l" style="font-family:var(--mono);font-size:11px">${shortAddr(addr)}</span>
+      <span class="v ${on ? "cyan" : ""}" style="opacity:${on ? 1 : .45}">${on === null ? "?" : on ? "ALLOWED" : "revoked"}</span>`;
+    const b = document.createElement("button");
+    b.className = "adm-btn" + (on ? " danger" : "");
+    b.textContent = on ? "Revoke" : "Allow";
+    b.onclick = () => setCreator(addr, !on);
+    row.appendChild(b);
+    root.appendChild(row);
+  });
+}
+
+async function setCreator(addr, allow) {
+  const toast = (m, kind = "error") => import("./ui.js").then(({ toast: t }) => t(m, { kind, ttl: 6000 }));
+  if (!isPredOwner) return toast("Connect the PREDICTIONS deployer account", "warn");
+  if (!ethers.isAddress(addr)) return toast("Invalid address", "warn");
+  try {
+    await connect();
+    const tx = await pred().connect(SL.signer).setAllowedCreator(addr, allow);
+    await tx.wait();
+    const l = roster(); if (!l.includes(addr.toLowerCase())) l.push(addr.toLowerCase());
+    rosterSave(l);
+    toast(`${allow ? "Allowed" : "Revoked"} ${shortAddr(addr)}`, "success");
+    refreshPredictions();
+  } catch (e) { toast(e.shortMessage || e.message); }
+}
+
 async function refreshAll() {
   await gateAccess();
-  if (!isOwner && !isPokerOwner) return;
-  await Promise.all([refreshPoker().catch(() => {})].concat(
+  if (!isOwner && !isPokerOwner && !isPredOwner) return;
+  await Promise.all([refreshPoker().catch(() => {}), refreshPredictions().catch(() => {})].concat(
     isOwner ? [refreshTreasury(), refreshBonus(), refreshGames(), refreshWindows(), refreshReasoning(), refreshAgents(), refreshStats()] : [],
   ));
 }

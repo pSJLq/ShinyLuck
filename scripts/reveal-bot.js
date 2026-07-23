@@ -191,6 +191,95 @@ async function main() {
   const provider = ethers.provider;
   console.log(`[reveal-bot] signer=${signer.address} casino=${casinoAddr} network=${network.name}`);
 
+  // ───────────────── PIPELINED SETTLE DISPATCH ─────────────────
+  // The per-bet sweep used to be strictly serial: send one settle, await its
+  // receipt, only then look at the next bet. At Somnia's ~65ms RPC round trip
+  // and 0.1s blocks that caps the house at ~1.2 settles/s — measured on the
+  // load rig (scripts/_casino-load-test.js). A slot spin occupies a player for
+  // only ~5s, so ~10 concurrent spinners already saturate it, and past that
+  // the pending queue grows until bets cross the 256-block blockhash window
+  // and can only be REFUNDED with no result (at 50 players: p50 spin→result
+  // 30s and 40% of all spins refunded).
+  //
+  // Somnia includes transactions from one sender in parallel as long as their
+  // nonces are contiguous — the same fix that took the poker dealer from
+  // ~0.6 to 12.5 tx/s (see poker-dealer-bot.js worker dispatch). So: allocate
+  // nonces locally, broadcast up to SETTLE_CONCURRENCY at a time, and confirm
+  // them in parallel. SETTLE_CONCURRENCY=1 restores the old serial behaviour.
+  const SETTLE_CONCURRENCY = parseInt(process.env.SETTLE_CONCURRENCY || "12", 10);
+  // DO NOT pin a fixed gasLimit here. Somnia meters these calls FAR higher than
+  // a local EVM does: the same settle that costs 151k (dice) / 233k (slots) on
+  // hardhat estimates at ~1.15M on Somnia — a limit derived from local numbers
+  // silently ran every dice and slots settle out of gas, five retries, then
+  // dropped the bet (caught live on prod, bets 295/296, 2026-07-22). The
+  // estimateGas round trip is cheap now that sends are concurrent, so let
+  // ethers do it and stay correct across future contract changes.
+  let _nonce = null;              // next nonce to hand out
+  let _feeCache = { at: 0, fee: null };
+  // Nonce handout is serialised through a promise chain. Without it, twelve
+  // workers awaiting getTransactionCount concurrently all read the SAME count
+  // and hand out the SAME nonce — measured on the rig as a 16% collision rate
+  // ("replacement underpriced" / "nonce too low") that burned the 5-retry
+  // budget and dropped bets on the floor unsettled.
+  let _nonceLock = Promise.resolve();
+  function withNonceLock(fn) {
+    const run = _nonceLock.then(fn, fn);
+    _nonceLock = run.then(() => {}, () => {});
+    return run;
+  }
+  async function allocNonce() {
+    return withNonceLock(async () => {
+      if (_nonce == null) _nonce = await provider.getTransactionCount(signer.address, "pending");
+      return _nonce++;
+    });
+  }
+  // Resync straight to the chain's PENDING count — that count already includes
+  // everything we broadcast but which hasn't mined yet, so it is authoritative
+  // in both directions. It has to be able to move the counter DOWN: when a
+  // broadcast fails outright the nonce we handed out was never consumed, and a
+  // counter that only ever moved up would leave a permanent gap with every
+  // later transaction stuck unmined in the mempool — a wedged settle bot.
+  // The mutex is what keeps concurrent resyncs from stampeding each other.
+  async function nonceResync() {
+    return withNonceLock(async () => {
+      _nonce = await provider.getTransactionCount(signer.address, "pending");
+    });
+  }
+  // Every OTHER transaction the bot sends (round settle/refund, round opens,
+  // seed top-ups, owner sweeps) must draw from the same counter — an ethers
+  // call that reads its own nonce mid-settle-storm collides with the batch.
+  async function sendVia(contract, method, args = [], extra = {}) {
+    const nonce = await allocNonce();
+    try {
+      return await contract[method](...args, { nonce, ...(await cachedFee()), ...extra });
+    } catch (e) {
+      await nonceResync();   // the nonce we took was not consumed — put it back
+      throw e;
+    }
+  }
+  async function cachedFee() {
+    // Somnia's baseFee is fixed at 6 gwei, so this barely moves; refreshing
+    // every 15s keeps us correct if the chain ever changes it.
+    if (Date.now() - _feeCache.at < 15_000 && _feeCache.fee) return _feeCache.fee;
+    const fd = await provider.getFeeData();
+    _feeCache = { at: Date.now(), fee: {
+      maxFeePerGas: fd.maxFeePerGas ?? undefined,
+      maxPriorityFeePerGas: fd.maxPriorityFeePerGas ?? undefined,
+      gasPrice: fd.maxFeePerGas ? undefined : (fd.gasPrice ?? undefined),
+    } };
+    return _feeCache.fee;
+  }
+  // Run `jobs` with at most `limit` in flight. Each job gets its own nonce, so
+  // broadcasts go out back-to-back instead of waiting on the previous receipt.
+  async function dispatchPool(jobs, limit) {
+    let i = 0;
+    const workers = Array.from({ length: Math.min(limit, jobs.length) }, async () => {
+      while (i < jobs.length) { const job = jobs[i++]; await job(); }
+    });
+    await Promise.all(workers);
+  }
+
+
   // QUORUM VERIFIER activation: every Nth settled bet, ask the independent
   // 3-of-4 LLM committee (AgentQuorumVerifier) to re-derive the bet's keccak256
   // randomness on-chain (defence-in-depth on the RNG). Fully fire-and-forget so
@@ -207,7 +296,7 @@ async function main() {
     if (_settleCount % QUORUM_EVERY !== 0) return;
     try {
       const price = await verifier.quotePrice();
-      const tx = await verifier.requestVerification(betId, { value: price });
+      const tx = await sendVia(verifier, "requestVerification", [betId], { value: price });
       await tx.wait();
       console.log(`[reveal-bot] quorum verification fired for bet ${betId} (tx=${tx.hash.slice(0, 12)}…)`);
     } catch (e) { /* defence-in-depth only - never disrupt settlement */ }
@@ -271,7 +360,7 @@ async function main() {
         // bug that left the pool stuck at 3/5 chunks → drained to 0 → froze).
         let broadcast = false;
         for (let attempt = 0; attempt < 6 && !broadcast; attempt++) {
-          try { await casino.provisionSeedHashes(slice); broadcast = true; }
+          try { await sendVia(casino, "provisionSeedHashes", [slice]); broadcast = true; }
           catch (e) {
             const msg = e.shortMessage || e.message || "";
             if (/nonce|replacement|already known|underpriced|mempool/i.test(msg)) await napMs(1200 + Math.random() * 1200);
@@ -402,7 +491,7 @@ async function main() {
       try { players = await reg.getActivePlayers(0, 10); } catch (_) { return; }
       for (const p of players) {
         try {
-          const tx = await hm.requestPlayerDecision(p);
+          const tx = await sendVia(hm, "requestPlayerDecision", [p]);
           await tx.wait();
           console.log(`[reveal-bot] player-agent tick fired for ${p.slice(0, 10)}... (${tx.hash.slice(0, 12)}...)`);
         } catch (e) {
@@ -501,6 +590,9 @@ async function main() {
 
   // Per-bet pending: betId → { commitBlock, seedIdx, game, player }
   const pending = new Map();
+  // betIds currently being settled — the loop ticks every POLL_MS and must not
+  // fire a second settle for a bet whose first one is still in flight.
+  const inflight = new Set();
   // Round-based pending: roundId → { commitBlock, seedIdx, betWindowEnd, kind: "crash"|"roulette" }
   const pendingRounds = new Map();
   // round key -> { fails, nextMs }: throttles doomed settle re-submits (e.g. an
@@ -592,35 +684,63 @@ async function main() {
     const nowSec = chainNowSec;
 
     // 2. Sweep per-bet pending.
-    for (const [betId, info] of pending) {
+    //    Collect everything that is due this tick, then dispatch it through the
+    //    concurrent pool. Oldest bet first: the one closest to the blockhash
+    //    window is the one that degrades into a no-result refund if we're late.
+    const dueJobs = [];
+    for (const [betId, info] of [...pending].sort((a, b) => Number(BigInt(a[0]) - BigInt(b[0])))) {
       const age = cur - info.commitBlock;
       if (age < 0n) continue;
+      if (inflight.has(betId)) continue;
       if (age > REVEAL_DELAY + BLOCKHASH_WINDOW) {
-        try {
-          const tx = await casino.refundExpired(betId);
-          await tx.wait();
-          console.log(`[reveal-bot] refunded expired bet ${betId} tx=${tx.hash}`);
-        } catch (e) {
-          const msg = e.shortMessage || e.message;
-          if (/BetAlreadySettled|BetNotFound|not expired/.test(msg)) {/* drop */}
-          else console.warn(`[reveal-bot] refundExpired ${betId}: ${msg}`);
-        }
-        pending.delete(betId);
+        dueJobs.push(async () => {
+          inflight.add(betId);
+          try {
+            const tx = await casino.refundExpired(betId, { nonce: await allocNonce(), ...(await cachedFee()) });
+            await tx.wait();
+            console.log(`[reveal-bot] refunded expired bet ${betId} tx=${tx.hash}`);
+          } catch (e) {
+            const msg = e.shortMessage || e.message;
+            // ANY failure here has to resync, not just nonce-shaped ones. A
+            // plain revert (Somnia returns custom errors the bot can't decode,
+            // so "BetAlreadySettled" arrives as "execution reverted") throws
+            // during estimateGas — before broadcast — leaving the nonce we took
+            // unused. That gap parks every later transaction in the mempool
+            // unmined and wedges the whole bot; it is what stopped settlement
+            // dead on prod on 2026-07-22 until the process was restarted.
+            await nonceResync();
+            if (/nonce|replacement|already known/i.test(msg)) { inflight.delete(betId); return; }
+            if (/BetAlreadySettled|BetNotFound|not expired/.test(msg)) {/* drop */}
+            else console.warn(`[reveal-bot] refundExpired ${betId}: ${msg}`);
+          } finally { inflight.delete(betId); }
+          pending.delete(betId);
+        });
       } else if (age > REVEAL_DELAY) {
         const seed = seedStore.get(info.seedIdx);
         if (!seed) { console.warn(`[reveal-bot] no seed at idx=${info.seedIdx} for bet ${betId}`); pending.delete(betId); continue; }
         const action = info.game === 3 ? "REVEAL_MINES" : (info.game === 1 || info.game === 5 ? "SKIP_ROUND" : "SETTLE");
         if (action === "SKIP_ROUND") { pending.delete(betId); continue; }
+        dueJobs.push(async () => {
+        inflight.add(betId);
         try {
+          const opts = { nonce: await allocNonce(), ...(await cachedFee()) };
           const tx = info.game === 3
-            ? await casino.revealMinesSeed(betId, seed)
-            : await casino.revealAndSettle(betId, seed);
+            ? await casino.revealMinesSeed(betId, seed, opts)
+            : await casino.revealAndSettle(betId, seed, opts);
           await tx.wait();
           console.log(`[reveal-bot] ${action} bet ${betId} tx=${tx.hash}`);
           pending.delete(betId);
           if (action === "SETTLE") maybeFireQuorum(betId).catch(() => {});
         } catch (e) {
           const msg = e.shortMessage || e.message;
+          // Always resync: whether the chain rejected our nonce or the call
+          // reverted during estimateGas, the nonce we took may never have been
+          // consumed, and an unconsumed nonce is a gap that wedges every later
+          // transaction in the mempool (see the refund path above).
+          await nonceResync();
+          // A rejected nonce means the bet never reached the contract, so it
+          // must NOT burn the 5-retry budget — let the next tick redeliver it.
+          if (/nonce|replacement|already known/i.test(msg)) return;
           if (/BetAlreadySettled|BetNotFound|InvalidGame/.test(msg)) pending.delete(betId);
           else if (/RevealTooEarly/.test(msg)) {/* retry next tick */}
           else if (/RevealExpired/.test(msg)) {/* refund branch next tick */}
@@ -642,9 +762,11 @@ async function main() {
               console.warn(`[reveal-bot] ${action} ${betId}: ${msg} (retry ${info._retries}/5)`);
             }
           }
-        }
+        } finally { inflight.delete(betId); }
+        });
       }
     }
+    if (dueJobs.length) await dispatchPool(dueJobs, SETTLE_CONCURRENCY);
 
     // 3. Sweep round-based pending - try settle first, then refund only on
     //    real timeout. The contract enforces order:
@@ -710,7 +832,7 @@ async function main() {
       if (refundable) {
         const fn = info.kind === "crash" ? "refundCrashRound" : "refundRouletteRound";
         try {
-          const tx = await casino[fn](info.roundId);
+          const tx = await sendVia(casino, fn, [info.roundId]);
           await tx.wait();
           console.log(`[reveal-bot] refunded ${info.kind} round ${info.roundId} tx=${tx.hash}`);
         } catch (e) {
@@ -757,7 +879,7 @@ async function main() {
               const seed = seedStore.get(Number(round.seedIdx));
               if (seed) {
                 const settleFn = gameLabel === "crash" ? "settleCrashRound" : "settleRouletteRound";
-                const tx = await casino[settleFn](id, seed);
+                const tx = await sendVia(casino, settleFn, [id, seed]);
                 await tx.wait();
                 console.log(`[reveal-bot] keepalive settle ${gameLabel} round ${id} (age=${age}) tx=${tx.hash}`);
               }
@@ -829,26 +951,35 @@ async function main() {
         }
       };
       // Only act if we have at least one round in history; bootstrap below.
-      try {
-        const crashTotal = Number(await casino.totalCrashRounds());
-        if (crashTotal === 0) {
-          const tx = await casino.startCrashRound();
-          await tx.wait();
-          console.log(`[reveal-bot] bootstrapped first crash round tx=${tx.hash}`);
-        } else {
-          await startIfNoOpen("crash", "currentCrashRoundId", "getCrashRound", "refundCrashRound");
-        }
-      } catch (e) { console.warn(`[reveal-bot] crash keepalive: ${e.shortMessage || e.message}`); }
-      try {
-        const rouletteTotal = Number(await casino.totalRouletteRounds());
-        if (rouletteTotal === 0) {
-          const tx = await casino.startRouletteRound();
-          await tx.wait();
-          console.log(`[reveal-bot] bootstrapped first roulette round tx=${tx.hash}`);
-        } else {
-          await startIfNoOpen("roulette", "currentRouletteRoundId", "getRouletteRound", "refundRouletteRound");
-        }
-      } catch (e) { console.warn(`[reveal-bot] roulette keepalive: ${e.shortMessage || e.message}`); }
+      // A game the operator left out of ROUND_GAMES is off — don't try to open
+      // rounds for it. On a freshly deployed casino totalCrashRounds() is 0, so
+      // the bootstrap branch fired every single tick against a deliberately
+      // paused game: a revert logged 2.5×/s forever, and (since every send now
+      // draws from the shared nonce counter) a pointless alloc+resync each time.
+      if (!roundGameDisabled(1)) {
+        try {
+          const crashTotal = Number(await casino.totalCrashRounds());
+          if (crashTotal === 0) {
+            const tx = await sendVia(casino, "startCrashRound");
+            await tx.wait();
+            console.log(`[reveal-bot] bootstrapped first crash round tx=${tx.hash}`);
+          } else {
+            await startIfNoOpen("crash", "currentCrashRoundId", "getCrashRound", "refundCrashRound");
+          }
+        } catch (e) { console.warn(`[reveal-bot] crash keepalive: ${e.shortMessage || e.message}`); }
+      }
+      if (!roundGameDisabled(5)) {
+        try {
+          const rouletteTotal = Number(await casino.totalRouletteRounds());
+          if (rouletteTotal === 0) {
+            const tx = await sendVia(casino, "startRouletteRound");
+            await tx.wait();
+            console.log(`[reveal-bot] bootstrapped first roulette round tx=${tx.hash}`);
+          } else {
+            await startIfNoOpen("roulette", "currentRouletteRoundId", "getRouletteRound", "refundRouletteRound");
+          }
+        } catch (e) { console.warn(`[reveal-bot] roulette keepalive: ${e.shortMessage || e.message}`); }
+      }
     }
   };
 
@@ -932,8 +1063,8 @@ async function main() {
       }
       const amt = need < bankRoom ? need : bankRoom;
       try {
-        let tx = await casino.scheduleOwnerWithdraw(amt); await tx.wait();
-        tx = await casino.executeOwnerWithdraw(); await tx.wait();
+        let tx = await sendVia(casino, "scheduleOwnerWithdraw", [amt]); await tx.wait();
+        tx = await sendVia(casino, "executeOwnerWithdraw"); await tx.wait();
         console.log(`[reveal-bot] gas auto-topup (fallback): pulled ${ethers.formatEther(amt)} STT from casino bankroll → deployer (tx=${tx.hash})`);
       } catch (e) {
         console.warn(`[reveal-bot] casino-bankroll gas fallback failed: ${e.shortMessage || e.message}`);
@@ -984,8 +1115,8 @@ async function main() {
       }
       const amt = need < room ? need : room;
       // casino free bankroll -> deployer (owner) -> HM. Owner-withdraw is zero-delay.
-      let tx = await casino.scheduleOwnerWithdraw(amt); await tx.wait();
-      tx = await casino.executeOwnerWithdraw(); await tx.wait();
+      let tx = await sendVia(casino, "scheduleOwnerWithdraw", [amt]); await tx.wait();
+      tx = await sendVia(casino, "executeOwnerWithdraw"); await tx.wait();
       tx = await signer.sendTransaction({ to: manifest.addresses.houseManager, value: amt }); await tx.wait();
       console.log(`[reveal-bot] HM agent-budget refill: moved ${ethers.formatEther(amt)} STT casino -> HM (HM ${ethers.formatEther(hmBal)} -> ~${ethers.formatEther(hmBal + amt)} STT, tx=${tx.hash})`);
     } catch (e) {
@@ -1022,7 +1153,7 @@ async function main() {
     const seed = seedStore.get(Number(r.seedIdx));
     if (!seed) return;
     try {
-      const tx = await casino[settleFn](id, seed);   // no await wait(): stay snappy
+      const tx = await sendVia(casino, settleFn, [id, seed]);   // no await wait(): stay snappy
       console.log(`[reveal-bot] fast-settle ${label} round ${id} tx=${tx.hash} (age=${age})`);
     } catch (e) {
       const msg = e.shortMessage || e.message;

@@ -89,8 +89,18 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: 
 /* hover-run sheen bars (mockup used a never-defined "sl-nosheen" name so the
    bar only animates via play-state; we alias it to the real sheen keyframes) */
 @keyframes sl-nosheen { 0% { transform: translateX(-170%) skewX(-18deg); } 55%, 100% { transform: translateX(300%) skewX(-18deg); } }
-[data-shine] [data-shine-bar] { animation-play-state: paused; }
-[data-shine]:hover [data-shine-bar] { animation-play-state: running; }
+/* GPU/BATTERY: a hidden tab still composites CSS animations every frame
+   (browsers throttle JS timers but NOT CSS animation) - that is a casino tab
+   left in the background quietly heating the laptop. Pause EVERYTHING the
+   moment the tab is not visible; JS toggles .sl-hidden on <html>. Zero visual
+   change while the tab is on screen. */
+html.sl-hidden *, html.sl-hidden *::before, html.sl-hidden *::after { animation-play-state: paused !important; }
+/* sheen bars are hover-only; the inline `animation:` shorthand sets an inline
+   play-state:running that beats a non-important rule, and a few bars live
+   outside any [data-shine] parent — so pause ALL bars with !important and let
+   only a hovered [data-shine] run its bar. Kills 7 always-on GPU animations. */
+[data-shine-bar] { animation-play-state: paused !important; }
+[data-shine]:hover [data-shine-bar] { animation-play-state: running !important; }
 
 [data-rail]::-webkit-scrollbar { display: none; }
 
@@ -203,7 +213,10 @@ main { overflow-x: clip; }
 /* ---------------------------------------------------------------------------
    Shell: topbar
    ------------------------------------------------------------------------- */
-.nav2 { display: flex; align-items: center; gap: 16px; height: 64px; padding: 0 20px; background: rgba(5,5,6,.8); backdrop-filter: blur(20px) saturate(1.15); -webkit-backdrop-filter: blur(20px) saturate(1.15); border-bottom: 1px solid var(--line-2); }
+/* blur(9) not (20): a sticky frosted bar re-renders its blur EVERY frame the
+   ambient dust drifts behind it — a 9px strip costs a fraction of a 20px one
+   and looks near-identical over an 80%-opaque background. */
+.nav2 { display: flex; align-items: center; gap: 16px; height: 64px; padding: 0 20px; background: rgba(5,5,6,.85); backdrop-filter: blur(9px) saturate(1.15); -webkit-backdrop-filter: blur(9px) saturate(1.15); border-bottom: 1px solid var(--line-2); }
 .nav2-logo { display: flex; align-items: center; gap: 10px; border: none; background: none; cursor: pointer; padding: 4px 2px; color: inherit; }
 .nav2-logo .img { position: relative; flex: none; width: 34px; height: 34px; border-radius: 999px; overflow: hidden; }
 .nav2-logo .img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; mix-blend-mode: screen; }
@@ -264,7 +277,9 @@ main { overflow-x: clip; }
 /* ---------------------------------------------------------------------------
    Shell: mobile bottom bar
    ------------------------------------------------------------------------- */
-.mob2 { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 70; height: 66px; background: rgba(7,7,8,.92); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-top: 1px solid var(--line-2); align-items: stretch; justify-content: space-around; padding: 0 6px env(safe-area-inset-bottom); }
+/* bg is 92% opaque here — the blur behind it is invisible, so it was pure GPU
+   waste on mobile. Dropped; nudged opacity to fully solid. */
+.mob2 { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 70; height: 66px; background: rgba(7,7,8,.96); border-top: 1px solid var(--line-2); align-items: stretch; justify-content: space-around; padding: 0 6px env(safe-area-inset-bottom); }
 @media (max-width: 860px) { .mob2 { display: flex; } }
 .mob2 a, .mob2 button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; flex: 1; border: none; background: none; color: var(--fg-faint); cursor: pointer; transition: color .18s; text-decoration: none; }
 .mob2 .active { color: var(--gold); }
@@ -322,8 +337,17 @@ main { overflow-x: clip; }
 .veil2.on { opacity: 1; }
 
 /* dust particles layer */
-.dust2 { position: fixed; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
-.dust2 i { position: absolute; display: block; width: 3px; height: 3px; border-radius: 999px; background: radial-gradient(circle, #F6F1E7, rgba(217,185,112,.9) 45%, transparent 75%); filter: drop-shadow(0 0 6px rgba(217,185,112,.8)); opacity: 0; }
+/* The dust field starts BELOW the 64px sticky nav. A particle drifting behind
+   a bar with backdrop-filter forces that bar's blur to re-render for the whole
+   1270x64 strip, every frame it moves — and over an 85%-opaque background you
+   cannot actually see the particle you are paying for. */
+.dust2 { position: fixed; top: 64px; right: 0; bottom: 0; left: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+/* No filter here. The glow used to be a drop-shadow, which is a blur pass the
+   GPU had to redo on every frame of the twinkle (it animates transform:scale,
+   so the shadow could never be cached). The same halo painted as extra stops
+   in the gradient is rasterised once and then only composited — identical look,
+   and the animation becomes a pure compositor transform/opacity. */
+.dust2 i { position: absolute; display: block; width: 9px; height: 9px; margin: -3px 0 0 -3px; border-radius: 999px; background: radial-gradient(circle, #F6F1E7 0%, rgba(217,185,112,.92) 17%, rgba(217,185,112,.4) 38%, rgba(217,185,112,.12) 58%, transparent 76%); opacity: 0; will-change: opacity, transform; }
 
 /* connect modal (wallet.js injects its own base styles; re-theme to gold) */
 .sl-conn-mask { font-family: var(--mono) !important; }

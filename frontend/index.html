@@ -261,6 +261,8 @@ initWins().catch((e) => console.warn("[lobby] wins:", e.message));
     '/docs': 'Docs · ShinyLuck',
     '/fair': 'Provably Fair · ShinyLuck',
     '/leaderboard': 'Leaderboard · ShinyLuck',
+    '/predictions': 'Predictions · ShinyLuck',
+    '/infofi': 'InfoFi · ShinyLuck',
   };
   // Every non-lobby view is an iframe · that is what keeps navigation free of
   // full page reloads. The framed page detects `embed=1` and drops its own
@@ -274,6 +276,8 @@ initWins().catch((e) => console.warn("[lobby] wins:", e.message));
     '/docs': '/docs.html',
     '/fair': '/fair.html',
     '/leaderboard': '/leaderboard.html',
+    '/predictions': '/predictions.html',
+    '/infofi': '/infofi.html',
   };
   const ROUTES = new Set(Object.keys(TITLES));
   window.__slRoutes = ROUTES;
@@ -300,7 +304,11 @@ initWins().catch((e) => console.warn("[lobby] wins:", e.message));
   })();
 
   function setActive(poker) {
-    document.querySelectorAll('[data-side="lobby"]').forEach((el) => el.classList.toggle('active', !poker));
+    const here = normPath();
+    const pred = here === '/predictions', info = here === '/infofi';
+    document.querySelectorAll('[data-side="predictions"]').forEach((el) => el.classList.toggle('active', pred));
+    document.querySelectorAll('[data-side="infofi"]').forEach((el) => el.classList.toggle('active', info));
+    document.querySelectorAll('[data-side="lobby"]').forEach((el) => el.classList.toggle('active', !poker && !pred && !info));
     document.querySelectorAll('[data-side="poker"]').forEach((el) => el.classList.toggle('active', poker));
     document.querySelectorAll('.mob2 a[href="/"]').forEach((el) => el.classList.toggle('active', !poker));
     document.querySelectorAll('.mob2 a[href="/poker"]').forEach((el) => el.classList.toggle('active', poker));
@@ -315,6 +323,27 @@ initWins().catch((e) => console.warn("[lobby] wins:", e.message));
     document.getElementById('view-game').style.display = isGame ? '' : 'none';
     document.title = TITLES[p] || TITLES['/'];
     setActive(isPoker);
+
+    /* Tear down the view we just left. Collapsing an iframe to 0x0 does NOT
+       stop it: the document stays live, and a hidden frame still reports
+       visibilityState "visible" because that follows the TAB, not the element.
+       So touring the site left every app visited still running on top of the
+       one on screen - the poker lobby alone keeps Babel + a React tree + three
+       4s chain polls + a 400ms re-fit going forever. */
+    if (!isPoker) {
+      const f = document.getElementById('poker-frame');
+      const at = f.dataset.target || '';
+      /* EXCEPT a seated player: the table client answers the dealer's key and
+         share requests every hand, and killing it mid-hand reads as a
+         disconnect - that is a sit-out strike and, in a tournament, a bust. */
+      if (at && at.indexOf('table.html') === -1) {
+        f.src = 'about:blank'; f.dataset.target = ''; f.style.height = '';
+      }
+    }
+    if (!isGame) {
+      const f = document.getElementById('game-frame');
+      if (f.dataset.target) { f.src = 'about:blank'; f.dataset.target = ''; f.style.height = ''; }
+    }
 
     if (isPoker) {
       const f = document.getElementById('poker-frame');

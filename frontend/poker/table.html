@@ -58,33 +58,25 @@
   <script type="module" src="/lib/i18n.js"></script>
 </head>
 <body>
-<canvas id="bgcanvas"></canvas>
 <div id="stage"><div id="root"></div></div>
 
 <!-- Privy (email → embedded Somnia wallet, headless). Same bundle/app as the casino. -->
 <script src="/vendor/privy.bundle.js"></script>
 <script src="poker-grid.js"></script>
+<script src="poker-dust.js"></script>
   <script src="poker-press.js"></script>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
-
-<!-- design visual components (export to window) -->
 <script type="text/babel" src="poker-cards.jsx"></script>
 <script type="text/babel" src="poker-seats.jsx"></script>
 <script type="text/babel" src="poker-chrome.jsx"></script>
-
-<!-- live data bridge (ES module → window.SP) + the live app -->
 <script type="module" src="poker-bridge.js"></script>
 <script type="text/babel" src="poker-live-table.jsx"></script>
 
-<script>
-  // ambient background grid (behind the table)
-  window.addEventListener("load", function () {
-    var c = document.getElementById("bgcanvas");
-    if (window.GridField && c) new GridField(c, { cell: 22, gap: 7, speed: 0.4, density: 0.5,
-      accent: "#d9ab4a", accent2: "#f2d78a", maxAlpha: 0.7, minBright: 0.01, shape: "square" }).start();
-  });
-</script>
+<!-- design visual components (export to window) -->
+
+<!-- live data bridge (ES module → window.SP) + the live app -->
+
 </body>
 </html>

@@ -364,10 +364,18 @@ function TournamentPage() {
   );
 }
 
+// Bound once - see the same fix in poker-lobby-app.jsx: a 400ms interval was
+// re-registering the resize handler forever, and the fit itself rewrote layout
+// styles 2.5x/second even when nothing had moved.
+let _trnScaleBound = false;
 function mountScaleTrn() {
   const scaler = document.getElementById("scaler"); if (!scaler) return;
   const app = scaler.querySelector(".app"); if (!app) return;
   const fit = () => {
+    const embedNow = document.documentElement.classList.contains("sp-embed");
+    const key = window.innerWidth + "x" + window.innerHeight + "|" + (embedNow ? 1 : 0);
+    if (app.dataset.slFit === key) return;   // remounted nodes carry no marker
+    app.dataset.slFit = key;
     if (window.innerWidth <= 760) { // fluid mobile layout (mobile.css) - no stage scaling
       app.style.transform = ""; app.style.position = ""; app.style.top = ""; app.style.left = "";
       scaler.style.width = ""; scaler.style.height = "";
@@ -386,7 +394,8 @@ function mountScaleTrn() {
     app.style.transform = `scale(${s})`; app.style.transformOrigin = "top left"; app.style.position = "absolute"; app.style.top = "0"; app.style.left = "0";
     scaler.style.width = 1600 * s + "px"; scaler.style.height = 1000 * s + "px";
   };
-  fit(); window.addEventListener("resize", fit);
+  fit();
+  if (!_trnScaleBound) { _trnScaleBound = true; window.addEventListener("resize", () => mountScaleTrn()); }
 }
 function bootTrn() { ReactDOM.createRoot(document.getElementById("root")).render(<TournamentPage />); setInterval(mountScaleTrn, 400); setTimeout(mountScaleTrn, 80); }
 if (window.SP) bootTrn(); else window.addEventListener("sp:ready", bootTrn, { once: true });

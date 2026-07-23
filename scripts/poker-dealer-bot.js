@@ -417,6 +417,9 @@ async function main() {
     const nodeCrypto = require("node:crypto");
     zkModule.init({ bn254, keccak256: ethers.keccak256, randomBytes: (n) => nodeCrypto.randomBytes(n) });
     zkDrv.init({ zkModule, bn254 });
+    // Offload shuffle-proof verification (~400ms each) to a worker pool so
+    // the HTTP relay never freezes while two tables are live.
+    zkDrv.initVerifyPool(Math.max(1, parseInt(process.env.ZK_VERIFY_WORKERS || "2", 10)));
     const W = Math.max(1, parseInt(process.env.ZK_WORKERS || "3", 10));
     for (let i = 0; i < W; i++) {
       const w = new ethers.Wallet(ethers.keccak256(ethers.solidityPacked(["bytes32", "string"], [MASTER, `zk-worker-${i}`])), provider);
@@ -539,8 +542,11 @@ async function main() {
             console.log(`[poker-bot] PROFIT SWEEP: ${ethers.formatEther(excess)} STT → ${PROFIT_WALLET}`);
           } catch (e) { console.error("[poker-bot] sweep:", e.shortMessage || e.message); }
         }
-        if (balWei < 500000000000000000n) {
-          console.error(`[poker-bot] LOW GAS: operator ${wallet.address} has ${ethers.formatEther(balWei)} STT — top up or dealing will stall`);
+        // Warn at 3 STT (real runway left), not 0.5 (already starving), and
+        // rate-limit to once / 5 min so the log isn't a wall of identical lines
+        // like it was during the first tournament's gas-out.
+        if (balWei < 3000000000000000000n && Date.now() - lastGasWarnAt > 300_000) {
+          console.error(`[poker-bot] LOW GAS: operator ${wallet.address} has ${ethers.formatEther(balWei)} STT — top up soon or dealing will stall`);
           lastGasWarnAt = Date.now();
         }
         // zk worker keys refuel from the main wallet (which self-refuels from
@@ -561,8 +567,11 @@ async function main() {
               const target = 2n * ONE;
               const room_ = mainLeft > MAIN_RESERVE ? mainLeft - MAIN_RESERVE : 0n;
               const amt = (target - wb) < room_ ? (target - wb) : room_;
-              if (amt < ONE / 4n) { // can't meaningfully help — say it loudly
-                console.error(`[poker-bot] WORKER LOW GAS, refuel impossible: ${w.wallet.address.slice(0, 10)}… has ${ethers.formatEther(wb)} STT, main has ${ethers.formatEther(mainLeft)} — TOP UP ${wallet.address}`);
+              if (amt < ONE / 4n) { // can't meaningfully help — say it loudly (but not every tick)
+                if (Date.now() - lastGasWarnAt > 300_000) {
+                  console.error(`[poker-bot] WORKER LOW GAS, refuel impossible: ${w.wallet.address.slice(0, 10)}… has ${ethers.formatEther(wb)} STT, main has ${ethers.formatEther(mainLeft)} — TOP UP ${wallet.address}`);
+                  lastGasWarnAt = Date.now();
+                }
                 continue;
               }
               await (await wallet.sendTransaction({ to: w.wallet.address, value: amt })).wait();
@@ -773,7 +782,7 @@ function startCardServer(room, state, zkCtx = {}) {
         let out;
         if (req.url.startsWith("/zk/task")) out = zkDrv.zkTask(zkCtx.zkState, t, addr, body.dealId);
         else if (req.url.startsWith("/zk/key")) out = zkDrv.zkPostKey(zkCtx.zkState, t, addr, body);
-        else if (req.url.startsWith("/zk/shuffleproof")) out = zkDrv.zkPostShuffleProof(zkCtx.zkState, t, addr, body); // before /zk/shuffle (prefix!)
+        else if (req.url.startsWith("/zk/shuffleproof")) out = await zkDrv.zkPostShuffleProof(zkCtx.zkState, t, addr, body); // async: proof verified in a worker · before /zk/shuffle (prefix!)
         else if (req.url.startsWith("/zk/shuffle")) out = zkDrv.zkPostShuffle(zkCtx.zkState, t, addr, body);
         else if (req.url.startsWith("/zk/shares")) out = zkDrv.zkPostShares(zkCtx.zkState, t, addr, body);
         else if (req.url.startsWith("/zk/chain")) out = zkDrv.zkChain(zkCtx.zkState, t, body.dealId); // full proof transcript for client-side chain verification

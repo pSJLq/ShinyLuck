@@ -355,7 +355,22 @@ export function startZkAgent(sdk, getTableId) {
     }
   }
 
+  // Deals whose ON-CHAIN data is gone (a strike re-deal replaces the deal and
+  // wipes the old ciphertexts - ctHash then panics ARRAY_RANGE_ERROR). Parked
+  // with an expiry rather than forever: the relay moves to a fresh dealId
+  // within seconds, and if this one somehow revives, we retry after the pause.
+  const deadDeals = new Map(); // String(dealId) -> retry-after timestamp
+  const parkDeal = (dealId, why) => {
+    if (!deadDeals.has(String(dealId))) console.warn(`[zk-agent] deal ${dealId}: ${why} - parked 45s`);
+    deadDeals.set(String(dealId), Date.now() + 45_000);
+    if (deadDeals.size > 64) { // prune the oldest so the map can't grow all session
+      const oldest = [...deadDeals.entries()].sort((a, b) => a[1] - b[1])[0];
+      if (oldest) deadDeals.delete(oldest[0]);
+    }
+  };
+
   async function runDeal(t, dealId) {
+    if ((deadDeals.get(String(dealId)) || 0) > Date.now()) return;
     const signature = await sign(t, dealId);
     const task = await post("/zk/task", { tableId: t, dealId, signature });
     if (task.observer || task.phase === "none" || task.participant === undefined) return;
@@ -507,7 +522,20 @@ export function startZkAgent(sdk, getTableId) {
         // 1. the ciphertext I'm about to decrypt is the one committed on-chain
         const a = zk.aff(ct.A), b = zk.aff(ct.B);
         const packed = ethers.concat([ethers.toBeHex(a.x, 32), ethers.toBeHex(a.y, 32), ethers.toBeHex(b.x, 32), ethers.toBeHex(b.y, 32)]);
-        const want = await zkd.ctHash(dealId, idx);
+        let want;
+        try {
+          want = await zkd.ctHash(dealId, idx);
+        } catch (e) {
+          // ARRAY_RANGE panic = the deal no longer exists on-chain (re-deal
+          // after a strike). Retrying is pointless and each retry logs a huge
+          // CALL_EXCEPTION object - this exact loop ate players' RAM at the
+          // first tournament. Park and wait for the relay's fresh dealId.
+          if (/Panic|ARRAY_RANGE|CALL_EXCEPTION|missing revert data/i.test(e.message || "")) {
+            parkDeal(dealId, "on-chain deal data gone (re-deal)");
+            return;
+          }
+          throw e;
+        }
         if (ethers.keccak256(packed) !== want) throw new Error("hole ct mismatch vs on-chain commitment");
         // 2. every relayed share is proof-checked against its sender's key
         const ds = [];
@@ -532,11 +560,32 @@ export function startZkAgent(sdk, getTableId) {
     }
   }
 
-  const timer = setInterval(async () => {
+  // Errors: back off when they repeat (a broken state otherwise spins at full
+  // tick rate) and never print the same message more than once per burst - the
+  // console retains every logged object, so spam IS a memory leak.
+  let errStreak = 0, errBackoffUntil = 0, lastErrMsg = "", lastErrCount = 0;
+  const logErrOnce = (msg) => {
+    if (msg === lastErrMsg) {
+      if (++lastErrCount % 40 === 0) console.warn(`[zk-agent] (still) ${msg} ×${lastErrCount}`);
+      return;
+    }
+    lastErrMsg = msg; lastErrCount = 1;
+    console.warn("[zk-agent]", msg);
+  };
+
+  const tick = async () => {
     if (running || stopped) return;
+    if (Date.now() < errBackoffUntil) return;
     running = true;
-    try { await iteration(); } catch (e) {
-      if (!/stale dealId|not collecting|not your|snapshot/i.test(e.message || "")) console.warn("[zk-agent]", e.message || e);
+    try {
+      await iteration();
+      errStreak = 0; lastErrMsg = ""; lastErrCount = 0;
+    } catch (e) {
+      const msg = e.message || String(e);
+      if (!/stale dealId|not collecting|not your|snapshot/i.test(msg)) logErrOnce(msg);
+      if (++errStreak >= 3) {
+        errBackoffUntil = Date.now() + Math.min(8_000, 1_000 * 2 ** (errStreak - 3));
+      }
     } finally { running = false; }
     // Accusation watch runs on the CHAIN, not the bot relay, every ~3.5s · the
     // 45s rescue window leaves plenty of margin even with a couple of misses.
@@ -544,9 +593,31 @@ export function startZkAgent(sdk, getTableId) {
       const t = Number(getTableId());
       if (Number.isFinite(t)) selfRescue(t).catch((e) => console.warn("[zk-agent] rescue check:", e.message || e));
     }
-  }, 350);
+  };
 
-  return { stop() { stopped = true; clearInterval(timer); } };
+  // The ticker lives in a dedicated Worker: browsers throttle MAIN-THREAD
+  // timers in background tabs to >=1s (and harder under "intensive throttling"),
+  // which is exactly why the table you were not watching kept missing its key/
+  // shuffle deadlines at the first tournament. Worker timers are exempt, so the
+  // deal protocol keeps its 350ms cadence even in a background tab.
+  let timer = null, tickWorker = null;
+  try {
+    const src = "setInterval(function(){ postMessage(0); }, 350);";
+    tickWorker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    tickWorker.onmessage = tick;
+  } catch (_) {
+    timer = setInterval(tick, 350); // CSP fallback: main-thread interval
+  }
+  // Coming back to the tab: resync immediately instead of waiting a tick.
+  const onVis = () => { if (!document.hidden) { errBackoffUntil = 0; tick(); } };
+  document.addEventListener("visibilitychange", onVis);
+
+  return { stop() {
+    stopped = true;
+    if (timer) clearInterval(timer);
+    if (tickWorker) tickWorker.terminate();
+    document.removeEventListener("visibilitychange", onVis);
+  } };
 }
 
 /// Attach to the page: waits for the SDK to connect, follows the ?t= param

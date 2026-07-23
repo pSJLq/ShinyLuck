@@ -149,3 +149,6 @@ scripts/_q*.js
 # ShinyPoker design source videos (52MB, not needed in repo)
 ShinyPokerDesign/uploads/
 deployments/zk-active/
+
+# Local pre-refactor backups (never for the repo)
+_zkshuffle-backup-*/

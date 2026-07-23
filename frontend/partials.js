@@ -168,7 +168,8 @@
         ${it('lobby', '/', 'Lobby', I.spark)}
         ${it('poker', '/poker', 'Poker', I.poker)}
         ${it('nfts', '', 'NFTs', I.diamond, 'SOON')}
-        ${it('predictions', '', 'Predictions', I.clock, 'SOON')}
+        ${it('predictions', '/predictions', 'Predictions', I.clock)}
+        ${it('infofi', '/infofi', 'InfoFi', I.trophy)}
         <div style="flex:1;min-height:22px"></div>
         <div class="side2-foot">
           <button class="fbtn" data-sound-btn aria-label="Toggle sound" title="Sound"><svg width="17" height="17" viewBox="0 0 24 24"><path data-sound-path d="" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
@@ -411,8 +412,20 @@
     announceSound();
   }
 
+  // ---------- ANIMATION PAUSE (hidden tab = no GPU) ----------
+  // CSS animations keep compositing in a background tab and cook the laptop.
+  // Toggle a class the CSS uses to pause them all whenever the tab is hidden.
+  (function () {
+    var root = document.documentElement;
+    function sync() { root.classList.toggle('sl-hidden', document.hidden); }
+    document.addEventListener('visibilitychange', sync);
+    sync(); // in case we mount already-hidden
+  })();
+
   // ---------- DUST ----------
-  const DUST = [[8,22,13,5.5],[21,64,16,7],[34,12,12,6.2],[47,78,18,8],[58,34,14,5.8],[69,16,15,9],[78,58,13.5,6.6],[88,30,17,7.4],[93,74,15,6],[14,88,19,7.8]];
+  // 6 particles, not 10: fewer composited layers, and fewer drift instances
+  // grazing the frosted nav (each one there forces a per-frame blur redraw).
+  const DUST = [[8,22,13,5.5],[21,64,16,7],[47,78,18,8],[69,16,15,9],[88,30,17,7.4],[93,74,15,6]];
   function mountDust() {
     if (document.querySelector('.dust2')) return;
     if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;

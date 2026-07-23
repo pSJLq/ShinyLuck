@@ -44,6 +44,77 @@ function init({ zkModule, bn254 }) {
   G1 = bn254.G1.ProjectivePoint;
 }
 
+// ---- shuffle-proof verification pool (worker_threads) --------------------
+// verifyShuffle is ~400ms of BN254 math. Running it inline froze the HTTP
+// relay when two tables were live (players on the other table missed their
+// deadlines -> the "tables take turns" report). Offload to a small pool so the
+// event loop stays free to relay keys/shuffles/shares. Verification is public
+// (no secrets), so this changes nothing about the trust model.
+let VPOOL = null; // { workers:[{w,busy}], queue:[], next, seq, pending:Map }
+function initVerifyPool(size) {
+  if (VPOOL || !size) return;
+  let Worker;
+  try { ({ Worker } = require("node:worker_threads")); } catch (_) { return; }
+  const path = require("node:path");
+  const workerFile = path.join(__dirname, "zk-verify-worker.js");
+  VPOOL = { workers: [], queue: [], seq: 1, pending: new Map() };
+  for (let i = 0; i < size; i++) {
+    let w;
+    try { w = new Worker(workerFile); } catch (e) { console.error("[zk-pool] worker spawn failed:", e.message); break; }
+    const rec = { w, busy: false, ready: false };
+    w.on("message", (m) => {
+      if (m && m.ready) { rec.ready = true; return; }
+      if (m && m.fatal) { console.error("[zk-pool] worker fatal:", m.fatal); return; }
+      const p = VPOOL.pending.get(m.id);
+      if (!p) return;
+      VPOOL.pending.delete(m.id);
+      clearTimeout(p.timer);
+      rec.busy = false;
+      p.resolve(!!m.ok);
+      _drain();
+    });
+    w.on("error", (e) => { console.error("[zk-pool] worker error:", e.message); rec.busy = false; _drain(); });
+    VPOOL.workers.push(rec);
+  }
+  if (!VPOOL.workers.length) { VPOOL = null; return; }
+  console.log(`[zk-pool] ${VPOOL.workers.length} shuffle-verify workers up`);
+}
+function _drain() {
+  if (!VPOOL || !VPOOL.queue.length) return;
+  const free = VPOOL.workers.find((r) => !r.busy);
+  if (!free) return;
+  const job = VPOOL.queue.shift();
+  free.busy = true;
+  const id = VPOOL.seq++;
+  const timer = setTimeout(() => {
+    if (!VPOOL.pending.has(id)) return;
+    VPOOL.pending.delete(id);
+    free.busy = false;
+    // a hung worker must NEVER resolve true - reject so the caller falls back
+    // to an inline verify (still correct, just on the main thread)
+    job.reject(new Error("verify worker timeout"));
+    _drain();
+  }, 8000);
+  VPOOL.pending.set(id, { resolve: job.resolve, reject: job.reject, timer });
+  free.w.postMessage({ id, domain: job.domain, prevDeck: job.prevDeck, newDeck: job.newDeck, aggKey: job.aggKey, proofWire: job.proofWire });
+}
+/// Verify a shuffle proof off-thread; falls back to inline on any pool issue.
+/// Result is IDENTICAL to zk.verifyShuffle - the worker runs the same code.
+async function verifyShuffleOffthread(domain, prevDeck, newDeck, aggKey, proofWire) {
+  if (VPOOL) {
+    try {
+      const prevW = prevDeck.map(serCt), nextW = newDeck.map(serCt), keyW = serPt(aggKey);
+      return await new Promise((resolve, reject) => {
+        VPOOL.queue.push({ domain, prevDeck: prevW, newDeck: nextW, aggKey: keyW, proofWire, resolve, reject });
+        _drain();
+      });
+    } catch (e) {
+      // pool timeout/crash -> fall through to inline (never silently accept)
+    }
+  }
+  return (zk.verifyShuffleBatched || zk.verifyShuffle)(domain, prevDeck, newDeck, aggKey, zk.shuffleProofFromWire(proofWire, parsePt));
+}
+
 const STREET = { PREFLOP: 0, FLOP: 1, TURN: 2, RIVER: 3, SHOWDOWN: 4, IDLE: 255 };
 const boardCountForStreet = (s) => (s === STREET.FLOP ? 3 : s === STREET.TURN ? 4 : s === STREET.RIVER || s === STREET.SHOWDOWN ? 5 : 0);
 
@@ -137,7 +208,7 @@ function newSession(tableId, elig, nextHand, opts) {
     markedReady: false,
     showdownAt: 0,
     phaseAt: Date.now(),
-    deadlineAt: Date.now() + (opts.keysMs ?? 10_000),
+    deadlineAt: Date.now() + (opts.keysMs ?? 12_000),
   };
   return sess;
 }
@@ -319,7 +390,7 @@ const shufDomain = (dealId, turn) => `SPZK:${dealId}:shuffle:${turn}`;
 /// every other client independently re-verifies the whole chain via zkChain
 /// before contributing any decryption share. An invalid proof is simply not
 /// accepted — the prover gets struck at the deadline like any no-show.
-function zkPostShuffleProof(state, tableId, addrLower, body) {
+async function zkPostShuffleProof(state, tableId, addrLower, body) {
   const sess = _sessFor(state, tableId, body.dealId);
   if (!sess || sess.phase !== "shuffle") throw new Error("not in shuffle phase");
   if (String(sess.dealId) !== String(body.dealId)) throw new Error("stale dealId");
@@ -329,12 +400,28 @@ function zkPostShuffleProof(state, tableId, addrLower, body) {
   if (turn !== part) throw new Error("can only prove your own shuffle");
   if (turn >= sess.shuffleTurn) throw new Error("deck not posted yet");
   if (sess.proofs[turn]) return { ok: true }; // idempotent
-  const prf = zk.shuffleProofFromWire(body.proof, parsePt);
-  if (!zk.verifyShuffle(shufDomain(sess.dealId, turn), sess.decks[turn], sess.decks[turn + 1], sess.aggKey, prf)) {
-    throw new Error("shuffle proof failed verification");
-  }
+  const prf = zk.shuffleProofFromWire(body.proof, parsePt); // parse = cheap validity gate (points on-curve)
+  // OPTIMISTIC ACCEPT (see initVerifyPool). Store the proof and let the NEXT
+  // shuffler proceed at once, instead of holding this response ~220ms for the
+  // verify. Money is not at risk yet: honest clients run their OWN full
+  // verifyChain before releasing any decryption share, so a bad shuffle can
+  // never reach startHand — it stalls holeshares and cancels with a refund.
+  // The background verify below is a FAST-FAIL: it flags a bad shuffler early
+  // so the tick strikes them, rather than waiting for the holeshares deadline.
+  const dealId = sess.dealId;
   sess.proofs[turn] = prf;
   sess.proofWires[turn] = body.proof;
+  const prevDeck = sess.decks[turn], newDeck = sess.decks[turn + 1], aggKey = sess.aggKey;
+  verifyShuffleOffthread(shufDomain(dealId, turn), prevDeck, newDeck, aggKey, body.proof)
+    .then((ok) => {
+      if (ok) return;
+      const s2 = _sessFor(state, tableId, dealId);
+      if (s2 && String(s2.dealId) === String(dealId) && s2.badShuffle == null) {
+        s2.badShuffle = turn;
+        console.error(`[poker-bot] bad shuffle proof t${tableId} turn${turn} (background) - striking`);
+      }
+    })
+    .catch(() => {}); // pool hiccup: the client gate + holeshares deadline still protect money
   if (sess.shuffleTurn === sess.k && sess.proofs.every(Boolean)) {
     sess.transcriptHash = zk.shuffleTranscriptHash(
       `SPZKSH:tr:${sess.dealId}`,
@@ -384,6 +471,9 @@ function zkPostShares(state, tableId, addrLower, body) {
   if (!Array.isArray(body.items) || body.items.length === 0 || body.items.length > inPlayCount(sess.k)) throw new Error("bad items");
   const X = sess.pubkeys[part].X;
   let accepted = 0;
+  // Pass 1: run every per-item guard (idx bounds, own-hole rule, idempotency)
+  // and parse the points; collect what still needs a crypto check.
+  const pending = []; // { idx, d, R1, R2, s, domain }
   for (const item of body.items) {
     const idx = Number(item.idx);
     if (!(idx >= 0 && idx < inPlayCount(sess.k))) throw new Error("bad idx");
@@ -391,13 +481,25 @@ function zkPostShares(state, tableId, addrLower, body) {
     // bot must never hold a full share set for a live player's cards earlier
     const own = holeIdxsOf(part, sess.k).includes(idx);
     if (own && !(sess.ownNeeded && sess.ownNeeded.has(part))) throw new Error("own shares not needed yet");
-    let m = sess.shares.get(idx);
+    const m = sess.shares.get(idx);
     if (m && m.has(part)) continue; // idempotent
-    const share = { d: parsePt(item.d), proof: { R1: parsePt(item.R1), R2: parsePt(item.R2), s: BigInt(item.s) } };
-    if (!zk.verifyShare(sess.deck[idx], X, share, shareDomain(sess.dealId, idx, part))) throw new Error(`bad share proof for idx ${idx}`);
-    if (!m) { m = new Map(); sess.shares.set(idx, m); }
-    m.set(part, { d: share.d, R1: share.proof.R1, R2: share.proof.R2, s: share.proof.s });
-    accepted++;
+    pending.push({ idx, d: parsePt(item.d), R1: parsePt(item.R1), R2: parsePt(item.R2), s: BigInt(item.s), domain: shareDomain(sess.dealId, idx, part) });
+  }
+  // Pass 2: ONE batched Chaum–Pedersen check for the whole POST (measured ~3×
+  // over per-item verifyShare). Same all-or-nothing semantics: a single bad
+  // share rejects the POST. Falls back to per-item if the batch fn is absent.
+  if (pending.length) {
+    const items = pending.map((p) => ({ ct: sess.deck[p.idx], d: p.d, R1: p.R1, R2: p.R2, s: p.s, domain: p.domain }));
+    const okAll = zk.verifySharesBatched
+      ? zk.verifySharesBatched(X, items)
+      : items.every((it) => zk.verifyShare(it.ct, X, { d: it.d, proof: { R1: it.R1, R2: it.R2, s: it.s } }, it.domain));
+    if (!okAll) throw new Error("bad share proof in batch");
+    for (const p of pending) {
+      let m = sess.shares.get(p.idx);
+      if (!m) { m = new Map(); sess.shares.set(p.idx, m); }
+      m.set(part, { d: p.d, R1: p.R1, R2: p.R2, s: p.s });
+      accepted++;
+    }
   }
   return { ok: true, accepted };
 }
@@ -622,6 +724,21 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
       return "keys:0/" + sess.k;
     }
 
+    // fast-fail: the background shuffle verify flagged a forged proof. Strike
+    // its author and restart without them (money was never at risk - clients
+    // gate on their own verifyChain - this just avoids the holeshares stall).
+    if (sess.badShuffle != null) {
+      const seat = sess.seats[sess.badShuffle];
+      try {
+        await send(() => room.sitOutIdle(tableId, seat));
+        state.delete(tableId);
+        return `strike:badshuffle:seat${seat}`;
+      } catch (e) {
+        try { await send(() => room.cancelHand(tableId)); state.delete(tableId); dropPersisted(opts.persistDir, tableId); return `cancelled:badshuffle:seat${seat}`; }
+        catch (_) { return `strike-blocked:seat${seat}`; }
+      }
+    }
+
     // deadline enforcement (pre-hand: strike + restart without the offender)
     if (sess.deadlineAt && now > sess.deadlineAt) {
       const missing = [];
@@ -643,9 +760,33 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
       }
       if (missing.length) {
         const seat = sess.seats[missing[0]];
-        try { await send(() => room.sitOutIdle(tableId, seat)); } catch (_) {}
-        state.delete(tableId);
-        return `strike:${sess.phase}:seat${seat}`;
+        try {
+          await send(() => room.sitOutIdle(tableId, seat));
+          state.delete(tableId);
+          return `strike:${sess.phase}:seat${seat}`;
+        } catch (e) {
+          // The strike tx ITSELF failed - classically the bot's gas tank ran
+          // dry mid-tournament. The old code swallowed this and deleted state
+          // anyway, faking a strike that never hit the chain: the table then
+          // re-hit this same deadline every tick and wedged (the first
+          // tournament's 8-minute freeze at shufproofs:2/3). Retry a couple of
+          // times for a transient failure; if it keeps failing, cancel the deal
+          // with a FULL REFUND so one unreachable tx can never hold the table.
+          sess.strikeFails = (sess.strikeFails || 0) + 1;
+          console.error(`[poker-bot] strike tx failed t${tableId} seat${seat} (#${sess.strikeFails}): ${e.shortMessage || e.message}`);
+          if (sess.strikeFails >= 3) {
+            try {
+              await send(() => room.cancelHand(tableId));
+              state.delete(tableId);
+              dropPersisted(opts.persistDir, tableId);
+              return `cancelled:strike-unreachable:seat${seat}`;
+            } catch (e2) {
+              console.error(`[poker-bot] cancelHand ALSO failed t${tableId}: ${e2.shortMessage || e2.message} - bot wallet out of gas? TOP UP`);
+              return `strike-blocked:seat${seat}`; // surfaced, not silently wedged
+            }
+          }
+          return `strike-retry:${sess.phase}:seat${seat}`;
+        }
       }
     }
 
@@ -1000,7 +1141,7 @@ function zkSnapshot(state, tableId) {
 }
 
 module.exports = {
-  init, newZkState, tickZkTable, zkTask, zkPostKey, zkPostShuffle, zkPostShuffleProof, zkChain, zkPostShares, zkSnapshot,
+  init, initVerifyPool, newZkState, tickZkTable, zkTask, zkPostKey, zkPostShuffle, zkPostShuffleProof, zkChain, zkPostShares, zkSnapshot,
   eligibleSeats, keyDomain, shareDomain, shufDomain, serPt, parsePt, serCt, parseCt, cPt, STREET, boardCountForStreet, inPlayCount, holeIdxsOf, boardIdx, mayReleaseShare,
   nextKey,
 };
