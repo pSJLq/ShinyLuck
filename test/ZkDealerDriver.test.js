@@ -450,18 +450,22 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     evil[0] = { A: bn254.G1.ProjectivePoint.ZERO, B: zk.deckPoints()[51] }; // naked ace
     zkDealer.zkPostShuffle(state, 0, clients[1].addr, { dealId: task.dealId, deck: evil.map(zkDealer.serCt) });
 
-    // an honest proof of the HONEST shuffle can't cover the evil deck…
+    // an honest proof of the HONEST shuffle can't cover the evil deck. The
+    // relay now ACCEPTS the post optimistically (verification is backgrounded
+    // so the next shuffler is never held up ~220ms)…
     const prf = zk.proveShuffle(`SPZK:${task.dealId}:shuffle:1`, deck, out.deck, X, out.secret);
-    expect(() => zkDealer.zkPostShuffleProof(state, 0, clients[1].addr, {
+    await zkDealer.zkPostShuffleProof(state, 0, clients[1].addr, {
       dealId: task.dealId, turn: 1, proof: zk.shuffleProofToWire(prf),
-    })).to.throw(/shuffle proof failed verification/);
-    // …no proof ⇒ holeshares never open, nobody ever shares on the evil deck…
-    expect(state.get(0).phase).to.equal("shuffle");
-    expect(() => zkDealer.zkPostShares(state, 0, clients[0].addr, { dealId: task.dealId, items: [{ idx: 0 }] }))
-      .to.throw(/shuffle proofs pending/);
-    // …and the proof deadline strikes the cheater; the deal restarts without money moving
+    });
+    // …but the background verify (inline fallback — no worker pool in unit
+    // tests) flags the forgery within a few event-loop turns…
+    for (let i = 0; i < 200 && state.get(0).badShuffle == null; i++) await new Promise((r) => setImmediate(r));
+    expect(state.get(0).badShuffle).to.equal(1);
+    // …and the next tick strikes the cheater; the deal restarts without money
+    // moving. Honest clients are independently safe regardless: none releases
+    // a decryption share until its OWN verifyChain passes (share-gate tests).
     const tag = await tick({ now: () => Date.now() + 60_000 });
-    expect(tag).to.equal("strike:shuffle:seat1");
+    expect(tag).to.equal("strike:badshuffle:seat1");
     expect((await room.getSeat(0, 1)).sittingOut).to.equal(true);
     expect((await room.getSeat(0, 0)).stack).to.equal(E(100));
     expect((await room.getSeat(0, 1)).stack).to.equal(E(100));
