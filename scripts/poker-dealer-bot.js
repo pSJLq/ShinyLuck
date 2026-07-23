@@ -37,7 +37,12 @@ const NET = process.env.NETWORK_NAME || "somniaTestnet";
 const RPC_URL = process.env.RPC_URL || process.env.RPC_TESTNET || "https://api.infra.testnet.somnia.network";
 const KEY = process.env.DEALER_KEY || process.env.POKER_DEPLOYER_KEY || process.env.PRIVATE_KEY;
 const MASTER = process.env.POKER_SEED_MASTER_KEY || process.env.SEED_MASTER_KEY;
-const POLL_MS = parseInt(process.env.POLL_MS || "1500", 10);
+// 600ms baseline (was 1500): the loop is how the bot NOTICES a street closing,
+// so the old interval added up to 1.5s of pure sit-still to every flop/turn/
+// river reveal. Reads are cheap (a handful of eth_calls per active table);
+// state-advancing client posts additionally poke the loop directly (see
+// requestTick below), so the interval is just the fallback cadence.
+const POLL_MS = parseInt(process.env.POLL_MS || "600", 10);
 const PORT = parseInt(process.env.POKER_DEALER_PORT || "3002", 10);
 // owner's main wallet — profits above the gas reserve auto-forward here
 const PROFIT_WALLET = process.env.PROFIT_WALLET || "0x85b7D75cf35efC7E636FbDf3E82C92c6ceB5AC9D";
@@ -242,8 +247,9 @@ function startSnapshotCache(provider, room, dealerC, trn, zkCtx = {}) {
   }
 
   let busy = false;
+  let again = false; // poked mid-pass → run one more pass right after
   async function refresh() {
-    if (busy) return;
+    if (busy) { again = true; return; }
     busy = true;
     try {
       const count = Number(await room.tableCount());
@@ -264,7 +270,10 @@ function startSnapshotCache(provider, room, dealerC, trn, zkCtx = {}) {
       await Promise.all(due.map((t) => buildTable(t).then((s) => SNAPS.set(t, s)).catch(() => { STATUS.snapErrors++; })));
       await refreshLobby();
     } catch (_) { STATUS.snapErrors++; }
-    finally { busy = false; }
+    finally {
+      busy = false;
+      if (again) { again = false; setTimeout(refresh, 50); }
+    }
   }
 
   const doneTrnCache = new Map(); // finished/cancelled tournaments never change
@@ -303,6 +312,9 @@ function startSnapshotCache(provider, room, dealerC, trn, zkCtx = {}) {
 
   refresh();
   setInterval(refresh, 900); // fresher served state; parallel build keeps a pass cheap
+  // callers poke refresh() right after an on-chain state change (board reveal,
+  // settle) so watchers see it on their NEXT poll instead of cache-age later
+  return { refresh };
 }
 
 // ---------------------------------------------------------------------------
@@ -482,13 +494,16 @@ async function main() {
 
   // --- hole-card API: a player proves wallet ownership, gets only their cards.
   //     In zk mode the same server also relays the mental-poker protocol.
-  startCardServer(room, state, { zkState, ZK_MODE, wallet, provider });
+  //     zkCtx is shared: the relay pokes zkCtx.requestTick (assigned below,
+  //     once the loop exists) whenever a client post advances a table's state.
+  const zkCtx = { zkState, ZK_MODE, wallet, provider };
+  startCardServer(room, state, zkCtx);
 
   // --- snapshot cache: one chain read per table serves every watcher over HTTP.
   //     Card views (board etc.) come from whichever dealer the room runs on —
   //     the IPokerDealer interface is identical for v1 and v2.
   const cardView = ZK_MODE ? new ethers.Contract(zkAddr, loadAbi("ZkTableDealer"), provider) : dealer;
-  startSnapshotCache(provider, room, cardView, trn, { zkState, ZK_MODE });
+  const snapCache = startSnapshotCache(provider, room, cardView, trn, { zkState, ZK_MODE });
 
   // --- hand-history indexer (backfills in the background, then stays current)
   startHistoryIndexer(provider, room, deployBlock || 0).catch((e) => console.error("[poker-bot] indexer:", e.message));
@@ -636,6 +651,12 @@ async function main() {
         if (tag && tag !== "idle" && tag !== "wait" && !/^(keys:|shuffle:|holeshares|board-wait|showdown-collect|showdown-wait|prep|inter-hand|hold)/.test(tag)) {
           console.log(`[poker-bot] table ${t}: ${tag}`);
         }
+        // the tick just changed on-chain state watchers render (board card,
+        // revealed holes, pot/settle) → rebuild the served snapshot NOW so the
+        // next client poll shows it, instead of up to a full cache pass later
+        if (tag && /^(started|board:|holes:|settled|showdown-ready|timeout|hand-ended|cancelled|strike|recovered|rescued)/.test(tag)) {
+          snapCache.refresh();
+        }
         if (tag === "timeout") {
           const n = (timeoutStreak.get(t) || 0) + 1;
           timeoutStreak.set(t, n);
@@ -673,11 +694,18 @@ async function main() {
     await Promise.all(due.map(processTable));
   }
 
-  // simple non-overlapping interval
+  // Non-overlapping loop, driven two ways: the POLL_MS interval (baseline
+  // cadence — how player actions / street changes are noticed) and
+  // requestTick() pokes from the zk relay — the moment a client posts the
+  // artifact a table was waiting on (the last board share, a key, a shuffle
+  // proof) the loop runs again instead of sleeping out the interval. This is
+  // the bulk of the reveal-latency fix: the reveal tx goes out right when the
+  // shares are complete, not up to a poll later.
   let running = false;
+  let rerun = false; // poked while a pass was running → one more pass after it
   let loopN = 0;
-  setInterval(async () => {
-    if (running) return;
+  async function runLoop() {
+    if (running) { rerun = true; return; }
     running = true;
     try {
       await loop();
@@ -686,8 +714,15 @@ async function main() {
     } finally {
       running = false;
       STATUS.lastLoopEndAt = Date.now();
+      if (rerun) { rerun = false; setTimeout(runLoop, 60); }
     }
-  }, POLL_MS);
+  }
+  setInterval(runLoop, POLL_MS);
+  let pokeTimer = null; // coalesce a burst of client posts into ONE early run
+  zkCtx.requestTick = () => {
+    if (pokeTimer) return;
+    pokeTimer = setTimeout(() => { pokeTimer = null; runLoop(); }, 50);
+  };
 
   // Watchdog: if the loop wedges (an await that never resolves ate the
   // `running` flag — the exact failure mode behind past multi-hour stalls),
@@ -787,6 +822,11 @@ function startCardServer(room, state, zkCtx = {}) {
         else if (req.url.startsWith("/zk/shares")) out = zkDrv.zkPostShares(zkCtx.zkState, t, addr, body);
         else if (req.url.startsWith("/zk/chain")) out = zkDrv.zkChain(zkCtx.zkState, t, body.dealId); // full proof transcript for client-side chain verification
         else { res.writeHead(404).end(); return; }
+        // a state-ADVANCING post (key/shuffle/proof/shares — not the task/chain
+        // polls) pokes the main loop: the tick that consumes this artifact
+        // (phase advance, prepareDeal, board/hole reveal) runs now, not up to
+        // POLL_MS later. Biggest win: the last flop share → reveal tx gap.
+        if (zkCtx.requestTick && !req.url.startsWith("/zk/task") && !req.url.startsWith("/zk/chain")) zkCtx.requestTick();
         res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
         return res.end(JSON.stringify(out));
       } catch (e) {
