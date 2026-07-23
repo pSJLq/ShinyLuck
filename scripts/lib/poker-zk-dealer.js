@@ -262,7 +262,11 @@ function zkTask(state, tableId, addrLower, dealId) {
   if (!sess) return { phase: "none" };
   const part = sess.part.get(addrLower);
   if (part === undefined) return { phase: sess.phase, dealId: String(sess.dealId), observer: true };
-  const base = { phase: sess.phase, dealId: String(sess.dealId), participant: part, k: sess.k, seats: sess.seats, mySeat: sess.seats[part] };
+  // `prepared` tells the client whether prepareDeal has CONFIRMED on-chain —
+  // before that, the on-chain ctHash commitments its decrypt path checks
+  // against don't exist yet (the read panics, and the client used to park the
+  // whole deal for 45s: the "hand started but my cards are still hidden" bug).
+  const base = { phase: sess.phase, dealId: String(sess.dealId), participant: part, k: sess.k, seats: sess.seats, mySeat: sess.seats[part], prepared: !!sess.prepared };
 
   if (sess.phase === "keys") {
     if (!sess.pubkeys[part]) return { ...base, do: "key", domain: keyDomain(sess.dealId, part) };
@@ -321,8 +325,11 @@ function zkTask(state, tableId, addrLower, dealId) {
     // sender's key instead of trusting this relay. NOT served while this deal
     // is still a speculative pre-deal: a player must never see their NEXT
     // hand's cards before that hand exists (they could dodge blinds on bad
-    // holes with perfect information).
-    if (sess.deck && !sess.predeal) {
+    // holes with perfect information). Also NOT served until prepareDeal has
+    // confirmed: the client verifies each ciphertext against the ON-CHAIN
+    // ctHash before decrypting, and reading a not-yet-prepared deal panics —
+    // the client then parked the dealId and the hand ran with hidden cards.
+    if (sess.deck && !sess.predeal && sess.prepared) {
       const mine = {};
       let complete = true;
       for (const idx of holeIdxsOf(part, sess.k)) {

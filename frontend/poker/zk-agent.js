@@ -359,10 +359,13 @@ export function startZkAgent(sdk, getTableId) {
   // wipes the old ciphertexts - ctHash then panics ARRAY_RANGE_ERROR). Parked
   // with an expiry rather than forever: the relay moves to a fresh dealId
   // within seconds, and if this one somehow revives, we retry after the pause.
+  // 8s, not 45: the park exists to stop log/RAM churn, but a LIVE deal that
+  // lands here by mistake (e.g. a prepare race) must recover within a street,
+  // not sit with the hero's cards hidden for most of the hand.
   const deadDeals = new Map(); // String(dealId) -> retry-after timestamp
   const parkDeal = (dealId, why) => {
-    if (!deadDeals.has(String(dealId))) console.warn(`[zk-agent] deal ${dealId}: ${why} - parked 45s`);
-    deadDeals.set(String(dealId), Date.now() + 45_000);
+    if (!deadDeals.has(String(dealId))) console.warn(`[zk-agent] deal ${dealId}: ${why} - parked 8s`);
+    deadDeals.set(String(dealId), Date.now() + 8_000);
     if (deadDeals.size > 64) { // prune the oldest so the map can't grow all session
       const oldest = [...deadDeals.entries()].sort((a, b) => a[1] - b[1])[0];
       if (oldest) deadDeals.delete(oldest[0]);
@@ -499,8 +502,13 @@ export function startZkAgent(sdk, getTableId) {
       if (items.length) await post("/zk/shares", { tableId: t, dealId, signature, items });
     }
 
-    // my own hole cards: verify everything, then decrypt locally
-    if (task.myHoles && !window.__SPZK.holes[String(dealId)]) {
+    // my own hole cards: verify everything, then decrypt locally. Never before
+    // the deal is PREPARED on-chain — the ctHash commitments we check the
+    // ciphertexts against only exist after prepareDeal confirms; reading
+    // earlier panics and used to park this deal for 45s mid-hand (the
+    // "action's on me but my cards are still face-down" bug). A relay that
+    // predates the `prepared` flag omits it → undefined ≠ false, old behavior.
+    if (task.myHoles && task.prepared !== false && !window.__SPZK.holes[String(dealId)]) {
       // the deal the room bound on-chain must commit to the EXACT proof chain
       // I verified · otherwise the coordinator swapped decks after the proofs
       const verdict = chainVerdict.get(dealId);
