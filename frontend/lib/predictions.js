@@ -9,7 +9,7 @@ import { SL, connect } from "./wallet.js";
 
 const CFG = {
   chainId: 50312,
-  rpc: "https://api.infra.testnet.somnia.network",
+  rpc: "https://shinyluck.win/rpc", // our proxy (retry+failover), see scripts/rpc-proxy.js
   predictionMarket: "0x8AA8E7D6D89b4D6a9C9a43C0f4Fa5a547a7974E5",
   xOracleResolver: "0x4bfdCA75c535c6feE61A27209bbDFe215792de09",
   agentsExplorer: "https://agents.testnet.somnia.network",
