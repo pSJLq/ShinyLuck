@@ -92,7 +92,7 @@
             </div>
             <div style="margin-top:14px">
               <div class="k-label" style="margin-bottom:7px">Mines · <span data-sl-minecount-display style="color:var(--gold)">5</span></div>
-              <input type="range" min="1" max="24" value="5" data-sl-minecount aria-label="Mine count" style="width:100%">
+              <input type="range" min="1" max="24" value="5" data-sl-minecount aria-label="Mine count" style="width:100%;--p:17.4%">
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;padding-top:13px;border-top:1px solid var(--line)">
               <div><div class="k-label" style="font-size:8px;margin-bottom:3px">Next multiplier</div><div style="font:600 12.5px var(--mono);color:var(--green)" data-sl-mines-mult>-</div></div>
@@ -132,6 +132,20 @@
 </div>
 
 <script>
+/* keep the gold range-fill in sync with the mines slider (1..24 → 0..100%).
+   Without this the fill bar sat frozen at its default center while the knob
+   moved — the "ползунок завис" report. */
+(function () {
+  const s = document.querySelector('[data-sl-minecount]');
+  if (!s) return;
+  const paint = () => {
+    const min = +s.min || 1, max = +s.max || 24;
+    s.style.setProperty('--p', (((+s.value - min) / (max - min)) * 100).toFixed(1) + '%');
+  };
+  s.addEventListener('input', paint);
+  paint();
+})();
+
 /* stake stepper · same 1-2-5 ladder as the other game pages */
 (function () {
   const inp = document.querySelector('[data-sl-stake]');

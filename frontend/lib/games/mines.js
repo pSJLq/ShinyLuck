@@ -34,6 +34,32 @@ let cellsOpened = 0;
 // One pick may be in flight at a time (the contract enforces this too).
 let cellPending = false;
 
+// Single source of truth for the two action buttons. During an active round
+// ONLY the cashout button shows (disabled until ≥1 cell is open); with no
+// active round ONLY the start button shows. This replaced scattered
+// display-toggles that could leave the cashout hidden or the start button
+// wedged (the "no cashout button / start does nothing" report).
+function renderButtons() {
+  const placeBtn = $("[data-sl-place]");
+  const cashoutBtn = $("[data-sl-cashout]");
+  const active = activeBetId !== null;
+  if (placeBtn) {
+    placeBtn.style.display = active ? "none" : "block";
+    if (!active) {
+      placeBtn.disabled = false;
+      delete placeBtn.dataset.locked;      // never leave it wedged between rounds
+      if (placeBtn.textContent === "Arming mines…" || placeBtn.textContent === "round in progress") placeBtn.textContent = "Start round";
+    }
+  }
+  if (cashoutBtn) {
+    cashoutBtn.style.display = active ? "block" : "none";
+    if (cashoutBtn.dataset.refund === "1") { cashoutBtn.disabled = false; cashoutBtn.textContent = "Cancel & refund"; return; }
+    const canCash = active && cellsOpened > 0 && !cellPending;
+    cashoutBtn.disabled = !canCash;
+    cashoutBtn.textContent = cellsOpened > 0 ? `Cash out · ${cellsOpened} open` : "Pick a cell…";
+  }
+}
+
 function clearGrid() {
   $$("[data-sl-cell]").forEach((el) => {
     el.textContent = "";
@@ -116,9 +142,12 @@ async function waitForRootCommit(betId) {
 
 async function onPlaceBet() {
   const placeBtn = $("[data-sl-place]");
-  const cashoutBtn = $("[data-sl-cashout]");
   if (!placeBtn) return;
   if (placeBtn.dataset.locked === "1") return;
+  // Never get wedged: if a previous round is still "active" locally (a pick
+  // that never resolved, an abandoned board), starting a new round drops it.
+  // Its stake is recoverable on-chain (cashout/cancel) independently.
+  if (activeBetId !== null) { activeBetId = null; cellPending = false; }
   placeBtn.dataset.locked = "1";
 
   const stake = readStakeStr() || "0.1";
@@ -170,20 +199,18 @@ async function onPlaceBet() {
       setStagePill(null, "REFUNDED");
       setResultBanner({ won: false, txt: `<b>REFUNDED</b> · stake returned`, accent: "#facc15" });
       activeBetId = null;
+      renderButtons();
       return;
     }
     setStagePill("live", "ROUND ACTIVE");
     setMinesStatus(`${mineCount} mines hidden · pick a cell`);
-    placeBtn.textContent = "round in progress";
-    if (cashoutBtn) cashoutBtn.style.display = "block";
+    renderButtons();
     updateLiveMultiplier();
   } catch (e) {
     const msg = friendlyError(e);
     if (/rejected|user cancelled/i.test(msg)) {
       setStagePill("ready", "READY");
       setMinesStatus("");
-      placeBtn.textContent = "Start round";
-      placeBtn.disabled = false;
     } else {
       setStagePill(null, "ERROR");
       setMinesStatus(msg);
@@ -193,15 +220,16 @@ async function onPlaceBet() {
     activeBetId = null;
   } finally {
     delete placeBtn.dataset.locked;
+    renderButtons();
   }
 }
 
 function endRoundUI() {
   activeBetId = null;
+  cellPending = false;
   const cashoutBtn = $("[data-sl-cashout]");
-  if (cashoutBtn) cashoutBtn.style.display = "none";
-  const placeBtn = $("[data-sl-place]");
-  if (placeBtn) { placeBtn.disabled = false; placeBtn.textContent = "Start new round"; }
+  if (cashoutBtn) delete cashoutBtn.dataset.refund;
+  renderButtons();
   refreshRecent();
 }
 
@@ -259,6 +287,7 @@ async function onCellClick(ev) {
   cellPending = true;
   cell.disabled = true;
   setMinesStatus(`opening cell ${idx}…`);
+  renderButtons(); // cashout disabled while a pick is resolving
   try {
     // 1) commit the pick on-chain (cheap, proof-less)
     await SL.pickMines(betId, idx);
@@ -271,8 +300,10 @@ async function onCellClick(ev) {
       setStagePill("lost", "BUSTED");
       setMinesStatus(`bet #${betId} · BUSTED at cell ${idx}`);
       setResultBanner({ won: false, txt: `<b>BUSTED</b> at cell ${idx} · − ${fmtSTT(activeStakeWei)} STT` });
+      cellPending = false;
       endRoundUI();
       revealFullLayout(betId, idx).catch(() => {});
+      return;
     } else if (res.safe) {
       showCell(idx, "safe");
       openedBitmap |= mask;
@@ -283,11 +314,11 @@ async function onCellClick(ev) {
       setText("[data-sl-mines-cashout-amount]", fmtSTT((activeStakeWei * x100) / 100n) + " STT");
       setMinesStatus(`${cellsOpened} open · pick another or cash out`);
     } else {
-      // coordinator stalled — offer the refund path
+      // coordinator stalled — offer the refund path on the cashout button
       cell.disabled = false;
       setMinesStatus(`no response · you can cancel for a refund`);
       const cashoutBtn = $("[data-sl-cashout]");
-      if (cashoutBtn) { cashoutBtn.textContent = "Cancel & refund"; cashoutBtn.dataset.refund = "1"; }
+      if (cashoutBtn) cashoutBtn.dataset.refund = "1";
     }
   } catch (e) {
     cell.disabled = false;
@@ -295,13 +326,14 @@ async function onCellClick(ev) {
     setMinesStatus(`pick failed: ${friendlyError(e)}`);
   } finally {
     cellPending = false;
+    renderButtons();
   }
 }
 
 async function onCashout() {
   if (activeBetId === null) return;
   const cashoutBtn = $("[data-sl-cashout]");
-  // If a pick stalled, this button becomes "Cancel & refund".
+  // If a pick stalled, this button became "Cancel & refund".
   if (cashoutBtn && cashoutBtn.dataset.refund === "1") {
     cashoutBtn.disabled = true;
     try {
@@ -310,10 +342,11 @@ async function onCashout() {
       setResultBanner({ won: false, txt: `<b>REFUNDED</b> · stake returned`, accent: "#facc15" });
     } catch (e) {
       setMinesStatus(`refund not ready yet: ${friendlyError(e)}`);
-    } finally {
-      cashoutBtn.disabled = false; cashoutBtn.textContent = "Cash out"; delete cashoutBtn.dataset.refund;
-      endRoundUI();
+      cashoutBtn.disabled = false;
+      return;
     }
+    delete cashoutBtn.dataset.refund;
+    endRoundUI();
     return;
   }
   if (cellsOpened === 0) { import("../ui.js").then(({ toast }) => toast("Open at least one cell first", { kind: "warn" })); return; }
@@ -329,19 +362,11 @@ async function onCashout() {
     const profit = payout - activeStakeWei;
     setMinesStatus(`bet #${activeBetId} · cashed out @ ${(Number(cash?.args.multiplierX100 || 0n) / 100).toFixed(2)}×`);
     setResultBanner({ won: true, txt: `<b>CASHED OUT</b> · + ${fmtSTT(profit)} STT`, txHash: tx.hash });
-    activeBetId = null;
-    cashoutBtn.style.display = "none";
-    cashoutBtn.disabled = false;
-    cashoutBtn.textContent = "Cash out";
-    const placeBtn = $("[data-sl-place]");
-    placeBtn.disabled = false;
-    placeBtn.textContent = "Start new round";
-    refreshRecent();
+    endRoundUI();
   } catch (e) {
-    cashoutBtn.disabled = false;
-    cashoutBtn.textContent = "Cash out";
     console.error("[mines] cashout:", e);
     setMinesStatus(`cashout failed: ${friendlyError(e)}`);
+    renderButtons();
   }
 }
 
@@ -384,10 +409,7 @@ async function tryRestoreActiveRound() {
       }
       setStagePill("live", "ROUND ACTIVE");
       setMinesStatus(`resumed bet #${id} · ${cellsOpened} cells open · pick another or cashout`);
-      const placeBtn = $("[data-sl-place]");
-      if (placeBtn) { placeBtn.disabled = true; placeBtn.textContent = "round in progress"; }
-      const cashoutBtn = $("[data-sl-cashout]");
-      if (cashoutBtn) cashoutBtn.style.display = "block";
+      renderButtons();
       updateLiveMultiplier();
       populateFairPanel({ clientSeed: b.clientSeed, betId: id, nonce: id, serverSeed: ethers.ZeroHash });
       return;
@@ -420,6 +442,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $$("[data-sl-cell]").forEach((cell) => cell.addEventListener("click", onCellClick));
 
   recalcSummary();
+  renderButtons();
   setStagePill("ready", "READY");
   refreshRecent().catch((e) => console.warn("[mines] recent:", e.message));
   document.addEventListener("shinyluck:connected", () => {
