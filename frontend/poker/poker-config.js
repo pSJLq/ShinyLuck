@@ -38,7 +38,10 @@ export const NETWORKS = {
     chainId: 50312,
     chainIdHex: "0xC488",
     name: "Somnia Testnet (Shannon)",
-    rpcUrls: ["https://api.infra.testnet.somnia.network"],
+    // [0] = our proxy (shinyluck.win/rpc, retry+failover over Somnia gateways
+    // + Ankr) — poker-sdk reads through rpcUrls[0]; direct endpoint kept as a
+    // manual fallback.
+    rpcUrls: ["https://shinyluck.win/rpc", "https://api.infra.testnet.somnia.network"],
     wsUrl: "wss://api.infra.testnet.somnia.network/ws",
     explorer: "https://shannon-explorer.somnia.network",
     currency: { name: "Somnia Test Token", symbol: "STT", decimals: 18 },

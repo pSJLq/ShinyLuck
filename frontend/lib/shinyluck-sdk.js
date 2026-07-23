@@ -19,15 +19,14 @@ export const CHAINS = {
     chainId: 50312,
     chainName: "Somnia Testnet (Shannon)",
     nativeCurrency: { name: "STT", symbol: "STT", decimals: 18 },
-    // Canonical Somnia infra endpoints (matches emrestay's reactivity
-    // examples + somnia-devrel SKILL.md). `dream-rpc.somnia.network` is
-    // the public RPC - works for tx submission but WS subs there
-    // occasionally drop silently. `api.infra.testnet.somnia.network` is
-    // the validator infra endpoint maintained by the Somnia team, used
-    // by every first-party example. Order matters - list canonical
-    // first, public second as fallback.
-    rpcUrls: ["https://api.infra.testnet.somnia.network", "https://dream-rpc.somnia.network"],
-    wsUrls: ["wss://api.infra.testnet.somnia.network/ws", "wss://dream-rpc.somnia.network/ws"],
+    // First entry = OUR proxy (shinyluck.win/rpc → rpc-proxy.js on the VPS):
+    // it retries/fails over across the canonical Somnia gateways + Ankr, so
+    // browsers never see the gateway's 502 waves and VPN users blocked by
+    // Somnia's LB still reach the chain through the site's own origin.
+    // Direct endpoints stay listed after it as manual fallbacks (canonical
+    // api.infra first, public dream-rpc second — see docs.somnia.network).
+    rpcUrls: ["https://shinyluck.win/rpc", "https://api.infra.testnet.somnia.network", "https://dream-rpc.somnia.network"],
+    wsUrls: ["wss://shinyluck.win/rpc/ws", "wss://api.infra.testnet.somnia.network/ws", "wss://dream-rpc.somnia.network/ws"],
     blockExplorerUrls: ["https://shannon-explorer.somnia.network"],
   },
   somniaMainnet: {
