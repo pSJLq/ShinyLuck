@@ -192,10 +192,12 @@ async function main() {
   const bots = [];
   for (let i = 0; i < players.length; i++) {
     const pl = players[i];
-    const bank = await room.balance(pl.address);
-    if (bank < buyIn) await (await room.connect(pl).deposit({ value: buyIn - bank })).wait();
     let seat = Number(await room.seatOf(TABLE, pl.address));
     if (seat === 255) {
+      // deposit is only needed to sit down — an already-seated bot has its
+      // chips in the seat stack (bank 0), and depositing again just drains gas
+      const bank = await room.balance(pl.address);
+      if (bank < buyIn) await (await room.connect(pl).deposit({ value: buyIn - bank })).wait();
       // find a free seat
       for (let s = 0; s < Number(cfg.maxSeats); s++) {
         const st = await room.getSeat(TABLE, s);
@@ -249,7 +251,14 @@ async function main() {
   console.log(`[run] ${HANDS} hands complete — leaving the table`);
   await sleep(1500); // let the last settle tick pass
   for (const b of bots) {
-    try { await (await room.connect(b.signer).leaveTable(TABLE)).wait(); } catch (e) { console.log(`[leave] ${b.addr.slice(0, 8)}: ${e.shortMessage || e.message}`); }
+    // pre-deal starts the NEXT hand ~2s after settle, and leaveTable reverts
+    // InHand() for anyone dealt in — retry across a few hands if we lose the race
+    let left = false;
+    for (let tr = 0; tr < 5 && !left; tr++) {
+      try { await (await room.connect(b.signer).leaveTable(TABLE)).wait(); left = true; }
+      catch (e) { await sleep(4000); }
+    }
+    if (!left) console.log(`[leave] ${b.addr.slice(0, 8)}: still seated after retries (in-hand race)`);
   }
   obs.stop();
 
