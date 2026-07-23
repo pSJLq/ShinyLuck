@@ -177,7 +177,9 @@ describe("E2E", function () {
     await casino.connect(owner).commitMinesRoot(betId, tree.root);
     let safe = -1;
     for (let i = 0; i < 25; i++) if (((bitmap >> BigInt(i)) & 1n) === 0n) { safe = i; break; }
-    await casino.connect(alice).openMinesCell(betId, safe, false, salt(ss, betId, safe), proofFor(tree.levels, safe));
+    // player picks (intent), coordinator (owner) resolves with the proof
+    await casino.connect(alice).pickMinesCell(betId, safe);
+    await casino.connect(owner).resolveMinesCell(betId, false, salt(ss, betId, safe), proofFor(tree.levels, safe));
     await casino.connect(alice).cashoutMines(betId);
     expect((await casino.getBet(betId)).won).to.equal(true);
     // post-game transparency: honest root → no fraud

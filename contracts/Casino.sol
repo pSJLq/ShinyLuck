@@ -855,19 +855,29 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
     // finalizeMines reveals the server seed and RECOMPUTES the layout + root
     // on-chain: a coordinator that committed anything but the seed-derived
     // layout is caught publicly and the player's stake is made whole.
+    // Blocks the coordinator has to resolve a pending pick before the player
+    // may cancel it for a full refund (protects against a down/stalling
+    // coordinator; ~a few seconds at Somnia block time). A stalling
+    // coordinator can only refund the player, never deny a mine outcome —
+    // cancel voids the whole bet, so it can't be used to retry off a bad pick.
+    uint256 public constant MINES_PICK_TIMEOUT = 40;
+
     struct MinesState {
         uint8   mineCount;
         uint32  openedBitmap;
         bool    busted;
         bool    finalized;
-        bytes32 layoutRoot;   // Merkle root of the hidden layout (32 padded leaves)
-        bytes32 entropyHash;  // blockhash(commitBlock+DELAY) snapshotted at root
-                              // commit — Somnia's 256-block window is ~26s, long
-                              // gone by the time a human finishes the game
+        uint8   pendingCell;    // 0 = none, else (cellIdx + 1) awaiting resolve
+        uint64  pickBlock;      // block the pending pick was made (timeout clock)
+        bytes32 layoutRoot;     // Merkle root of the hidden layout (32 leaves)
+        bytes32 entropyHash;    // blockhash(commitBlock+DELAY) snapshotted at root
+                                // commit — Somnia's 256-block window is ~26s, long
+                                // gone by the time a human finishes the game
     }
     mapping(uint256 => MinesState) public minesState;
 
     event MinesRootCommitted(uint256 indexed betId, bytes32 root);
+    event MinesCellPicked(uint256 indexed betId, uint8 cellIdx);
     event MinesCellOpened(uint256 indexed betId, uint8 cellIdx, uint32 openedBitmap, uint256 multiplierX100);
     event MinesBust(uint256 indexed betId, uint8 cellIdx);
     event MinesCashout(uint256 indexed betId, uint8 cellsOpened, uint256 payout, uint256 multiplierX100);
@@ -905,12 +915,12 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         emit MinesRootCommitted(betId, root);
     }
 
-    /// @notice Open a cell. The {isMine, salt, proof} tuple comes from the
-    ///         coordinator's HTTP endpoint for the clicked cell only; the
-    ///         contract trusts nothing but the committed root.
-    function openMinesCell(uint256 betId, uint8 cellIdx, bool isMine, bytes32 salt, bytes32[] calldata proof)
-        external nonReentrant
-    {
+    /// @notice Player commits to opening a cell — a cheap, proof-less tx. This
+    ///         on-chain intent is what makes the layout un-peekable: the
+    ///         coordinator only discloses a cell's {isMine, proof} AFTER the
+    ///         player has irrevocably committed to it here, so querying the
+    ///         result to avoid mines is impossible.
+    function pickMinesCell(uint256 betId, uint8 cellIdx) external nonReentrant {
         Bet storage bet = _bets[betId];
         MinesState storage ms = minesState[betId];
         if (bet.game != GameType.MINES) revert InvalidGame();
@@ -918,10 +928,29 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         if (bet.status != 0) revert BetAlreadySettled();
         if (ms.layoutRoot == bytes32(0)) revert InvalidBet("root not committed");
         if (ms.busted) revert InvalidBet("busted");
+        if (ms.pendingCell != 0) revert InvalidBet("pick pending");
         if (cellIdx >= 25) revert InvalidBet("cell oob");
-        uint32 mask = uint32(1) << cellIdx;
-        if (ms.openedBitmap & mask != 0) revert InvalidBet("already opened");
-        bytes32 leaf = keccak256(abi.encode(betId, cellIdx, isMine, salt));
+        if (ms.openedBitmap & (uint32(1) << cellIdx) != 0) revert InvalidBet("already opened");
+        ms.pendingCell = cellIdx + 1;
+        ms.pickBlock = uint64(block.number);
+        emit MinesCellPicked(betId, cellIdx);
+    }
+
+    /// @notice Coordinator resolves the pending pick with its Merkle proof.
+    ///         The contract trusts nothing but the committed root; a proof
+    ///         that doesn't match the pending cell reverts.
+    function resolveMinesCell(uint256 betId, bool isMine, bytes32 salt, bytes32[] calldata proof)
+        external nonReentrant
+    {
+        if (msg.sender != owner() && msg.sender != houseManager) revert NotHouseManager();
+        Bet storage bet = _bets[betId];
+        MinesState storage ms = minesState[betId];
+        if (bet.game != GameType.MINES) revert InvalidGame();
+        if (bet.status != 0) revert BetAlreadySettled();
+        if (ms.pendingCell == 0) revert InvalidBet("no pending pick");
+        uint8 cellIdx = ms.pendingCell - 1;
+        ms.pendingCell = 0;
+        bytes32 leaf = keccak256(abi.encode(betId, uint256(cellIdx), isMine, salt));
         if (_minesProofRoot(leaf, cellIdx, proof) != ms.layoutRoot) revert InvalidBet("bad proof");
         if (isMine) {
             ms.busted = true;
@@ -933,9 +962,25 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
                 abi.encode(uint8(0), ms.openedBitmap, uint32(0), true));
             return;
         }
-        ms.openedBitmap |= mask;
+        ms.openedBitmap |= uint32(1) << cellIdx;
         uint256 multX100 = _minesMultiplierX100(_popcount25(ms.openedBitmap), ms.mineCount);
         emit MinesCellOpened(betId, cellIdx, ms.openedBitmap, multX100);
+    }
+
+    /// @notice If the coordinator fails to resolve a pick within the timeout,
+    ///         the player voids the whole bet for a full stake refund. Voids
+    ///         everything (opened progress included) so a stalling coordinator
+    ///         can never be used to retry off an unwanted pick.
+    function cancelMinesPick(uint256 betId) external nonReentrant {
+        Bet storage bet = _bets[betId];
+        MinesState storage ms = minesState[betId];
+        if (bet.game != GameType.MINES) revert InvalidGame();
+        if (bet.player != msg.sender) revert InvalidBet("not player");
+        if (bet.status != 0) revert BetAlreadySettled();
+        if (ms.pendingCell == 0) revert InvalidBet("no pending pick");
+        if (block.number <= uint256(ms.pickBlock) + MINES_PICK_TIMEOUT) revert InvalidBet("pick not timed out");
+        ms.pendingCell = 0;
+        _refund(betId, "mines pick timeout");
     }
 
     function cashoutMines(uint256 betId) external nonReentrant {
@@ -946,6 +991,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         if (bet.status != 0) revert BetAlreadySettled();
         if (ms.layoutRoot == bytes32(0)) revert InvalidBet("root not committed");
         if (ms.busted) revert InvalidBet("busted");
+        if (ms.pendingCell != 0) revert InvalidBet("pick pending"); // resolve or time out first
         uint8 k = _popcount25(ms.openedBitmap);
         if (k == 0) revert InvalidBet("nothing opened");
 
