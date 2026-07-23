@@ -152,3 +152,6 @@ deployments/zk-active/
 
 # Local pre-refactor backups (never for the repo)
 _zkshuffle-backup-*/
+
+# JSX syntax-check output (build-poker-jsx.js); the site loads raw .jsx via Babel
+frontend/poker/*.compiled.js

@@ -995,7 +995,11 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
         sess.showdownAt = now;
         return "showdown-ready";
       }
-      if (now - (sess.showdownAt || 0) < (opts.showdownMs ?? 1200)) return "showdown-wait";
+      // Short beat only: the UI announces the winner CLIENT-side the moment the
+      // reveals land and holds its own banner through settle, so a long
+      // "display pause" here just kept everyone staring at a finished hand
+      // (part of the reported ~7s cards-open→result wait).
+      if (now - (sess.showdownAt || 0) < (opts.showdownMs ?? 400)) return "showdown-wait";
       await send(() => room.resolveShowdown(tableId));
       return "settled";
     }

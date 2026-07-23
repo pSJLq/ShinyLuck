@@ -4,10 +4,20 @@
 const { useState, useEffect, useRef } = React;
 
 // Seat ring positions per table size (index 0 = bottom = hero), % of the felt.
+// Top seats sit at ≥12% so they clear the tournament HUD strip even on the
+// compact "larger interface" canvas.
 const POS = {
-  2: [{ x: 50, y: 84 }, { x: 50, y: 10 }],
+  2: [{ x: 50, y: 84 }, { x: 50, y: 12 }],
   6: [{ x: 50, y: 83 }, { x: 15, y: 65 }, { x: 15, y: 27 }, { x: 50, y: 12 }, { x: 85, y: 27 }, { x: 85, y: 65 }],
   9: [{ x: 50, y: 87 }, { x: 18, y: 80 }, { x: 6, y: 52 }, { x: 14, y: 22 }, { x: 38, y: 8 }, { x: 62, y: 8 }, { x: 86, y: 22 }, { x: 94, y: 52 }, { x: 82, y: 80 }],
+};
+// Phones: the feltwrap is short, the HUD/topbar eat a bigger share of it and
+// the action bar overlays the bottom — pull top seats down and bottom seats up
+// so nothing slides under the chrome.
+const POS_M = {
+  2: [{ x: 50, y: 78 }, { x: 50, y: 18 }],
+  6: [{ x: 50, y: 78 }, { x: 14, y: 61 }, { x: 14, y: 32 }, { x: 50, y: 17 }, { x: 86, y: 32 }, { x: 86, y: 61 }],
+  9: [{ x: 50, y: 80 }, { x: 17, y: 74 }, { x: 7, y: 51 }, { x: 15, y: 27 }, { x: 38, y: 15 }, { x: 62, y: 15 }, { x: 85, y: 27 }, { x: 93, y: 51 }, { x: 83, y: 74 }],
 };
 
 const short = (a) => (a && a !== "0x0000000000000000000000000000000000000000" ? a.slice(0, 6) + "…" + a.slice(-4) : "");
@@ -95,7 +105,7 @@ function LiveTable() {
   }, []);
   // persisted table preferences · every toggle here actually works
   const [prefs, setPrefs] = useState(() => {
-    const d = { sound: true, deck: "4", turbo: false, reduced: false, bbstacks: false };
+    const d = { sound: true, deck: "4", turbo: false, reduced: false, bbstacks: false, bigui: false };
     try { return Object.assign(d, JSON.parse(localStorage.getItem("sp_prefs") || "{}")); } catch { return d; }
   });
   const setPref = (k, v) => setPrefs((p) => { const n = { ...p, [k]: v }; try { localStorage.setItem("sp_prefs", JSON.stringify(n)); } catch {} return n; });
@@ -144,8 +154,6 @@ function LiveTable() {
   const [tableId, setTableId] = useState(SP.tableId); // switchable WITHOUT a page reload (LePoker-style)
   const [ctl, setCtl] = useState(undefined); // table controller: undefined = not resolved yet, zero = cash, else = tournament
   const ZERO_CTL = "0x0000000000000000000000000000000000000000";
-  const canvasRef = useRef(null);
-  const fieldRef = useRef(null);
 
   useEffect(() => { localStorage.setItem("sp_theme", theme); }, [theme]);
 
@@ -184,25 +192,11 @@ function LiveTable() {
   }
   useEffect(() => { if (connected) { refreshBal(); const id = setInterval(refreshBal, 4000); return () => clearInterval(id); } }, [connected]);
 
-  // LED grid background on the felt canvas (design motion engine)
-  useEffect(() => {
-    if (!canvasRef.current || !window.GridField) return;
-    if (fieldRef.current) fieldRef.current.destroy();
-    const cfg = {
-      a: { cell: 15, gap: 4, speed: 0.7, density: 0.5, accent: "#d9ab4a", maxAlpha: 0.55, minBright: 0.02, shape: "square" },
-      b: { cell: 17, gap: 6, speed: 0.55, density: 0.42, accent: "#d9ab4a", accent2: "#f2d78a", maxAlpha: 0.5, minBright: 0.015, shape: "dot" },
-      c: { cell: 13, gap: 3, speed: 0.6, density: 0.45, accent: "#d9ab4a", maxAlpha: 0.42, minBright: 0.02, shape: "square" },
-    }[theme];
-    const f = new GridField(canvasRef.current, cfg);
-    fieldRef.current = f; f.start();
-    // GridField sizes its buffer at construction, before the scaler finishes
-    // layout · re-measure a couple of times so the felt grid fills the oval.
-    const r1 = setTimeout(() => f._resize(), 160);
-    const r2 = setTimeout(() => f._resize(), 650);
-    return () => { clearTimeout(r1); clearTimeout(r2); f.destroy(); };
-    // Re-run once the first snapshot arrives · until then the felt canvas isn't
-    // mounted (loading state), so the grid had nothing to attach to.
-  }, [theme, snap ? 1 : 0]);
+  // The felt used to run a GridField LED canvas here (plus a scramble wave on
+  // each deal and a flash on wins) — a steady per-frame CPU/GPU cost competing
+  // with the zk crypto during hands, and the "waves" kept reappearing with
+  // every theme change. Gone entirely: the page-wide sp-dust sparks
+  // (poker-dust.js, same as the casino menu) are the only ambient motion now.
 
   // fetch my hole cards once per deal · failed attempts retry on a FAST local
   // timer (dealer is still locking entropy) instead of waiting for the next
@@ -367,7 +361,6 @@ function LiveTable() {
     const h = snap.hand;
     const boardLen = snap.board.length;
     if (h.inProgress && h.handId !== prev.handId && h.handId > 0) {
-      if (fieldRef.current && !reducedMo) fieldRef.current.scramble(900);
       setAnim((a) => ({ ...a, dealing: !reducedMo, flipFrom: 99, winnerSeat: -1 }));
       clearTimeout(dealTimerRef.current);
       dealTimerRef.current = setTimeout(() => setAnim((a) => ({ ...a, dealing: false })), prefs.turbo ? 600 : 1300);
@@ -418,7 +411,6 @@ function LiveTable() {
     if (!h.inProgress && prev.inProgress) {
       let winner = -1, best = 0n;
       for (const s of snap.seats) { const d = s.stack - (prev.stacks[s.index] || 0n); if (d > best) { best = d; winner = s.index; } }
-      if (fieldRef.current) fieldRef.current.flash();
       // EVERY client gets the winner + amount (banner). Only the chip-flight
       // motion itself respects reduced-motion · before, that flag silently
       // swallowed the whole payout announcement.
@@ -582,7 +574,8 @@ function LiveTable() {
   };
   // rotate so my seat sits at the bottom
   CHIPS = !!trn || ctl !== ZERO_CTL; // controller ≠ zero → chip units, even before the trn poll lands
-  const positions = POS[maxSeats] || (maxSeats < 6 ? POS[6] : POS[9]);
+  const POSSET = window.innerWidth <= 760 ? POS_M : POS; // nowMs re-render keeps this fresh across rotations
+  const positions = POSSET[maxSeats] || (maxSeats < 6 ? POSSET[6] : POSSET[9]);
   const view = (i) => (mySeat >= 0 ? (i - mySeat + maxSeats) % maxSeats : i % maxSeats);
   const seatPos = (i) => positions[view(i)] || positions[0];
   const now = Math.floor(nowMs / 1000);
@@ -624,7 +617,7 @@ function LiveTable() {
 
   return (
     <div className="scaler" id="scaler">
-      <div className="app" data-dir={theme} data-deck={deck} data-anim={reducedMo ? "off" : "on"} data-turbo={prefs.turbo ? "1" : "0"}>
+      <div className="app" data-dir={theme} data-deck={deck} data-anim={reducedMo ? "off" : "on"} data-turbo={prefs.turbo ? "1" : "0"} data-bigui={prefs.bigui ? "1" : "0"}>
         {/* top bar */}
         <header className="topbar">
           <div className="group">
@@ -704,7 +697,6 @@ function LiveTable() {
 
         <div className="mainrow">
           <div className="feltwrap scanlines" ref={feltWrapRef}>
-            <canvas className="feltcanvas" ref={canvasRef} />
             <div className="feltglow" />
             <div className="felt">
               <div className="center">
@@ -1272,24 +1264,32 @@ function mountScale() {
   if (!app) return;
   function fit() {
     const embedNow = document.documentElement.classList.contains("sp-embed");
-    const key = window.innerWidth + "x" + window.innerHeight + "|" + (embedNow ? 1 : 0);
+    let big = false;
+    try { big = !!JSON.parse(localStorage.getItem("sp_prefs") || "{}").bigui; } catch (e) {}
+    const key = window.innerWidth + "x" + window.innerHeight + "|" + (embedNow ? 1 : 0) + "|" + (big ? 1 : 0);
     if (app.dataset.slFit === key) return;   // remounted nodes carry no marker
     app.dataset.slFit = key;
     if (window.innerWidth <= 760) { // fluid mobile layout (mobile.css) - no stage scaling
       app.style.transform = ""; app.style.position = ""; app.style.top = ""; app.style.left = "";
+      app.style.width = ""; app.style.height = "";
       scaler.style.width = ""; scaler.style.height = "";
       return;
     }
     // The TABLE must fit BOTH axes · a player has to see their own seat at the
-    // bottom without scrolling, so unlike the lobby this never over-scales on
-    // width. Embedded, the shell owns the chrome, so only the slim topbar is
-    // subtracted instead of the standalone page's header+footer.
-    const embed = document.documentElement.classList.contains("sp-embed");
-    const sW = (window.innerWidth - 16) / 1600;
-    const sH = (window.innerHeight - (embed ? 16 : 84)) / 1000;
-    const s = Math.min(sW, sH);
+    // bottom without scrolling. The canvas ASPECT follows the viewport (width
+    // stretches between sane poker proportions) so the scaled stage fills the
+    // screen edge-to-edge instead of leaving dead side bands on 16:9.
+    // "Larger interface" (bigui) shrinks the canvas ~18% and the scale-up
+    // compensates: same fit, every element ~18% bigger, less on screen.
+    const availW = window.innerWidth - 16;
+    const availH = window.innerHeight - (embedNow ? 16 : 84);
+    const k = big ? 1.18 : 1;
+    const H = Math.round(1000 / k);
+    const W = Math.round(Math.min(2.05 * H, Math.max(1.45 * H, (availW / Math.max(1, availH)) * H)));
+    const s = Math.min(availW / W, availH / H);
+    app.style.width = W + "px"; app.style.height = H + "px";
     app.style.transform = `scale(${s})`; app.style.transformOrigin = "top left"; app.style.position = "absolute"; app.style.top = "0"; app.style.left = "0";
-    scaler.style.width = 1600 * s + "px"; scaler.style.height = 1000 * s + "px";
+    scaler.style.width = W * s + "px"; scaler.style.height = H * s + "px";
   }
   fit();
   if (!_tableScaleBound) { _tableScaleBound = true; window.addEventListener("resize", () => mountScale()); }

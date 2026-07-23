@@ -105,8 +105,10 @@
   .lt-modal { width: min(440px, 96vw); max-height: 88dvh; overflow-y: auto; }
 }
 
-/* desktop: the mobile-only controls stay hidden */
-.railfab { display: none; position: absolute; right: 10px; bottom: 236px; z-index: 40; width: 46px; height: 46px;
+/* the chat-drawer opener shows on EVERY size now (the rail is a drawer
+   everywhere since the event-week layout round; this sheet loads after
+   poker-live.css, so the display must be set here) */
+.railfab { display: grid; position: absolute; right: 10px; bottom: 236px; z-index: 40; width: 46px; height: 46px;
   border-radius: 50%; place-items: center; border: 1px solid var(--accent-32, rgba(217,171,74,.32));
   background: rgba(16, 14, 8, .94); color: var(--accent-soft, #f2d78a); cursor: pointer;
   box-shadow: 0 8px 26px rgba(0, 0, 0, .5); }

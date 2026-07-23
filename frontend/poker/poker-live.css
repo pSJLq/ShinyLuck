@@ -1,6 +1,20 @@
 /* Live-only extras layered on top of the design's styles.css. */
 .center-load { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted, #9a9aa8); font-family: var(--label, monospace); }
 
+/* ---- chat rail = slide-out drawer on EVERY screen size ----
+   The fixed 332px right column ate a fifth of the stage for a panel most
+   players never open; the felt now gets the full width and the rail slides
+   in over it from the right (the mobile bottom-sheet in mobile.css still
+   overrides this under 760px). */
+.mainrow { grid-template-columns: 1fr; }
+.siderail { position: absolute; top: 56px; right: 0; bottom: 0; width: 340px; z-index: 45;
+  transform: translateX(105%); transition: transform .22s ease;
+  border-left: 1px solid var(--line-2, #3a3a48); box-shadow: -18px 0 60px rgba(0, 0, 0, .55); }
+.siderail.open { transform: translateX(0); }
+.railfab { display: grid; }
+.railclose { display: grid !important; }
+.actionbar { right: 0; }
+
 .emptyseat {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   width: 86px; height: 86px; border-radius: 50%; border: 1.5px dashed var(--line-2, #3a3a48);

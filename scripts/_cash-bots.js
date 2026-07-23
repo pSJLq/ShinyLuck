@@ -161,11 +161,13 @@ async function main() {
   const zkd = new ethers.Contract(m.addresses.zkTableDealer, loadAbi("ZkTableDealer"), p);
   const wal = (name) => new ethers.Wallet(ethers.keccak256(ethers.solidityPacked(["bytes32", "string"], [master, name])), p);
 
-  // 2 players = arena-b-bot-0/1; top them up from other arena-b leftovers.
-  // A bot already seated (or with the buy-in banked) only needs act gas.
-  const players = [wal("arena-b-bot-0"), wal("arena-b-bot-1")];
+  // 2 players = arena-b-bot-0/1 by default; BOT_A/BOT_B/DONOR_FROM env let a
+  // SECOND pair run in parallel on another table (2-table concurrency tests)
+  // without wallet or donor-nonce collisions between the runs.
+  const players = [wal(process.env.BOT_A || "arena-b-bot-0"), wal(process.env.BOT_B || "arena-b-bot-1")];
   const ACT_GAS = ethers.parseEther("0.15");
-  const donors = Array.from({ length: 16 }, (_, i) => wal(`arena-b-bot-${i + 2}`));
+  const donorFrom = Number(process.env.DONOR_FROM || 2);
+  const donors = Array.from({ length: 16 }, (_, i) => wal(`arena-b-bot-${i + donorFrom}`));
   for (const pl of players) {
     const seated = Number(await room.seatOf(TABLE, pl.address)) !== 255;
     const banked = await room.balance(pl.address);

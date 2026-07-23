@@ -38,21 +38,15 @@
       return;
     }
     document.documentElement.classList.add("sp-embed");
-    // ONE SCROLLBAR: tell the shell how tall we are · it sizes the iframe to
-    // match, so this frame never grows its own scrollbar next to the page's.
-    var lastH = 0;
-    function reportH() {
-      var h = Math.ceil(Math.max(
-        document.documentElement.scrollHeight,
-        document.body ? document.body.scrollHeight : 0));
-      if (!h || Math.abs(h - lastH) < 2) return;
-      lastH = h;
-      try { window.parent.postMessage({ type: "sl-height", h: h }, "*"); } catch (e) {}
-    }
-    addEventListener("load", reportH);
-    addEventListener("resize", reportH);
-    setInterval(reportH, 1000);
-
+    // The TABLE is a viewport app, never a scrolling page: the stage scales
+    // itself to whatever box it gets (mountScale). Report height 1 so the
+    // shell clamps the iframe to its viewport floor (100vh minus the shell
+    // chrome) — a tall height left over from the poker LOBBY page in this
+    // same iframe used to force the whole site to scroll mid-game.
+    function pin() { try { window.parent.postMessage({ type: "sl-height", h: 1 }, "*"); } catch (e) {} }
+    pin();
+    addEventListener("load", pin);
+    addEventListener("resize", pin);
   })();
 </script>
   <script type="module" src="/lib/i18n.js"></script>
@@ -62,7 +56,6 @@
 
 <!-- Privy (email → embedded Somnia wallet, headless). Same bundle/app as the casino. -->
 <script src="/vendor/privy.bundle.js"></script>
-<script src="poker-grid.js"></script>
 <script src="poker-dust.js"></script>
   <script src="poker-press.js"></script>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>

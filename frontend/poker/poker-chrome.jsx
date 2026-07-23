@@ -265,6 +265,8 @@ function SettingsPanel({ t, set, dir, setDir, onClose, session }) {  // language
 
       <Row label={SPT("4-color deck")}><Sw on={t.deck === "4"} onClick={() => set("deck", t.deck === "4" ? "2" : "4")} /></Row>
       <Row label={SPT("Stacks in big blinds")}><Sw on={t.bbstacks} onClick={() => set("bbstacks", !t.bbstacks)} /></Row>
+      {/* less on screen, everything bigger — for the "it's all too small" crowd */}
+      <Row label={SPT("Larger interface")}><Sw on={t.bigui} onClick={() => set("bigui", !t.bigui)} /></Row>
       {session && (
         <div style={{ marginTop: 10, padding: "10px 11px", borderRadius: 8, border: "1px solid var(--accent-32)", background: "var(--accent-12)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: "var(--label)", fontSize: 11, color: "var(--accent-soft)" }}>
