@@ -20,6 +20,48 @@ const POS_M = {
   9: [{ x: 50, y: 80 }, { x: 17, y: 74 }, { x: 7, y: 51 }, { x: 15, y: 27 }, { x: 38, y: 15 }, { x: 62, y: 15 }, { x: 85, y: 27 }, { x: 93, y: 51 }, { x: 83, y: 74 }],
 };
 
+// ---- desktop felt geometry ----
+// The stage canvas follows the viewport aspect (mountScale), so the fixed POS
+// percentages drifted off the rail on wide screens: the oval stretched into a
+// racetrack and the side seats floated mid-felt. On desktop the felt is now a
+// stadium (half-circle ends) capped at a real poker-table proportion (~2:1) —
+// leftover width becomes margin the seat pods straddle into — and the seats
+// are placed ON the measured rail. The JSX publishes --sp-feltside/--sp-feltr
+// and poker-live.css draws the same shape, so the oval and the seat ring can
+// never disagree. POS/POS_M stay as the pre-measure fallback and for phones.
+const FELT_D = { top: 92, bottom: 188, minSide: 150, maxAR: 2.0 };
+function feltGeom(w, h) {
+  const fh = h - FELT_D.top - FELT_D.bottom;
+  const side = Math.max(FELT_D.minSide, Math.round((w - FELT_D.maxAR * fh) / 2));
+  return { side, r: fh / 2, fw: w - side * 2, fh, x0: side, y0: FELT_D.top, y1: h - FELT_D.bottom, cx: w / 2, cy: FELT_D.top + fh / 2 };
+}
+// n seats at equal arc steps along the rail, seat 0 = bottom center (hero),
+// walking the LEFT side first (same order as POS, so view() rotation holds).
+function seatRing(n, w, h) {
+  const g = feltGeom(w, h);
+  if (g.fh <= 120 || g.fw <= 2 * g.r) return null;
+  const straight = g.fw - 2 * g.r, arc = Math.PI * g.r;
+  const P = 2 * straight + 2 * arc;
+  const pt = (s) => {
+    if (s <= straight / 2) return { x: g.cx - s, y: g.y1 };            // bottom rail, walking left
+    s -= straight / 2;
+    if (s <= arc) { const a = s / g.r; return { x: g.x0 + g.r * (1 - Math.sin(a)), y: g.cy + g.r * Math.cos(a) }; } // left cap, upward
+    s -= arc;
+    if (s <= straight) return { x: g.x0 + g.r + s, y: g.y0 };          // top rail, walking right
+    s -= straight;
+    if (s <= arc) { const a = s / g.r; return { x: g.x0 + g.fw - g.r * (1 - Math.sin(a)), y: g.cy - g.r * Math.cos(a) }; } // right cap, downward
+    s -= arc;
+    return { x: g.x0 + g.fw - g.r - s, y: g.y1 };                      // bottom rail, back to center
+  };
+  const ring = [];
+  for (let i = 0; i < n; i++) {
+    const p = pt((i / n) * P);
+    if (i === 0) p.y += 22; // hero anchor straddles outward, toward the herozone
+    ring.push({ x: (p.x / w) * 100, y: (p.y / h) * 100 });
+  }
+  return ring;
+}
+
 const short = (a) => (a && a !== "0x0000000000000000000000000000000000000000" ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const N = (wei) => Number(SP.fmt(wei, 6));
 // Tournament tables play in plain CHIP units (1500 chips, blinds 10/20), not
@@ -149,6 +191,7 @@ function LiveTable() {
   const dealIdRef = useRef("0");
   const balSeqRef = useRef(0);
   const feltWrapRef = useRef(null);
+  const [wrapBox, setWrapBox] = useState(null); // feltwrap layout box (offset px · immune to the stage scale transform)
   const reducedMo = prefs.reduced || !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
   const [tableId, setTableId] = useState(SP.tableId); // switchable WITHOUT a page reload (LePoker-style)
@@ -197,6 +240,25 @@ function LiveTable() {
   // with the zk crypto during hands, and the "waves" kept reappearing with
   // every theme change. Gone entirely: the page-wide sp-dust sparks
   // (poker-dust.js, same as the casino menu) are the only ambient motion now.
+
+  // Measure the feltwrap in LAYOUT px (offset*, unaffected by the stage scale
+  // transform) and feed the felt shape + seat ring from it. The wrap mounts
+  // together with the main tree, so re-attach once loading finishes; resizes
+  // (window, bigui toggle) come in through the ResizeObserver.
+  useEffect(() => {
+    const el = feltWrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      const w = el.offsetWidth, h = el.offsetHeight;
+      if (!w || !h) return;
+      const g = feltGeom(w, h);
+      el.style.setProperty("--sp-feltside", g.side + "px");
+      el.style.setProperty("--sp-feltr", g.r + "px");
+      setWrapBox((p) => (p && p.w === w && p.h === h ? p : { w, h }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [!snap || ctl === undefined]);
 
   // fetch my hole cards once per deal · failed attempts retry on a FAST local
   // timer (dealer is still locking entropy) instead of waiting for the next
@@ -574,8 +636,10 @@ function LiveTable() {
   };
   // rotate so my seat sits at the bottom
   CHIPS = !!trn || ctl !== ZERO_CTL; // controller ≠ zero → chip units, even before the trn poll lands
-  const POSSET = window.innerWidth <= 760 ? POS_M : POS; // nowMs re-render keeps this fresh across rotations
-  const positions = POSSET[maxSeats] || (maxSeats < 6 ? POSSET[6] : POSSET[9]);
+  const mobileUI = window.innerWidth <= 760; // nowMs re-render keeps this fresh across rotations
+  const POSSET = mobileUI ? POS_M : POS;
+  const positions = (!mobileUI && wrapBox && seatRing(maxSeats, wrapBox.w, wrapBox.h)) // desktop: seats ON the measured rail
+    || POSSET[maxSeats] || (maxSeats < 6 ? POSSET[6] : POSSET[9]);
   const view = (i) => (mySeat >= 0 ? (i - mySeat + maxSeats) % maxSeats : i % maxSeats);
   const seatPos = (i) => positions[view(i)] || positions[0];
   const now = Math.floor(nowMs / 1000);

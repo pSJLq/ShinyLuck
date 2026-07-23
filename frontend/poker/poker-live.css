@@ -15,6 +15,19 @@
 .railclose { display: grid !important; }
 .actionbar { right: 0; }
 
+/* ---- felt geometry (desktop) ----
+   The stage canvas follows the viewport aspect (mountScale), so the design's
+   fixed 150px side insets let the oval stretch into a racetrack on 16:9 and
+   wider. The JSX measures the wrap (seatRing in poker-live-table.jsx) and
+   publishes the side inset that caps the felt at a real table proportion
+   (~2:1) plus the half-circle end radius; the seat ring is computed from the
+   SAME numbers, so pods always straddle the rail. The fallback values keep
+   the first pre-measure paint on the design shape. */
+@media (min-width: 761px) {
+  .feltwrap .felt { inset: 92px var(--sp-feltside, 150px) 188px; border-radius: var(--sp-feltr, 280px); }
+  [data-dir="a"] .feltwrap .felt::before { border-radius: calc(var(--sp-feltr, 280px) - 16px); }
+}
+
 .emptyseat {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   width: 86px; height: 86px; border-radius: 50%; border: 1.5px dashed var(--line-2, #3a3a48);

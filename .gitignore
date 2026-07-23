@@ -155,3 +155,6 @@ _zkshuffle-backup-*/
 
 # JSX syntax-check output (build-poker-jsx.js); the site loads raw .jsx via Babel
 frontend/poker/*.compiled.js
+
+# Screenshots the user drops in for Claude to look at — local only
+/images for claude/
