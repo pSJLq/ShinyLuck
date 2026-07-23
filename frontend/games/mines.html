@@ -4,12 +4,157 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Mines · ShinyLuck</title>
-<script>
-  // Mines is switched off for now (paused on-chain while it gets production-
-  // ready). Send visitors back to the live floor.
-  location.replace("/");
-</script>
-  <script type="module" src="/lib/i18n.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../v2.css">
+<style>
+  /* 5×5 mines board — square, self-contained, no external assets */
+  #mines-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 100%; max-width: 420px; margin: 0 auto; aspect-ratio: 1; }
+  [data-sl-cell] { aspect-ratio: 1; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.03);
+    font: 600 20px var(--sans); color: var(--fg-strong); cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background .12s, transform .08s, border-color .12s; }
+  [data-sl-cell]:hover:not(:disabled) { border-color: var(--gold); background: rgba(217,185,112,.08); }
+  [data-sl-cell]:active:not(:disabled) { transform: scale(.95); }
+  [data-sl-cell]:disabled { cursor: default; }
+  .tile-anim-safe { animation: tile-pop .28s ease; }
+  .tile-anim-bomb { animation: tile-bomb .3s ease; }
+  @keyframes tile-pop { 0% { transform: scale(.6); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
+  @keyframes tile-bomb { 0% { transform: scale(1); } 30% { transform: scale(1.2) rotate(-6deg); } 100% { transform: scale(1); } }
+  .mines-anim-shake { animation: mines-shake .4s ease; }
+  @keyframes mines-shake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-6px); } 40% { transform: translateX(6px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(4px); } }
+</style>
+<script src="../lib/console-filter.js"></script>
+<script src="../partials.js" defer></script>
+<script src="../vendor/privy.bundle.js"></script>
+<script type="module" src="../lib/wallet.js"></script>
+<script type="module" src="../lib/livedata.js"></script>
+<script type="module" src="../lib/games/mines.js"></script>
+<script type="module" src="/lib/i18n.js"></script>
 </head>
-<body></body>
+<body data-active-page="lobby">
+<div data-page-shell>
+<div data-mount="nav"></div>
+
+<div style="display:flex;align-items:flex-start">
+  <div data-mount="side"></div>
+
+  <main data-r-padb-m style="flex:1;min-width:0">
+    <section class="gp-wrap" data-r-pad-m>
+
+      <div class="gp-head" data-r-wrap-m>
+        <a class="back" href="/" data-link>← Lobby</a>
+        <span class="vsep"></span>
+        <h1>Mines</h1>
+        <span style="flex:1"></span>
+        <span class="live-pill" data-sl-stage-pill><span class="dot"></span> READY</span>
+      </div>
+
+      <div class="gp-grid" data-r-grid-m1>
+        <!-- ================= STAGE ================= -->
+        <div class="gp-stage">
+          <div style="display:flex;flex-direction:column;flex:1;padding:22px 24px 12px">
+            <div id="mines-board">
+              <!-- 25 cells -->
+              <button data-sl-cell data-idx="0"></button><button data-sl-cell data-idx="1"></button><button data-sl-cell data-idx="2"></button><button data-sl-cell data-idx="3"></button><button data-sl-cell data-idx="4"></button>
+              <button data-sl-cell data-idx="5"></button><button data-sl-cell data-idx="6"></button><button data-sl-cell data-idx="7"></button><button data-sl-cell data-idx="8"></button><button data-sl-cell data-idx="9"></button>
+              <button data-sl-cell data-idx="10"></button><button data-sl-cell data-idx="11"></button><button data-sl-cell data-idx="12"></button><button data-sl-cell data-idx="13"></button><button data-sl-cell data-idx="14"></button>
+              <button data-sl-cell data-idx="15"></button><button data-sl-cell data-idx="16"></button><button data-sl-cell data-idx="17"></button><button data-sl-cell data-idx="18"></button><button data-sl-cell data-idx="19"></button>
+              <button data-sl-cell data-idx="20"></button><button data-sl-cell data-idx="21"></button><button data-sl-cell data-idx="22"></button><button data-sl-cell data-idx="23"></button><button data-sl-cell data-idx="24"></button>
+            </div>
+            <div style="text-align:center;font:600 10px var(--mono);letter-spacing:.24em;color:var(--fg-faint);min-height:14px;padding:10px 0 2px" data-sl-mines-status></div>
+          </div>
+          <div class="gp-stage-foot">
+            <span>RECENT ROUNDS</span>
+            <div class="recent-mults" data-sl-mines-recent><span class="m" style="opacity:.4">loading…</span></div>
+          </div>
+        </div>
+
+        <!-- ================= BET PANEL ================= -->
+        <div>
+          <div class="gp-panel" data-r-full-m>
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <span class="k-label">Balance</span>
+              <span style="flex:1"></span>
+              <span style="font:600 13px var(--mono);color:#E8E2D6"><span data-stt-balance>-</span> <span style="font:400 9.5px var(--mono);color:var(--fg-ghost)">STT</span></span>
+            </div>
+            <div style="margin-top:14px">
+              <div class="k-label" style="margin-bottom:7px">Amount</div>
+              <div class="stepper2">
+                <button type="button" data-stake-dn aria-label="Lower stake">−</button>
+                <span class="val">
+                  <input value="0.1" data-sl-stake inputmode="decimal" aria-label="Bet amount">
+                  <span class="u">STT</span>
+                </span>
+                <button type="button" data-stake-up aria-label="Raise stake">+</button>
+              </div>
+            </div>
+            <div style="margin-top:14px">
+              <div class="k-label" style="margin-bottom:7px">Mines · <span data-sl-minecount-display style="color:var(--gold)">5</span></div>
+              <input type="range" min="1" max="24" value="5" data-sl-minecount aria-label="Mine count" style="width:100%">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;padding-top:13px;border-top:1px solid var(--line)">
+              <div><div class="k-label" style="font-size:8px;margin-bottom:3px">Next multiplier</div><div style="font:600 12.5px var(--mono);color:var(--green)" data-sl-mines-mult>-</div></div>
+              <div><div class="k-label" style="font-size:8px;margin-bottom:3px">Cash out now</div><div style="font:600 12.5px var(--mono);color:#E8E2D6" data-sl-mines-cashout-amount>-</div></div>
+            </div>
+            <div style="margin-top:6px"><span class="k-label" style="font-size:8px">Cells open</span> <b style="font:600 11px var(--mono);color:var(--fg)" data-sl-mines-opened>0</b></div>
+            <button class="btn-bet" data-sl-place>Start round</button>
+            <button class="btn-bet" data-sl-cashout style="display:none;background:linear-gradient(180deg,#3ddc97,#1fa06a);border-color:#3ddc97">Cash out</button>
+            <div data-sl-result-banner></div>
+          </div>
+
+          <div class="fair-box">
+            <h3>Provably fair</h3>
+            <div class="fl">Client seed</div>
+            <div class="fv" data-sl-fairclient style="color:var(--gold)">-</div>
+            <div class="fl">Bet ID / Nonce</div>
+            <div class="fv" data-sl-fairnonce>-</div>
+            <div class="fl">Server seed (after finalize)</div>
+            <div class="fv" data-sl-fairserver style="color:var(--gold-mid)">-</div>
+            <div class="note" style="font-size:10.5px;color:var(--fg-faint);margin-top:6px;line-height:1.5">The mine layout is committed as a hidden Merkle root before you pick. After the round the seed is revealed and the layout is rebuilt on-chain — a rigged board is caught and refunded.</div>
+            <a href="/fair" data-link style="display:block;margin-top:8px;font:600 10px var(--mono);letter-spacing:.14em;color:var(--gold);text-transform:uppercase">How it works →</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="gp-statstrip" data-r-grid-t2>
+        <div><div class="l">RTP</div><div class="v gold" data-sl="rtp" data-game="mines">98.8%</div></div>
+        <div><div class="l">House edge</div><div class="v" data-sl="houseEdge" data-game="mines">1.20%</div></div>
+        <div><div class="l">Max bet</div><div class="v"><span data-sl="maxBet" data-game="mines">-</span> <span class="u">STT</span></div></div>
+        <div><div class="l">Max win</div><div class="v">100<span class="u">×</span></div></div>
+      </div>
+
+    </section>
+    <div data-mount="footer"></div>
+  </main>
+</div>
+</div>
+
+<script>
+/* stake stepper · same 1-2-5 ladder as the other game pages */
+(function () {
+  const inp = document.querySelector('[data-sl-stake]');
+  if (!inp) return;
+  const LADDER = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100];
+  const cap = () => parseFloat(inp.max) || Infinity;
+  const cur = () => parseFloat(inp.value) || 0;
+  const emit = (v) => {
+    const max = cap();
+    inp.value = String(Math.min(v, max)).replace(/\.?0+$/, '') || '0.01';
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const step = (dir) => {
+    const v = cur();
+    const next = dir > 0
+      ? (LADDER.find((x) => x > v + 1e-9) ?? v * 2)
+      : ([...LADDER].reverse().find((x) => x < v - 1e-9) ?? Math.max(0.01, v / 2));
+    emit(next);
+  };
+  document.querySelector('[data-stake-up]')?.addEventListener('click', () => step(1));
+  document.querySelector('[data-stake-dn]')?.addEventListener('click', () => step(-1));
+})();
+</script>
+</body>
 </html>

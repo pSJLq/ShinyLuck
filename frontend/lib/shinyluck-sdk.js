@@ -75,9 +75,17 @@ const CASINO_ABI = [
   "function placeMinesBet(uint8 mineCount, bytes32 clientSeed) payable returns (uint256)",
   "function placeplinkoBet(uint8 risk, bytes32 clientSeed) payable returns (uint256)",
   "function revealAndSettle(uint256 betId, bytes32 serverSeed) external",
-  "function revealMinesSeed(uint256 betId, bytes32 serverSeed) external",
-  "function openMinesCell(uint256 betId, uint8 cellIdx) external",
+  // Mines v14 (hidden layout): player picks a cell (cheap intent), the
+  // coordinator resolves it; the layout root is committed off the player's path.
+  "function pickMinesCell(uint256 betId, uint8 cellIdx) external",
+  "function cancelMinesPick(uint256 betId) external",
   "function cashoutMines(uint256 betId) external",
+  "function minesState(uint256) view returns (uint8 mineCount,uint32 openedBitmap,bool busted,bool finalized,uint8 pendingCell,uint64 pickBlock,bytes32 layoutRoot,bytes32 entropyHash)",
+  "event MinesCellPicked(uint256 indexed betId, uint8 cellIdx)",
+  "event MinesCellOpened(uint256 indexed betId, uint8 cellIdx, uint32 openedBitmap, uint256 multiplierX100)",
+  "event MinesBust(uint256 indexed betId, uint8 cellIdx)",
+  "event MinesCashout(uint256 indexed betId, uint8 cellsOpened, uint256 payout, uint256 multiplierX100)",
+  "event MinesRootCommitted(uint256 indexed betId, bytes32 root)",
   "function refundExpired(uint256 betId) external",
   // round-based Crash
   "function startCrashRound() external",
@@ -451,6 +459,21 @@ export class ShinyLuck {
   async placeMines(mineCount, valueStr) {
     const cs = this.randomClientSeed();
     return await this._placeWithRace(this.casino.placeMinesBet, [mineCount, cs], cs, ethers.parseEther(String(valueStr)));
+  }
+
+  /// @notice Commit to opening a cell (v14 hidden layout). Cheap, proof-less;
+  ///         the coordinator resolves it into a safe/bust via MinesCellOpened/
+  ///         MinesBust. Fire-and-forget like a poker action.
+  async pickMines(betId, cellIdx) {
+    const tx = await this.casino.pickMinesCell(betId, cellIdx);
+    return await tx.wait();
+  }
+
+  /// @notice Void a bet whose pick the coordinator failed to resolve in time
+  ///         (full stake refund). Only succeeds after MINES_PICK_TIMEOUT blocks.
+  async cancelMinesPick(betId) {
+    const tx = await this.casino.cancelMinesPick(betId);
+    return await tx.wait();
   }
 
   async placePlinko(risk, valueStr) {

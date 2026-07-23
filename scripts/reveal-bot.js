@@ -3,8 +3,13 @@
 // Three responsibilities:
 //   1. Per-bet games (Dice/Slots/Plinko): scan BetPlaced → reveal+settle
 //      once the future blockhash is available.
-//   2. Mines: scan BetPlaced for game=3 → revealMinesSeed (no settle -
-//      the player drives cell-by-cell, then cashouts/busts).
+//   2. Mines (hidden-layout v14): scan BetPlaced for game=3 → derive the
+//      layout from the revealed seed and commit only its Merkle ROOT
+//      (commitMinesRoot). The player then drives the game with cheap on-chain
+//      picks; the bot reacts to MinesCellPicked by submitting resolveMinesCell
+//      with that one cell's proof (on-chain intent gates disclosure → the
+//      layout can't be peeked). At bust/cashout, finalizeMines publishes the
+//      full layout so the committed root is provably honest (or fraud + refund).
 //   3. Round-based games (Crash/Roulette):
 //        - keep one round open at all times (startCrashRound/
 //          startRouletteRound when the chain has no open round)
@@ -22,6 +27,17 @@
 const { ethers, network } = require("hardhat");
 const fs = require("fs");
 const path = require("path");
+const minesCoord = require("./lib/mines-coordinator");
+
+// Coordinator crypto context for the hidden-layout Mines game (v14). These
+// wrappers make the shared lib match Casino.sol byte-for-byte (pinned by
+// test/MinesCoordinator.test.js).
+const MC_CTX = {
+  keccak256: ethers.keccak256,
+  encode: (types, vals) => ethers.AbiCoder.defaultAbiCoder().encode(types, vals),
+  concat: (arr) => ethers.concat(arr),
+  solidityPacked: (types, vals) => ethers.solidityPacked(types, vals),
+};
 
 // POLL_MS pushed to 100ms (was 5000 default, then 300, then 100). On Somnia
 // (~0.4s/block), 100ms poll gives avg detection latency of ~50ms vs 150ms
@@ -306,7 +322,86 @@ async function main() {
     betPlaced:           casino.interface.getEvent("BetPlaced").topicHash,
     crashRoundStarted:   casino.interface.getEvent("CrashRoundStarted").topicHash,
     rouletteRoundStarted:casino.interface.getEvent("RouletteRoundStarted").topicHash,
+    minesCellPicked:     casino.interface.getEvent("MinesCellPicked").topicHash,
   };
+
+  // ───────────────────────── MINES COORDINATOR (v14) ────────────────────────
+  // Hidden-layout Mines: after REVEAL_DELAY the bot derives the layout from the
+  // revealed seed, commits its Merkle ROOT (commitMinesRoot), and keeps the
+  // layout+tree in memory. The player then fires cheap pickMinesCell(idx) txs;
+  // the bot reacts to MinesCellPicked by submitting resolveMinesCell with the
+  // proof for that one cell (on-chain intent gates disclosure → no peeking).
+  // When the bet ends (bust/cashout), finalizeMines publishes the full layout
+  // and the on-chain rebuild proves the committed root was honest.
+  const minesGames = new Map();   // betId -> { bitmap, tree, serverSeed, mineCount, finalized }
+  const minesPicks = new Map();   // betId -> true while a resolve is in flight
+  // Rebuild a mines game in memory from chain state (after a restart the map is
+  // empty but the root is committed and every input is on-chain / derivable).
+  async function loadMinesGame(betId) {
+    if (minesGames.has(betId)) return minesGames.get(betId);
+    const bet = await casino.getBet(betId);
+    if (Number(bet.game) !== 3) return null;
+    const ms = await casino.minesState(betId);
+    if (ms.layoutRoot === ethers.ZeroHash) return null;
+    const serverSeed = seedStore.get(Number(bet.seedIdx));
+    if (!serverSeed) return null;
+    const { bitmap, tree } = minesCoord.layoutFor(MC_CTX, {
+      betId, serverSeed, clientSeed: bet.clientSeed, entropyHash: ms.entropyHash,
+      nonce: bet.nonce, mineCount: Number(ms.mineCount),
+    });
+    // Sanity: the rebuilt root MUST equal what we committed, or the seed store
+    // is stale — never resolve against a mismatched tree.
+    if (tree.root !== ms.layoutRoot) {
+      console.error(`[reveal-bot] MINES rebuild root mismatch bet ${betId} (stale seed?) — not serving`);
+      return null;
+    }
+    const g = { bitmap, tree, serverSeed, mineCount: Number(ms.mineCount), finalized: ms.finalized };
+    minesGames.set(betId, g);
+    return g;
+  }
+  // React to a player's on-chain pick: resolve it with the cell's proof.
+  async function resolveMinesPick(betId) {
+    if (minesPicks.get(betId)) return;
+    minesPicks.set(betId, true);
+    try {
+      const ms = await casino.minesState(betId);
+      if (Number(ms.pendingCell) === 0) return;      // already resolved / nothing pending
+      const idx = Number(ms.pendingCell) - 1;
+      const g = await loadMinesGame(betId);
+      if (!g) return;
+      const cp = minesCoord.cellProof(MC_CTX, { betId, serverSeed: g.serverSeed, bitmap: g.bitmap, tree: g.tree, idx });
+      const tx = await casino.resolveMinesCell(betId, cp.isMine, cp.salt, cp.proof, { nonce: await allocNonce(), ...(await cachedFee()) });
+      await tx.wait();
+      console.log(`[reveal-bot] MINES resolve bet ${betId} cell ${idx} mine=${cp.isMine} tx=${tx.hash}`);
+      if (cp.isMine) finalizeMinesGame(betId).catch(() => {}); // busted → publish layout
+    } catch (e) {
+      const msg = e.shortMessage || e.message;
+      await nonceResync();
+      if (!/nonce|replacement|already known|no pending pick|BetAlreadySettled/i.test(msg))
+        console.warn(`[reveal-bot] MINES resolve ${betId}: ${msg}`);
+    } finally { minesPicks.delete(betId); }
+  }
+  // Post-game transparency: reveal the seed so the on-chain rebuild can prove
+  // (or disprove) the committed root. Idempotent + best-effort.
+  async function finalizeMinesGame(betId) {
+    try {
+      const g = minesGames.get(betId) || (await loadMinesGame(betId));
+      if (!g || g.finalized) return;
+      const ms = await casino.minesState(betId);
+      if (ms.finalized) { g.finalized = true; return; }
+      const bet = await casino.getBet(betId);
+      if (Number(bet.status) === 0) return; // still live
+      const tx = await casino.finalizeMines(betId, g.serverSeed, { nonce: await allocNonce(), ...(await cachedFee()) });
+      await tx.wait();
+      g.finalized = true;
+      console.log(`[reveal-bot] MINES finalize bet ${betId} tx=${tx.hash}`);
+    } catch (e) {
+      const msg = e.shortMessage || e.message;
+      await nonceResync();
+      if (!/nonce|replacement|already known|finalized|game still open/i.test(msg))
+        console.warn(`[reveal-bot] MINES finalize ${betId}: ${msg}`);
+    }
+  }
 
   // ────────────────────── AUTO-TOPUP (deterministic seeds) ──────────────────
   // When SEED_MASTER_KEY is set, the bot can produce seed[i] for any i. To
@@ -561,9 +656,17 @@ async function main() {
         }
       } catch (_) {}
     };
+    const onMinesPick = (log) => {
+      try {
+        const parsed = casino.interface.parseLog({ topics: log.topics, data: log.data });
+        // React immediately: resolve the picked cell with its Merkle proof.
+        resolveMinesPick(parsed.args.betId.toString()).catch(() => {});
+      } catch (_) {}
+    };
     wsProvider.on({ address: casinoAddr, topics: [topics.betPlaced] }, onBetPlaced);
     wsProvider.on({ address: casinoAddr, topics: [topics.crashRoundStarted] }, onCrashRound);
     wsProvider.on({ address: casinoAddr, topics: [topics.rouletteRoundStarted] }, onRouletteRound);
+    wsProvider.on({ address: casinoAddr, topics: [topics.minesCellPicked] }, onMinesPick);
     // Newheads subscription - every block tick wakes the loop, so the moment
     // a pending bet's REVEAL_DELAY block is mined we attempt reveal. Without
     // this we'd wait up to POLL_MS extra after the block ticked.
@@ -642,6 +745,12 @@ async function main() {
               foundBets++;
             }
           }),
+          // Mines picks: fallback for a WS event the socket missed (and the
+          // restart-recovery path). resolveMinesPick is idempotent + no-ops if
+          // the pick was already resolved on chain.
+          sweepRange(topics.minesCellPicked, (p) => {
+            resolveMinesPick(p.args.betId.toString()).catch(() => {});
+          }),
           sweepRange(topics.crashRoundStarted, (p) => {
             const a = p.args;
             const id = a.roundId.toString();
@@ -718,15 +827,29 @@ async function main() {
       } else if (age > REVEAL_DELAY) {
         const seed = seedStore.get(info.seedIdx);
         if (!seed) { console.warn(`[reveal-bot] no seed at idx=${info.seedIdx} for bet ${betId}`); pending.delete(betId); continue; }
-        const action = info.game === 3 ? "REVEAL_MINES" : (info.game === 1 || info.game === 5 ? "SKIP_ROUND" : "SETTLE");
+        const action = info.game === 3 ? "COMMIT_MINES_ROOT" : (info.game === 1 || info.game === 5 ? "SKIP_ROUND" : "SETTLE");
         if (action === "SKIP_ROUND") { pending.delete(betId); continue; }
         dueJobs.push(async () => {
         inflight.add(betId);
         try {
           const opts = { nonce: await allocNonce(), ...(await cachedFee()) };
-          const tx = info.game === 3
-            ? await casino.revealMinesSeed(betId, seed, opts)
-            : await casino.revealAndSettle(betId, seed, opts);
+          let tx;
+          if (info.game === 3) {
+            // Hidden-layout Mines: derive the layout from the revealed seed and
+            // commit only its Merkle root. The player drives the game with
+            // pickMinesCell; the pick watcher resolves each cell (see above).
+            const bet = await casino.getBet(betId);
+            const ms = await casino.minesState(betId);
+            if (ms.layoutRoot !== ethers.ZeroHash) { pending.delete(betId); return; } // already committed
+            const entropyHash = (await provider.getBlock(Number(bet.commitBlock) + Number(REVEAL_DELAY)))?.hash;
+            const { tree } = minesCoord.layoutFor(MC_CTX, {
+              betId, serverSeed: seed, clientSeed: bet.clientSeed, entropyHash,
+              nonce: bet.nonce, mineCount: Number(ms.mineCount),
+            });
+            tx = await casino.commitMinesRoot(betId, tree.root, opts);
+          } else {
+            tx = await casino.revealAndSettle(betId, seed, opts);
+          }
           await tx.wait();
           console.log(`[reveal-bot] ${action} bet ${betId} tx=${tx.hash}`);
           pending.delete(betId);
@@ -767,6 +890,15 @@ async function main() {
       }
     }
     if (dueJobs.length) await dispatchPool(dueJobs, SETTLE_CONCURRENCY);
+
+    // 2b. MINES finalize sweep. A bust finalizes inline (see resolveMinesPick),
+    //     but a CASHOUT is player-initiated and the bot never gets a pick event
+    //     for it — so best-effort finalize any in-memory game whose bet has
+    //     settled but isn't finalized yet. finalizeMinesGame is idempotent.
+    for (const [betId, g] of minesGames) {
+      if (g.finalized) { minesGames.delete(betId); continue; }
+      finalizeMinesGame(betId).catch(() => {});
+    }
 
     // 3. Sweep round-based pending - try settle first, then refund only on
     //    real timeout. The contract enforces order:
