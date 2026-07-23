@@ -4,12 +4,137 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Plinko · ShinyLuck</title>
-<script>
-  // Plinko is switched off for now (paused on-chain while it gets production-
-  // ready). Send visitors back to the live floor.
-  location.replace("/");
-</script>
-  <script type="module" src="/lib/i18n.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../v2.css">
+<script src="../lib/console-filter.js"></script>
+<script src="../partials.js" defer></script>
+<script src="../vendor/privy.bundle.js"></script>
+<script type="module" src="../lib/wallet.js"></script>
+<script type="module" src="../lib/livedata.js"></script>
+<script type="module" src="../lib/games/plinko.js"></script>
+<script type="module" src="/lib/i18n.js"></script>
 </head>
-<body></body>
+<body data-active-page="lobby">
+<div data-page-shell>
+<div data-mount="nav"></div>
+
+<div style="display:flex;align-items:flex-start">
+  <div data-mount="side"></div>
+
+  <main data-r-padb-m style="flex:1;min-width:0">
+    <section class="gp-wrap" data-r-pad-m>
+
+      <div class="gp-head" data-r-wrap-m>
+        <a class="back" href="/" data-link>← Lobby</a>
+        <span class="vsep"></span>
+        <h1>Plinko</h1>
+        <span style="flex:1"></span>
+        <span class="live-pill" data-sl-stage-pill><span class="dot"></span> READY</span>
+      </div>
+
+      <div class="gp-grid" data-r-grid-m1>
+        <!-- ================= STAGE ================= -->
+        <div class="gp-stage">
+          <div style="display:flex;flex-direction:column;flex:1;padding:18px 20px 8px">
+            <!-- plinko.js mounts its canvas here and replays the ball drop
+                 from the on-chain 16-bit bounce path -->
+            <div data-sl-plinko-stage style="flex:1;display:flex;align-items:center;justify-content:center"></div>
+            <div style="text-align:center;font:600 10px var(--mono);letter-spacing:.3em;color:var(--fg-faint);min-height:14px;padding:6px 0" data-sl-result></div>
+          </div>
+          <div class="gp-stage-foot">
+            <span>RECENT DROPS</span>
+            <div class="recent-mults" data-sl-plinko-recent><span class="m" style="opacity:.4">loading…</span></div>
+          </div>
+        </div>
+
+        <!-- ================= BET PANEL ================= -->
+        <div>
+          <div class="gp-panel" data-r-full-m>
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <span class="k-label">Balance</span>
+              <span style="flex:1"></span>
+              <span style="font:600 13px var(--mono);color:#E8E2D6"><span data-stt-balance>-</span> <span style="font:400 9.5px var(--mono);color:var(--fg-ghost)">STT</span></span>
+            </div>
+            <div style="margin-top:14px">
+              <div class="k-label" style="margin-bottom:7px">Amount</div>
+              <div class="stepper2">
+                <button type="button" data-stake-dn aria-label="Lower stake">−</button>
+                <span class="val">
+                  <input value="0.1" data-sl-stake inputmode="decimal" aria-label="Bet amount">
+                  <span class="u">STT</span>
+                </span>
+                <button type="button" data-stake-up aria-label="Raise stake">+</button>
+              </div>
+            </div>
+            <div style="margin-top:14px">
+              <div class="k-label" style="margin-bottom:7px">Risk</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+                <button class="preset active" data-sl-risk data-value="0" style="height:40px;font:600 9.5px var(--mono);letter-spacing:.14em">LOW</button>
+                <button class="preset" data-sl-risk data-value="1" style="height:40px;font:600 9.5px var(--mono);letter-spacing:.14em">MEDIUM</button>
+                <button class="preset" data-sl-risk data-value="2" style="height:40px;font:600 9.5px var(--mono);letter-spacing:.14em">HIGH</button>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px;padding-top:13px;border-top:1px solid var(--line)">
+              <div><div class="k-label" style="font-size:8px;margin-bottom:3px">Best slot pays</div><div style="font:600 12.5px var(--mono);color:var(--green)" data-sl-profit>-</div></div>
+            </div>
+            <button class="btn-bet" data-sl-place>Drop ball</button>
+            <div data-sl-result-banner></div>
+          </div>
+
+          <div class="fair-box">
+            <h3>Provably fair</h3>
+            <div class="fl">Client seed</div>
+            <div class="fv" data-sl-fairclient style="color:var(--gold)">-</div>
+            <div class="fl">Bet ID / Nonce</div>
+            <div class="fv" data-sl-fairnonce>-</div>
+            <div class="fl">Server seed (after reveal)</div>
+            <div class="fv" data-sl-fairserver style="color:var(--gold-mid)">-</div>
+            <a data-sl-explorer-link href="#" target="_blank" rel="noopener" style="display:none;font:600 10px var(--mono);letter-spacing:.14em;color:var(--gold);text-transform:uppercase;margin-bottom:8px">verify on explorer ↗</a>
+            <a href="/fair" data-link style="display:block;margin-top:8px;font:600 10px var(--mono);letter-spacing:.14em;color:var(--gold);text-transform:uppercase">How it works →</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="gp-statstrip" data-r-grid-t2>
+        <div><div class="l">RTP</div><div class="v gold" data-sl="rtp" data-game="plinko">98.5%</div></div>
+        <div><div class="l">House edge</div><div class="v" data-sl="houseEdge" data-game="plinko">1.50%</div></div>
+        <div><div class="l">Max bet</div><div class="v"><span data-sl="maxBet" data-game="plinko">-</span> <span class="u">STT</span></div></div>
+        <div><div class="l">Max win</div><div class="v">1000<span class="u">×</span></div></div>
+      </div>
+
+    </section>
+    <div data-mount="footer"></div>
+  </main>
+</div>
+</div>
+
+<script>
+/* stake stepper · same 1-2-5 ladder as the other game pages */
+(function () {
+  const inp = document.querySelector('[data-sl-stake]');
+  if (!inp) return;
+  const LADDER = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100];
+  const cap = () => parseFloat(inp.max) || Infinity;
+  const cur = () => parseFloat(inp.value) || 0;
+  const emit = (v) => {
+    const max = cap();
+    inp.value = String(Math.min(v, max)).replace(/\.?0+$/, '') || '0.01';
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const step = (dir) => {
+    const v = cur();
+    const next = dir > 0
+      ? (LADDER.find((x) => x > v + 1e-9) ?? v * 2)
+      : ([...LADDER].reverse().find((x) => x < v - 1e-9) ?? Math.max(0.01, v / 2));
+    emit(next);
+  };
+  document.querySelector('[data-stake-up]')?.addEventListener('click', () => step(1));
+  document.querySelector('[data-stake-dn]')?.addEventListener('click', () => step(-1));
+})();
+</script>
+</body>
 </html>
