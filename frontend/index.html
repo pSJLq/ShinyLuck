@@ -174,10 +174,10 @@ initWins().catch((e) => console.warn("[lobby] wins:", e.message));
 (function () {
   const GAMES = [
     { id: 'dice',     name: 'Dice',      cat: 'orig',  href: '/dice',     live: true },
-    { id: 'mines',    name: 'Mines',     cat: 'orig',  live: false },
-    { id: 'plinko',   name: 'Plinko',    cat: 'orig',  live: false },
+    { id: 'mines',    name: 'Mines',     cat: 'orig',  href: '/mines',    live: true },
+    { id: 'plinko',   name: 'Plinko',    cat: 'orig',  href: '/plinko',   live: true },
     { id: 'roulette', name: 'Roulette',  cat: 'multi', href: '/roulette', live: true },
-    { id: 'crash',    name: 'Crash',     cat: 'multi', live: false },
+    { id: 'crash',    name: 'Crash',     cat: 'multi', href: '/crash',    live: true },
     { id: 'vault7',   name: 'VAULT.7',   cat: 'slots', href: '/vault7',   live: true },
     { id: 'sugarlab', name: 'SUGAR.LAB', cat: 'slots', href: '/sugar',    live: true },
   ];
@@ -255,6 +255,9 @@ initWins().catch((e) => console.warn("[lobby] wins:", e.message));
     '/': 'ShinyLuck · Provably-fair casino on Somnia',
     '/poker': 'Poker · ShinyLuck',
     '/dice': 'Dice · ShinyLuck',
+    '/mines': 'Mines · ShinyLuck',
+    '/plinko': 'Plinko · ShinyLuck',
+    '/crash': 'Crash · ShinyLuck',
     '/roulette': 'Roulette · ShinyLuck',
     '/vault7': 'VAULT.7 · ShinyLuck',
     '/sugar': 'SUGAR.LAB · ShinyLuck',
@@ -270,6 +273,9 @@ initWins().catch((e) => console.warn("[lobby] wins:", e.message));
   // only ones on screen.
   const GAME_SRC = {
     '/dice': '/games/dice.html',
+    '/mines': '/games/mines.html',
+    '/plinko': '/games/plinko.html',
+    '/crash': '/games/crash.html',
     '/roulette': '/games/roulette.html',
     '/vault7': '/games/vault7/index.html',
     '/sugar': '/games/sugar/index.html',
