@@ -408,10 +408,25 @@ async function tryRestoreActiveRound() {
         if (openedBitmap & (1n << BigInt(i))) { showCell(i, "safe", false); cellsOpened++; }
       }
       setStagePill("live", "ROUND ACTIVE");
-      setMinesStatus(`resumed bet #${id} · ${cellsOpened} cells open · pick another or cashout`);
-      renderButtons();
       updateLiveMultiplier();
       populateFairPanel({ clientSeed: b.clientSeed, betId: id, nonce: id, serverSeed: ethers.ZeroHash });
+      // A pick left pending across a reload: wait for the coordinator to
+      // resolve it (its sweep will), and if it never does, offer cancel-refund
+      // so the player is never trapped on a stuck bet.
+      if (Number(ms.pendingCell) !== 0) {
+        const idx = Number(ms.pendingCell) - 1;
+        setMinesStatus(`resuming bet #${id} · finishing your pick on cell ${idx}…`);
+        cellPending = true; renderButtons();
+        waitForResolve(id, idx).then((res) => {
+          cellPending = false;
+          if (res.bust) { showCell(idx, "bomb"); setStagePill("lost", "BUSTED"); setMinesStatus(`bet #${id} · BUSTED`); endRoundUI(); revealFullLayout(id, idx).catch(() => {}); }
+          else if (res.safe) { showCell(idx, "safe"); openedBitmap |= 1n << BigInt(idx); cellsOpened = res.opened; updateLiveMultiplier(); setMinesStatus(`${cellsOpened} open · pick another or cash out`); renderButtons(); }
+          else { const cb = $("[data-sl-cashout]"); if (cb) cb.dataset.refund = "1"; setMinesStatus(`pick didn't resolve · you can cancel for a refund`); renderButtons(); }
+        });
+      } else {
+        setMinesStatus(`resumed bet #${id} · ${cellsOpened} cells open · pick another or cashout`);
+        renderButtons();
+      }
       return;
     }
   } catch (e) {

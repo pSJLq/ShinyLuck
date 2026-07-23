@@ -840,7 +840,15 @@ async function main() {
             // pickMinesCell; the pick watcher resolves each cell (see above).
             const bet = await casino.getBet(betId);
             const ms = await casino.minesState(betId);
-            if (ms.layoutRoot !== ethers.ZeroHash) { pending.delete(betId); return; } // already committed
+            if (ms.layoutRoot !== ethers.ZeroHash) {
+              // Root already committed (e.g. committed by a prior process before
+              // a restart). Register the game so the sweep can finalize it AND
+              // resolve any pick left pending across the restart, then drop it
+              // from `pending`.
+              pending.delete(betId);
+              if (Number(bet.status) === 0) { await loadMinesGame(betId); resolveMinesPick(betId).catch(() => {}); }
+              return;
+            }
             const entropyHash = (await provider.getBlock(Number(bet.commitBlock) + Number(REVEAL_DELAY)))?.hash;
             const { tree } = minesCoord.layoutFor(MC_CTX, {
               betId, serverSeed: seed, clientSeed: bet.clientSeed, entropyHash,
@@ -895,8 +903,13 @@ async function main() {
     //     but a CASHOUT is player-initiated and the bot never gets a pick event
     //     for it — so best-effort finalize any in-memory game whose bet has
     //     settled but isn't finalized yet. finalizeMinesGame is idempotent.
+    //     ALSO self-heal a pick whose MinesCellPicked event we missed or failed
+    //     to resolve (e.g. a transient nonce collision) — without this a missed
+    //     pick sits stuck forever (pendingCell != 0 blocks cashout) until the
+    //     player cancels for a refund. resolveMinesPick no-ops if none pending.
     for (const [betId, g] of minesGames) {
       if (g.finalized) { minesGames.delete(betId); continue; }
+      resolveMinesPick(betId).catch(() => {});
       finalizeMinesGame(betId).catch(() => {});
     }
 
