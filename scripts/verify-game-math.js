@@ -27,17 +27,27 @@ const reported = src.match(/GameType\.PLINKO\)\s*return (\d+);/);
 console.log(`  contract reports RTP ${(Number(reported?.[1] ?? NaN) / 100).toFixed(2)}% on the stat strip`);
 
 // ---- crash ----------------------------------------------------------------
-// _crashPoint: h uniform in [0,e); h%33==0 → 1.00x bust; else cp = num·e/(100(e−h))
-// (num = 10000 − edgeBps). For a target multiplier m (X100 = M):
-//   P(cp ≥ M) = P(h % 33 != 0) · P(num·e/(e−h) ≥ M | h%33!=0)
-// h and h%33 are effectively independent for e=2^52, so
-//   P(win at m) ≈ (32/33) · (num/100)/m   → EV = m·P = (32/33)·num/10000.
-const crashEdge = Number(src.match(/GameType\.CRASH\)\s*bps = (\d+)/)?.[1] ?? src.match(/bps = (\d+); \/\/ crash/)?.[1] ?? NaN);
-console.log("\n== CRASH (bustabit formula + 1/33 instant bust) ==");
+// _crashPoint (v14): h uniform in [0,e); cp_X100 = 99·e/(e−h) with the 1.00x
+// floor clamp (no separate bust branch). For a target M (X100), M ≥ 99:
+//   P(cp ≥ M) = 99/M   ⟹   EV/stake = (M/100)·(99/M) = (100−edgeBps/100)/100.
+// The instant-1.00x floor is intrinsic (h < e/100 ⇒ ~1% of rounds), NOT an
+// extra charge — RTP is exactly 1 − edge at every cashout target.
+const crashEdge = Number(src.match(/GameType\.CRASH\)\s*bps = (\d+)/)?.[1] ?? NaN);
+console.log("\n== CRASH (bustabit formula, single edge, no double bust) ==");
 if (Number.isFinite(crashEdge)) {
-  const rtp = (32 / 33) * (10000 - crashEdge) / 100;
-  console.log(`  edgeBps ${crashEdge} → RTP ${rtp.toFixed(2)}% at ANY auto-cashout target`);
-  console.log(`  (Stake reference: 99.0% · gap comes from stacking 1/33 bust ON TOP of the ${crashEdge / 100}% edge)`);
+  const num = 10000 - crashEdge;
+  // Monte-Carlo the exact on-chain integer formula to confirm the closed form.
+  const e = 2 ** 52;
+  let staked = 0, ret = 0; const M = 200; // cash out at 2.00x
+  for (let i = 0; i < 2_000_000; i++) {
+    const h = Math.floor(Math.random() * e);
+    let cp = Math.floor((num * e) / (100 * (e - h)));
+    if (cp < 100) cp = 100;
+    staked += 100;
+    if (cp >= M) ret += M;
+  }
+  console.log(`  edgeBps ${crashEdge} → closed-form RTP ${(num / 100).toFixed(2)}% at ANY target`);
+  console.log(`  2M-round sim at 2.00x target: ${(ret / staked * 100).toFixed(2)}% (Stake reference 99.00%)`);
 } else {
   console.log("  couldn't parse crash edge bps — check houseEdgeBps()");
 }

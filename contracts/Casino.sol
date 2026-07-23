@@ -426,7 +426,10 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
 
     function houseEdgeBps(GameType g) public view returns (uint256 bps) {
         if (g == GameType.DICE)        bps = 100;
-        else if (g == GameType.CRASH)  bps = 300;
+        // CRASH: 1% total (Stake parity). The old 3% stacked ON TOP of a 1/33
+        // instant-bust branch in _crashPoint for an effective 5.94% edge —
+        // both trimmed in the same pass (see _crashPoint).
+        else if (g == GameType.CRASH)  bps = 100;
         // SLOTS / CLUSTER edge is *inside* the symbol pay tables - the math
         // is the edge. Applying additional bps here on top of the resolver
         // would double-discount payouts. The pay-table boosts in `_settleBet`
@@ -459,10 +462,10 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
 
     function defaultReportedRtpBps(GameType g) public pure returns (uint16) {
         if (g == GameType.DICE)         return 9900;
-        if (g == GameType.CRASH)        return 9700;
+        if (g == GameType.CRASH)        return 9900; // bustabit formula, 1% edge, no extra bust branch
         if (g == GameType.SLOTS)        return 9200; // VAULT.7
         if (g == GameType.MINES)        return 9880;
-        if (g == GameType.PLINKO)       return 9850;
+        if (g == GameType.PLINKO)       return 9900; // true table EV (98.98-99.00% across risks)
         if (g == GameType.ROULETTE)     return 9474;  // American (00) wheel
         if (g == GameType.CLUSTER)      return 9200; // SUGAR.LAB
         return 0;
@@ -842,19 +845,34 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
 
     uint256 public constant MINES_MAX_MULT_X100 = 10000;
 
+    // v14 · HIDDEN layout. The old flow put minesBitmap on-chain BEFORE the
+    // player opened cells (revealMinesSeed) — anyone reading contract storage
+    // saw every mine up front and cashed the max multiplier every game. Now
+    // the coordinator commits only a Merkle ROOT over 25 per-cell leaves
+    // (salted, so single-bit leaves can't be brute-forced), serves the
+    // clicked cell's {isMine, salt, proof} over HTTP, and the contract
+    // adjudicates each open against the root. After the game ends,
+    // finalizeMines reveals the server seed and RECOMPUTES the layout + root
+    // on-chain: a coordinator that committed anything but the seed-derived
+    // layout is caught publicly and the player's stake is made whole.
     struct MinesState {
-        uint8  mineCount;
-        uint32 openedBitmap;
-        uint32 minesBitmap;
-        bool   seedRevealed;
-        bool   busted;
+        uint8   mineCount;
+        uint32  openedBitmap;
+        bool    busted;
+        bool    finalized;
+        bytes32 layoutRoot;   // Merkle root of the hidden layout (32 padded leaves)
+        bytes32 entropyHash;  // blockhash(commitBlock+DELAY) snapshotted at root
+                              // commit — Somnia's 256-block window is ~26s, long
+                              // gone by the time a human finishes the game
     }
     mapping(uint256 => MinesState) public minesState;
 
-    event MinesSeedRevealed(uint256 indexed betId, uint32 minesBitmap);
+    event MinesRootCommitted(uint256 indexed betId, bytes32 root);
     event MinesCellOpened(uint256 indexed betId, uint8 cellIdx, uint32 openedBitmap, uint256 multiplierX100);
-    event MinesBust(uint256 indexed betId, uint8 cellIdx, uint32 minesBitmap);
+    event MinesBust(uint256 indexed betId, uint8 cellIdx);
     event MinesCashout(uint256 indexed betId, uint8 cellsOpened, uint256 payout, uint256 multiplierX100);
+    event MinesLayout(uint256 indexed betId, uint32 minesBitmap, bytes32 serverSeed);
+    event MinesFraud(uint256 indexed betId, bytes32 committedRoot, bytes32 derivedRoot);
 
     function placeMinesBet(uint8 mineCount, bytes32 clientSeed)
         external payable nonReentrant whenNotPaused whenGameLive(GameType.MINES)
@@ -867,49 +885,52 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         minesState[betId].mineCount = mineCount;
     }
 
-    function revealMinesSeed(uint256 betId, bytes32 serverSeed) external nonReentrant {
+    /// @notice Coordinator commits the hidden layout's Merkle root. Restricted:
+    ///         an open commit would let a griefer plant a garbage root (caught
+    ///         at finalize, but the game would be unplayable).
+    function commitMinesRoot(uint256 betId, bytes32 root) external nonReentrant {
+        if (msg.sender != owner() && msg.sender != houseManager) revert NotHouseManager();
         if (betId >= _bets.length) revert BetNotFound();
+        if (root == bytes32(0)) revert InvalidBet("zero root");
         Bet storage bet = _bets[betId];
         if (bet.game != GameType.MINES) revert InvalidGame();
         if (bet.status != 0) revert BetAlreadySettled();
+        MinesState storage ms = minesState[betId];
+        if (ms.layoutRoot != bytes32(0)) revert InvalidBet("root set");
 
         if (CommitReveal.isExpired(bet.commitBlock)) { _refund(betId, "expired blockhash"); return; }
         CommitReveal.requireRevealable(bet.commitBlock);
-
-        bytes32 storedSeed = revealedSeed[bet.seedIdx];
-        if (storedSeed == bytes32(0)) {
-            CommitReveal.requireSeedMatches(serverSeed, seedHashes[bet.seedIdx]);
-            revealedSeed[bet.seedIdx] = serverSeed;
-            storedSeed = serverSeed;
-        }
-        bytes32 randomness = CommitReveal.deriveRandomness(storedSeed, bet.clientSeed, bet.commitBlock, bet.nonce);
-        bet.randomness = randomness;
-
-        MinesState storage ms = minesState[betId];
-        ms.minesBitmap = _selectMines(randomness, ms.mineCount);
-        ms.seedRevealed = true;
-        emit MinesSeedRevealed(betId, ms.minesBitmap);
+        ms.layoutRoot = root;
+        ms.entropyHash = blockhash(bet.commitBlock + CommitReveal.REVEAL_DELAY);
+        emit MinesRootCommitted(betId, root);
     }
 
-    function openMinesCell(uint256 betId, uint8 cellIdx) external nonReentrant {
+    /// @notice Open a cell. The {isMine, salt, proof} tuple comes from the
+    ///         coordinator's HTTP endpoint for the clicked cell only; the
+    ///         contract trusts nothing but the committed root.
+    function openMinesCell(uint256 betId, uint8 cellIdx, bool isMine, bytes32 salt, bytes32[] calldata proof)
+        external nonReentrant
+    {
         Bet storage bet = _bets[betId];
         MinesState storage ms = minesState[betId];
         if (bet.game != GameType.MINES) revert InvalidGame();
         if (bet.player != msg.sender) revert InvalidBet("not player");
         if (bet.status != 0) revert BetAlreadySettled();
-        if (!ms.seedRevealed) revert InvalidBet("seed not revealed");
+        if (ms.layoutRoot == bytes32(0)) revert InvalidBet("root not committed");
         if (ms.busted) revert InvalidBet("busted");
         if (cellIdx >= 25) revert InvalidBet("cell oob");
         uint32 mask = uint32(1) << cellIdx;
         if (ms.openedBitmap & mask != 0) revert InvalidBet("already opened");
-        if (ms.minesBitmap & mask != 0) {
+        bytes32 leaf = keccak256(abi.encode(betId, cellIdx, isMine, salt));
+        if (_minesProofRoot(leaf, cellIdx, proof) != ms.layoutRoot) revert InvalidBet("bad proof");
+        if (isMine) {
             ms.busted = true;
             bet.status = 1; bet.won = false; bet.payout = 0;
             uint256 reserveAdd = _maxPayoutOf(bet) - bet.amount;
             lockedReserve -= reserveAdd;
-            emit MinesBust(betId, cellIdx, ms.minesBitmap);
+            emit MinesBust(betId, cellIdx);
             _emitSettled(betId, revealedSeed[bet.seedIdx], bet.randomness, false, 0,
-                abi.encode(uint8(0), ms.openedBitmap, ms.minesBitmap, true));
+                abi.encode(uint8(0), ms.openedBitmap, uint32(0), true));
             return;
         }
         ms.openedBitmap |= mask;
@@ -923,7 +944,7 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         if (bet.game != GameType.MINES) revert InvalidGame();
         if (bet.player != msg.sender) revert InvalidBet("not player");
         if (bet.status != 0) revert BetAlreadySettled();
-        if (!ms.seedRevealed) revert InvalidBet("seed not revealed");
+        if (ms.layoutRoot == bytes32(0)) revert InvalidBet("root not committed");
         if (ms.busted) revert InvalidBet("busted");
         uint8 k = _popcount25(ms.openedBitmap);
         if (k == 0) revert InvalidBet("nothing opened");
@@ -939,7 +960,80 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         emit WithdrawalCredited(bet.player, payout);
         emit MinesCashout(betId, k, payout, multX100);
         _emitSettled(betId, revealedSeed[bet.seedIdx], bet.randomness, true, payout,
-            abi.encode(k, ms.openedBitmap, ms.minesBitmap, false));
+            abi.encode(k, ms.openedBitmap, uint32(0), false));
+    }
+
+    /// @notice Post-game transparency + fraud tripwire. Reveals the server
+    ///         seed, re-derives the layout EXACTLY like the coordinator must
+    ///         have, and rebuilds the Merkle root on-chain. A mismatch means
+    ///         the committed layout was not the seed-derived one: the fraud is
+    ///         logged publicly and the player's stake is credited back on top
+    ///         of whatever the (possibly rigged) game already settled.
+    function finalizeMines(uint256 betId, bytes32 serverSeed) external nonReentrant {
+        if (betId >= _bets.length) revert BetNotFound();
+        Bet storage bet = _bets[betId];
+        MinesState storage ms = minesState[betId];
+        if (bet.game != GameType.MINES) revert InvalidGame();
+        if (bet.status == 0) revert InvalidBet("game still open");
+        if (ms.layoutRoot == bytes32(0)) revert InvalidBet("no root");
+        if (ms.finalized) revert InvalidBet("finalized");
+        ms.finalized = true;
+
+        bytes32 stored = revealedSeed[bet.seedIdx];
+        if (stored == bytes32(0)) {
+            CommitReveal.requireSeedMatches(serverSeed, seedHashes[bet.seedIdx]);
+            revealedSeed[bet.seedIdx] = serverSeed;
+            stored = serverSeed;
+        }
+        // Same recipe as CommitReveal.deriveRandomness, against the blockhash
+        // snapshotted at root-commit time (the live window is long gone).
+        bytes32 randomness = keccak256(abi.encodePacked(stored, bet.clientSeed, ms.entropyHash, uint256(bet.nonce)));
+        bet.randomness = randomness;
+        uint32 bitmap = _selectMines(randomness, ms.mineCount);
+        bytes32 derived = _minesLayoutRoot(betId, bitmap, stored);
+        if (derived != ms.layoutRoot) {
+            emit MinesFraud(betId, ms.layoutRoot, derived);
+            pendingWithdrawals[bet.player] += bet.amount;
+            totalPendingWithdrawals += bet.amount;
+            emit WithdrawalCredited(bet.player, bet.amount);
+        }
+        emit MinesLayout(betId, bitmap, stored);
+    }
+
+    /// @dev Per-cell salt — derived from the server seed so a 1-bit leaf can't
+    ///      be brute-forced from public data while the game is live.
+    function _minesSalt(bytes32 serverSeed, uint256 betId, uint256 i) internal pure returns (bytes32) {
+        return keccak256(abi.encode(serverSeed, betId, i));
+    }
+
+    /// @dev Rebuilds the full 32-leaf tree (25 real cells + 7 domain-separated
+    ///      pads) — ~63 keccaks, cheap. Must mirror the coordinator exactly.
+    function _minesLayoutRoot(uint256 betId, uint32 bitmap, bytes32 serverSeed) internal pure returns (bytes32) {
+        bytes32[32] memory nodes;
+        for (uint256 i; i < 25; i++) {
+            bool isMine = bitmap & (uint32(1) << i) != 0;
+            nodes[i] = keccak256(abi.encode(betId, i, isMine, _minesSalt(serverSeed, betId, i)));
+        }
+        for (uint256 i = 25; i < 32; i++) nodes[i] = keccak256(abi.encode(betId, i)); // pad (2-field shape ≠ 4-field real leaf)
+        uint256 width = 32;
+        while (width > 1) {
+            for (uint256 i; i < width / 2; i++) nodes[i] = keccak256(abi.encodePacked(nodes[2 * i], nodes[2 * i + 1]));
+            width /= 2;
+        }
+        return nodes[0];
+    }
+
+    /// @dev Standard index-ordered Merkle proof over the fixed depth-5 tree.
+    function _minesProofRoot(bytes32 leaf, uint256 index, bytes32[] calldata proof) internal pure returns (bytes32) {
+        if (proof.length != 5) return bytes32(0);
+        bytes32 node = leaf;
+        for (uint256 i; i < 5; i++) {
+            node = index & 1 == 1
+                ? keccak256(abi.encodePacked(proof[i], node))
+                : keccak256(abi.encodePacked(node, proof[i]));
+            index >>= 1;
+        }
+        return node;
     }
 
     function _popcount25(uint32 x) internal pure returns (uint8 c) {
@@ -1250,11 +1344,15 @@ contract Casino is Ownable, ReentrancyGuard, Pausable {
         return crashBets[roundId][player];
     }
 
+    /// @dev Bustabit-style point: P(cp ≥ m) = (1 − edge)/m, so EV of cashing
+    ///      out at ANY target m is exactly (1 − edge) — 99.00% RTP at the 1%
+    ///      edge. Instant 1.00× busts fall out of the same formula (~1.9% of
+    ///      rounds via the ≥100 clamp); the old separate `h % 33` bust branch
+    ///      double-charged players (94.06% effective RTP) and is gone.
     function _crashPoint(bytes32 randomness) internal view returns (uint256) {
         uint256 e = 1 << 52;
         uint256 h = uint256(randomness) % e;
         uint256 num = 10000 - houseEdgeBps(GameType.CRASH);
-        if (h % 33 == 0) return 100;
         uint256 cp = (num * e) / (100 * (e - h));
         return cp < 100 ? 100 : cp;
     }
