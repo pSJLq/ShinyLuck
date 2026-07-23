@@ -931,8 +931,17 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
         }
         await sendAll(args.map((a) => () => send(() => zkd.revealBoardCard(...a, overrides))));
       } catch (e) {
-        // recheck on-chain how far the batch got before deciding it's fatal
-        sess.boardRevealed = Number(await zkd.boardRevealedCount(sess.dealId));
+        // Recheck on-chain how far the batch got before deciding it's fatal.
+        // A transient RPC error mid-batch leaves LANDED reveals unrecorded and
+        // the retry then reverts ("slot already revealed") — which used to
+        // read as fatal and cancel a perfectly fine hand. Give in-flight txs
+        // a beat to mine, and if the chain shows progress we thought was
+        // missing, adopt it and carry on; only an unexplained revert cancels.
+        await new Promise((r) => setTimeout(r, 1200));
+        const onchain = Number(await zkd.boardRevealedCount(sess.dealId));
+        const explained = onchain > sess.boardRevealed;
+        sess.boardRevealed = onchain;
+        if (explained) { sess.boardDeadline = 0; return `board-resync:${onchain}`; }
         return await _revealFailed(room, state, tableId, sess, e, send, opts);
       }
       sess.boardRevealed = readySlots[readySlots.length - 1] + 1;
@@ -983,6 +992,21 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
           )).then(() => { sess.holesRevealed.add(p); revealedNow++; });
         }));
       } catch (e) {
+        // same resync as the board path: a reveal that LANDED but whose
+        // receipt was lost to an RPC hiccup makes the retry revert — read the
+        // chain before treating that as fatal (today's live repro: one
+        // "could not coalesce error" → retry → cancelled:reveal-refused,
+        // a full refund of a perfectly good showdown)
+        await new Promise((r) => setTimeout(r, 1200));
+        let explained = false;
+        for (const p of readyParts) {
+          if (sess.holesRevealed.has(p)) continue;
+          try {
+            const hc = await zkd.holeCards(sess.dealId, sess.seats[p]);
+            if (Number(hc[0]) !== 255) { sess.holesRevealed.add(p); explained = true; }
+          } catch (_) {}
+        }
+        if (explained) return "holes-resync";
         return await _revealFailed(room, state, tableId, sess, e, send, opts);
       }
     }
