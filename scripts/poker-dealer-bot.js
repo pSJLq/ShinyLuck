@@ -679,7 +679,13 @@ async function main() {
         else if (tag && tag.startsWith("strike:")) pushChat(t, "dealer", "A seat didn't respond to the deal and was sat out.", true);
       } catch (e) {
         console.error(`[poker-bot] table ${t} error:`, e.shortMessage || e.message);
-        tableBackoffUntil.set(t, Date.now() + 30_000); // don't spam a failing table every tick
+        // Don't spam a failing table every tick — but a mid-HAND pause is a
+        // visible freeze for the players (one transient RPC 502 used to stop
+        // reveals for 30s). A table with a live hand retries in 5s; only idle
+        // tables take the long cool-down.
+        const snap = SNAPS.get(t);
+        const live = !!(snap && snap.hand && snap.hand.inProgress);
+        tableBackoffUntil.set(t, Date.now() + (live ? 5_000 : 30_000));
       }
     }
 
