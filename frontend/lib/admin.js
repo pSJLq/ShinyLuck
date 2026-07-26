@@ -467,7 +467,12 @@ function bindActions() {
   // the edit is a SIGNED REQUEST rather than a transaction: no gas, instant.
   // The service re-derives the owner set from chain and accepts any of the same
   // three keys that open this console.
-  $("[data-sl-adm-if-list]") && bindInfofi(toast);
+  //
+  // Guarded: bindActions() is called before refreshAll() and before the 15s
+  // refresh interval is armed, so ANYTHING that throws in here takes the whole
+  // console down with it - the gate never runs and every owner sees ACCESS
+  // DENIED with both addresses blank. That is exactly what happened once.
+  try { bindInfofi(); } catch (e) { console.warn("[admin] infofi card:", e.message); }
 
   $("[data-sl-adm-pred-curated-toggle]")?.addEventListener("click", async () => {
     if (!isPredOwner) return ptoast("Connect the PREDICTIONS deployer account", "warn");
@@ -664,7 +669,11 @@ async function refreshInfofi() {
   ifPaint();
 }
 
-function bindInfofi(toast) {
+function bindInfofi() {
+  // Own toast: the one in bindActions is scoped INSIDE pokerWithdraw, so
+  // reaching for it from here is a ReferenceError.
+  const toast = (m, kind = "error") => import("./ui.js").then(({ toast: t }) => t(m, { kind, ttl: 6000 }));
+  if (!$("[data-sl-adm-if-list]")) return;
   document.querySelectorAll("[data-sl-adm-if-list]").forEach((b) => {
     b.addEventListener("click", () => {
       ifList = b.getAttribute("data-sl-adm-if-list");
