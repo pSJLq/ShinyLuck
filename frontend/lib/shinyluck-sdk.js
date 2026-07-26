@@ -123,7 +123,8 @@ const CASINO_ABI = [
   "function bonusModeUntil() view returns (uint256)",
   "function houseEdgeBps(uint8) view returns (uint256)",
   "function seedPoolStatus() view returns (uint256,uint256,uint256)",
-  "function minesState(uint256) view returns (uint8 mineCount,uint32 openedBitmap,uint32 minesBitmap,bool seedRevealed,bool busted)",
+  // (v14 minesState is defined once above — the stale v1 duplicate that used to
+  //  live here made the fragment ambiguous and could win with a wrong decode.)
   // events - per-bet
   "event BetPlaced(uint256 indexed betId,address indexed player,uint8 indexed game,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
   "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",

@@ -17,7 +17,7 @@ import {
   $, $$, setText, fmtSTTfromString, readStakeStr, injectKeyframes,
   setStagePill, setResultBanner, clearResultBanner, clearFairServer,
   populateFairPanel, refreshFairFromPlayer, refreshRecentEvents,
-  fmtSTT, casinoRO, SETTLE_POLL_MS, SETTLE_TIMEOUT_MS,
+  fmtSTT, casinoRO, minesRO, SETTLE_POLL_MS, SETTLE_TIMEOUT_MS,
   friendlyError, refreshEV,
 } from "./_base.js";
 import { validateStake } from "../errors.js";
@@ -124,18 +124,17 @@ function setMinesStatus(text) { setText("[data-sl-mines-status]", text); }
 // Poll minesState until the coordinator commits the layout root (was
 // seedRevealed in v1). Short-circuits on a refund.
 async function waitForRootCommit(betId) {
-  const c = casinoRO();
+  const c = minesRO();
   const start = Date.now();
   while (Date.now() - start < SETTLE_TIMEOUT_MS) {
     await new Promise((r) => setTimeout(r, SETTLE_POLL_MS));
     try {
-      const ms = await c.minesState(betId);
-      if (ms.layoutRoot && ms.layoutRoot !== ethers.ZeroHash) return { ok: true };
-    } catch (e) { console.warn("[mines] minesState read:", e.message); }
-    try {
-      const b = await c.getBet(betId);
-      if (Number(b.status) === 2) return { refunded: true };
-    } catch (_) {}
+      // v15: one read — the module's game record carries both the root and the
+      // status, so a refund short-circuits without a second call.
+      const g = await c.getGame(betId);
+      if (g.layoutRoot && g.layoutRoot !== ethers.ZeroHash) return { ok: true };
+      if (Number(g.status) === 2) return { refunded: true };
+    } catch (e) { console.warn("[mines] getGame read:", e.message); }
   }
   return null;
 }
@@ -236,11 +235,12 @@ function endRoundUI() {
 // After a bust, reveal the rest of the board once the coordinator finalizes
 // (MinesLayout carries the full bitmap). Best-effort, non-blocking.
 async function revealFullLayout(betId, clickedIdx) {
-  const c = casinoRO();
+  const c = minesRO();
   const start = Date.now();
   while (Date.now() - start < 12_000) {
     try {
-      const logs = await c.queryFilter(c.filters.MinesLayout(betId), -5000);
+      // Somnia caps eth_getLogs at 1000 blocks; -5000 always errored out.
+      const logs = await c.queryFilter(c.filters.MinesLayout(betId), -900);
       if (logs.length) {
         const bm = BigInt(logs[logs.length - 1].args.minesBitmap);
         for (let i = 0; i < TOTAL_CELLS; i++) if (bm & (1n << BigInt(i)) && i !== clickedIdx) showCell(i, "bomb", false);
@@ -254,12 +254,12 @@ async function revealFullLayout(betId, clickedIdx) {
 // Wait for the coordinator to resolve the pending pick. Returns
 // { safe, multX100 } | { bust } | { timeout }.
 async function waitForResolve(betId, idx) {
-  const c = casinoRO();
+  const c = minesRO();
   const start = Date.now();
   while (Date.now() - start < 25_000) {
     await new Promise((r) => setTimeout(r, 500));
     try {
-      const ms = await c.minesState(betId);
+      const ms = await c.getGame(betId);
       if (ms.busted) return { bust: true };
       const mask = 1n << BigInt(idx);
       if (BigInt(ms.openedBitmap) & mask) {
@@ -267,9 +267,8 @@ async function waitForResolve(betId, idx) {
         return { safe: true, opened: k };
       }
       // pendingCell cleared but neither opened nor busted → bet settled/refunded
-      if (Number(ms.pendingCell) === 0) {
-        const b = await c.getBet(betId);
-        if (Number(b.status) !== 0) return { bust: ms.busted };
+      if (Number(ms.pendingCell) === 0 && Number(ms.status) !== 0) {
+        return { bust: ms.busted };
       }
     } catch (e) { console.warn("[mines] resolve poll:", e.message); }
   }
@@ -353,15 +352,16 @@ async function onCashout() {
   cashoutBtn.disabled = true;
   cashoutBtn.textContent = "Cashing out…";
   try {
-    const tx = await SL.casino.cashoutMines(activeBetId);
-    const r = await tx.wait();
-    const events = (r.logs || []).map((l) => { try { return SL.casino.interface.parseLog(l); } catch { return null; } }).filter(Boolean);
+    const r = await SL.cashoutMines(activeBetId);
+    const mc = minesRO();
+    const events = (r.logs || []).map((l) => { try { return mc.interface.parseLog(l); } catch { return null; } }).filter(Boolean);
     const cash = events.find((p) => p.name === "MinesCashout");
     setStagePill("won", "CASHED OUT");
+    SL.autoClaim?.().catch(() => {});   // winnings straight to the wallet
     const payout = cash ? BigInt(cash.args.payout) : 0n;
     const profit = payout - activeStakeWei;
     setMinesStatus(`bet #${activeBetId} · cashed out @ ${(Number(cash?.args.multiplierX100 || 0n) / 100).toFixed(2)}×`);
-    setResultBanner({ won: true, txt: `<b>CASHED OUT</b> · + ${fmtSTT(profit)} STT`, txHash: tx.hash });
+    setResultBanner({ won: true, txt: `<b>CASHED OUT</b> · + ${fmtSTT(profit)} STT`, txHash: r.hash });
     endRoundUI();
   } catch (e) {
     console.error("[mines] cashout:", e);
@@ -390,15 +390,17 @@ async function tryRestoreActiveRound() {
   // cells were already opened (openedBitmap).
   if (!SL.address || activeBetId !== null) return;
   try {
-    const ids = await SL.casino.getPlayerBets(SL.address);
-    const tail = Array.from(ids).slice(-10).reverse();
-    for (const idStr of tail) {
-      const id = BigInt(idStr);
-      const b = await SL.casino.getBet(id);
-      if (Number(b.game) !== MINES) continue;
-      if (Number(b.status) !== 0) continue;
-      const ms = await SL.casino.minesState(id);
+    // v15: mines bet ids are local to the module, so walk it back from the tip
+    // and pick up this player's still-open game.
+    const mc = minesRO();
+    const total = Number(await mc.totalGames());
+    for (let n = total - 1; n >= Math.max(0, total - 40); n--) {
+      const id = BigInt(n);
+      const ms = await mc.getGame(id);
+      if (!ms.player || ms.player.toLowerCase() !== SL.address.toLowerCase()) continue;
+      if (Number(ms.status) !== 0) continue;
       if (!ms.layoutRoot || ms.layoutRoot === ethers.ZeroHash || ms.busted) continue;
+      const b = { amount: ms.amount, clientSeed: ms.clientSeed };
       activeBetId = id;
       activeStakeWei = BigInt(b.amount);
       mineCount = Number(ms.mineCount);

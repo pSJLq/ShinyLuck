@@ -295,6 +295,74 @@ async function main() {
     await Promise.all(workers);
   }
 
+  // ───────────────── PARALLEL CASHIERS ─────────────────
+  // Every hot-path call is permissionless EXCEPT the two mines authority calls
+  // (commitMinesRoot / resolveMinesCell — gated to owner/houseManager for the
+  // anti-peek guarantee). revealAndSettle, settle{Crash,Roulette}Round,
+  // refundExpired and finalizeMines are open to ANY sender: the contract gates
+  // them on the revealed seed hash, not msg.sender. A single sender is the
+  // throughput wall — one nonce lane means Somnia mines the house's settles in
+  // strict order and one stuck/reverting tx stalls everything behind it
+  // (measured at 50 players: p50 30s, 40% refunded). K independent cashier
+  // wallets = K nonce lanes mined in parallel. Cashier #0 is the owner itself,
+  // so an empty CASHIER_KEYS is byte-for-byte today's single-signer behaviour;
+  // owner-only calls always use ownerCashier.
+  const ownerCashier = {
+    address: signer.address, isOwner: true, wallet: signer,
+    async send(method, args = [], extra = {}) {
+      const nonce = await allocNonce();
+      try { return await casino[method](...args, { nonce, ...(await cachedFee()), ...extra }); }
+      catch (e) { await nonceResync(); throw e; }
+    },
+  };
+  function makeExtraCashier(pk) {
+    const w = new ethers.Wallet(pk, provider);
+    const cnx = casino.connect(w);
+    let n = null, lk = Promise.resolve();
+    const wl = (fn) => { const r = lk.then(fn, fn); lk = r.then(() => {}, () => {}); return r; };
+    const alloc = () => wl(async () => { if (n == null) n = await provider.getTransactionCount(w.address, "pending"); return n++; });
+    const resync = () => wl(async () => { n = await provider.getTransactionCount(w.address, "pending"); });
+    return {
+      address: w.address, isOwner: false, wallet: w,
+      async send(method, args = [], extra = {}) {
+        const nonce = await alloc();
+        try { return await cnx[method](...args, { nonce, ...(await cachedFee()), ...extra }); }
+        catch (e) { await resync(); throw e; }
+      },
+    };
+  }
+  const cashiers = [ownerCashier];
+  for (const k of (process.env.CASHIER_KEYS || "").split(",").map(s => s.trim()).filter(Boolean)) {
+    try { cashiers.push(makeExtraCashier(k)); } catch (e) { console.warn(`[reveal-bot] bad CASHIER_KEY: ${e.message}`); }
+  }
+  let _cashierRR = 0;
+  // round-robin over ALL cashiers — for permissionless sends only.
+  function anyCashier() { return cashiers[(_cashierRR++) % cashiers.length]; }
+  console.log(`[reveal-bot] cashiers=${cashiers.length}: ${cashiers.map(c => c.address.slice(0, 10)).join(" ")}`);
+
+  // Keep extra cashiers topped up with gas from the owner. A cashier that runs
+  // dry would silently drop every settle routed to it — the very refunds we
+  // added them to prevent.
+  const MIN_CASHIER_BAL = ethers.parseEther(process.env.MIN_CASHIER_BAL || "0.25");
+  const CASHIER_REFUEL  = ethers.parseEther(process.env.CASHIER_REFUEL  || "0.5");
+  async function refuelCashiers() {
+    for (const c of cashiers) {
+      if (c.isOwner) continue;
+      try {
+        const bal = await provider.getBalance(c.address);
+        if (bal >= MIN_CASHIER_BAL) continue;
+        const ownerBal = await provider.getBalance(signer.address);
+        if (ownerBal < CASHIER_REFUEL + ethers.parseEther("0.25")) { console.warn(`[reveal-bot] cashier refuel skipped — owner low (${ethers.formatEther(ownerBal)} STT)`); return; }
+        const nonce = await allocNonce();
+        const tx = await signer.sendTransaction({ to: c.address, value: CASHIER_REFUEL, nonce, ...(await cachedFee()) });
+        await tx.wait();
+        console.log(`[reveal-bot] refueled cashier ${c.address.slice(0, 10)} +${ethers.formatEther(CASHIER_REFUEL)} STT`);
+      } catch (e) { await nonceResync(); console.warn(`[reveal-bot] refuel ${c.address.slice(0, 10)}: ${e.shortMessage || e.message}`); }
+    }
+  }
+  setTimeout(() => { refuelCashiers().catch(() => {}); }, 5_000);
+  setInterval(() => { refuelCashiers().catch(() => {}); }, 60_000);
+
 
   // QUORUM VERIFIER activation: every Nth settled bet, ask the independent
   // 3-of-4 LLM committee (AgentQuorumVerifier) to re-derive the bet's keccak256
@@ -384,22 +452,30 @@ async function main() {
   // Post-game transparency: reveal the seed so the on-chain rebuild can prove
   // (or disprove) the committed root. Idempotent + best-effort.
   async function finalizeMinesGame(betId) {
+    const g0 = minesGames.get(betId);
+    if (g0 && g0._finalizing) return; // in-flight — the sweep fires every tick
+    if (g0) g0._finalizing = true;
     try {
-      const g = minesGames.get(betId) || (await loadMinesGame(betId));
+      const g = g0 || (await loadMinesGame(betId));
       if (!g || g.finalized) return;
       const ms = await casino.minesState(betId);
       if (ms.finalized) { g.finalized = true; return; }
       const bet = await casino.getBet(betId);
       if (Number(bet.status) === 0) return; // still live
-      const tx = await casino.finalizeMines(betId, g.serverSeed, { nonce: await allocNonce(), ...(await cachedFee()) });
+      const tx = await anyCashier().send("finalizeMines", [betId, g.serverSeed]);
       await tx.wait();
       g.finalized = true;
       console.log(`[reveal-bot] MINES finalize bet ${betId} tx=${tx.hash}`);
     } catch (e) {
       const msg = e.shortMessage || e.message;
       await nonceResync();
+      // Already finalized on chain (a racing tick won, or our read lagged):
+      // mark it locally so the sweep stops retrying.
+      if (/finalized/i.test(msg)) { const g = minesGames.get(betId); if (g) g.finalized = true; }
       if (!/nonce|replacement|already known|finalized|game still open/i.test(msg))
         console.warn(`[reveal-bot] MINES finalize ${betId}: ${msg}`);
+    } finally {
+      const g = minesGames.get(betId); if (g) g._finalizing = false;
     }
   }
 
@@ -805,7 +881,23 @@ async function main() {
         dueJobs.push(async () => {
           inflight.add(betId);
           try {
-            const tx = await casino.refundExpired(betId, { nonce: await allocNonce(), ...(await cachedFee()) });
+            // MINES: once the root is committed the layout entropy is LOCKED, so
+            // the game is a live, player-driven board no matter how far the
+            // commitBlock has aged past the ~26s blockhash window. refundExpired
+            // here would settle an in-progress bet and the player's very next
+            // pick reverts BetAlreadySettled ("squares stop opening"). Only a
+            // mines bet whose root was NEVER committed is genuinely expired; a
+            // committed one is handed back to the pick-driven flow instead.
+            if (info.game === 3) {
+              const ms = await casino.minesState(betId);
+              if (ms.layoutRoot !== ethers.ZeroHash) {
+                const bet = await casino.getBet(betId);
+                if (Number(bet.status) === 0) { await loadMinesGame(betId); resolveMinesPick(betId).catch(() => {}); }
+                pending.delete(betId);
+                return;
+              }
+            }
+            const tx = await anyCashier().send("refundExpired", [betId]);
             await tx.wait();
             console.log(`[reveal-bot] refunded expired bet ${betId} tx=${tx.hash}`);
           } catch (e) {
@@ -832,12 +924,12 @@ async function main() {
         dueJobs.push(async () => {
         inflight.add(betId);
         try {
-          const opts = { nonce: await allocNonce(), ...(await cachedFee()) };
           let tx;
           if (info.game === 3) {
             // Hidden-layout Mines: derive the layout from the revealed seed and
             // commit only its Merkle root. The player drives the game with
             // pickMinesCell; the pick watcher resolves each cell (see above).
+            // commitMinesRoot is owner/houseManager-gated → owner cashier only.
             const bet = await casino.getBet(betId);
             const ms = await casino.minesState(betId);
             if (ms.layoutRoot !== ethers.ZeroHash) {
@@ -854,9 +946,10 @@ async function main() {
               betId, serverSeed: seed, clientSeed: bet.clientSeed, entropyHash,
               nonce: bet.nonce, mineCount: Number(ms.mineCount),
             });
-            tx = await casino.commitMinesRoot(betId, tree.root, opts);
+            tx = await ownerCashier.send("commitMinesRoot", [betId, tree.root]);
           } else {
-            tx = await casino.revealAndSettle(betId, seed, opts);
+            // revealAndSettle is permissionless → spread across all cashiers.
+            tx = await anyCashier().send("revealAndSettle", [betId, seed]);
           }
           await tx.wait();
           console.log(`[reveal-bot] ${action} bet ${betId} tx=${tx.hash}`);
@@ -948,7 +1041,7 @@ async function main() {
           // No tx.wait(): submit and move on so a backlog can't blow the
           // ~28s window. Optimistically drop from pending; if the tx fails
           // the cold-start scan re-adds the round next sweep.
-          const tx = await casino[fn](info.roundId, seed);
+          const tx = await anyCashier().send(fn, [info.roundId, seed]);
           console.log(`[reveal-bot] settle ${info.kind} round ${info.roundId} submitted tx=${tx.hash} (age=${age})`);
           pendingRounds.delete(key); roundSettleBackoff.delete(key);
           continue;
@@ -1024,7 +1117,7 @@ async function main() {
               const seed = seedStore.get(Number(round.seedIdx));
               if (seed) {
                 const settleFn = gameLabel === "crash" ? "settleCrashRound" : "settleRouletteRound";
-                const tx = await sendVia(casino, settleFn, [id, seed]);
+                const tx = await anyCashier().send(settleFn, [id, seed]);
                 await tx.wait();
                 console.log(`[reveal-bot] keepalive settle ${gameLabel} round ${id} (age=${age}) tx=${tx.hash}`);
               }
@@ -1045,7 +1138,7 @@ async function main() {
         try {
           if (round && !round.settled && Number(round.betWindowEnd) > 0 &&
               nowSec - Number(round.betWindowEnd) > ROUND_TIMEOUT_S) {
-            const tx = await casino[refundFn](id);
+            const tx = await anyCashier().send(refundFn, [id]);
             await tx.wait();
             console.log(`[reveal-bot] self-heal: refunded stuck ${gameLabel} round ${id} tx=${tx.hash}`);
           }
@@ -1076,7 +1169,7 @@ async function main() {
         if (Date.now() < seedEmptyBackoffUntil) return; // empty-pool backoff: don't storm startRound
         try {
           const startFn = gameLabel === "crash" ? "startCrashRound" : "startRouletteRound";
-          const tx = await casino[startFn]();
+          const tx = await ownerCashier.send(startFn, []);
           await tx.wait();
           console.log(`[reveal-bot] opened new ${gameLabel} round tx=${tx.hash}`);
         } catch (e) {
@@ -1298,7 +1391,7 @@ async function main() {
     const seed = seedStore.get(Number(r.seedIdx));
     if (!seed) return;
     try {
-      const tx = await sendVia(casino, settleFn, [id, seed]);   // no await wait(): stay snappy
+      const tx = await anyCashier().send(settleFn, [id, seed]);   // no await wait(): stay snappy
       console.log(`[reveal-bot] fast-settle ${label} round ${id} tx=${tx.hash} (age=${age})`);
     } catch (e) {
       const msg = e.shortMessage || e.message;

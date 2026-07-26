@@ -8,6 +8,13 @@
 import { ethers } from "/vendor/ethers.bundle.js";
 import { CONFIG } from "./config.js";
 import { provider, wsProvider, fetchLogs, fetchDeploymentBlock } from "./rpc.js";
+import { vaultAddress, deploymentBlock as v15DeployBlock } from "./casino-sources.js";
+
+// The live casino is the v15 Vault. `CONFIG.casino` is the frozen v14
+// monolith, and its BetSettled takes `uint8 indexed game` where v15 takes
+// `uint16 indexed gameId` — different topic0, so the old ABI matched nothing
+// here and the page sat on "no settled bets in window yet" forever.
+const VAULT_ADDR = vaultAddress();
 
 const GAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.LAB"];
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -36,8 +43,8 @@ function readQueryBetId() {
 }
 
 const casinoAbi = [
-  "event BetPlaced(uint256 indexed betId,address indexed player,uint8 indexed game,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
-  "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
+  "event BetPlaced(uint256 indexed betId,address indexed player,uint16 indexed gameId,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
+  "event BetSettled(uint256 indexed betId,address indexed player,uint16 indexed gameId,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
   "function seedHashes(uint256) view returns (bytes32)",
 ];
 const verifAbi = [
@@ -127,7 +134,7 @@ function buildReceiptJSON(settledEv) {
     txHash:      settledEv.transactionHash,
     blockNumber: settledEv.blockNumber,
     network:     CONFIG.network,
-    casino:      CONFIG.casino,
+    casino:      VAULT_ADDR,
   }, null, 2);
 }
 
@@ -156,13 +163,13 @@ nonce:      ${a.nonce.toString()}`;
 }
 
 async function refresh() {
-  if (!CONFIG.casino || CONFIG.casino === ZERO) return;
-  const dep = await fetchDeploymentBlock();
+  if (!VAULT_ADDR || VAULT_ADDR === ZERO) return;
   const head = await provider().getBlockNumber();
-  // Clamp to contract age - never scan blocks before deploy.
+  // Clamp to the Vault's own age - never scan blocks before it existed.
+  const dep = v15DeployBlock();
   const fromBlock = dep > 0 ? Math.max(dep, head - LOOKBACK) : (head - LOOKBACK);
 
-  const casino = new ethers.Contract(CONFIG.casino, casinoAbi, provider());
+  const casino = new ethers.Contract(VAULT_ADDR, casinoAbi, provider());
   const queryBet = readQueryBetId();
 
   let target = null;
@@ -243,11 +250,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (ws) {
       try {
         const casinoAbi = [
-          "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)"
+          "event BetSettled(uint256 indexed betId,address indexed player,uint16 indexed gameId,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)"
         ];
-        const c = new ethers.Contract(CONFIG.casino, casinoAbi, ws);
+        const c = new ethers.Contract(VAULT_ADDR, casinoAbi, ws);
         const settledTopic = c.interface.getEvent("BetSettled").topicHash;
-        ws.on({ address: CONFIG.casino, topics: [settledTopic] }, () => {
+        ws.on({ address: VAULT_ADDR, topics: [settledTopic] }, () => {
           // Cheap: just re-run refresh() which will pick up the latest
           // settled (it sorts by blockNumber desc and grabs [0]).
           refresh().catch(() => {});

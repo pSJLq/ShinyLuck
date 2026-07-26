@@ -16,10 +16,11 @@
 import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect } from "../wallet.js";
 import { CONFIG } from "../config.js";
+import { CONFIG_V15 } from "../config-v15.js";
 import { provider, fetchRecentLogs } from "../rpc.js";
 import {
   $, $$, setText, populateFairPanel, clearFairServer, friendlyError,
-  pollForSettle, fmtSTT,
+  pollForSpinSettle, fmtSTT,
 } from "./_base.js";
 import { validateStake } from "../errors.js";
 
@@ -140,13 +141,11 @@ function highlightClusters(symbolIds) {
 let _casinoRO = null;
 function casinoRO() {
   if (!_casinoRO) {
-    const abi = [
-      "function freeSpinsAvailable(address) view returns (uint256)",
+    // v15: loyalty counters live in the shared SlotLoyalty contract.
+    _casinoRO = new ethers.Contract(CONFIG_V15.addresses.loyalty, [
+      "function available(address) view returns (uint256)",
       "function getPlayerSlotState(address) view returns (uint64 total,uint64 earned,uint64 used,uint256 toNext)",
-      "function gameMaxBet(uint8) view returns (uint256)",
-      "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
-    ];
-    _casinoRO = new ethers.Contract(CONFIG.casino, abi, provider());
+    ], provider());
   }
   return _casinoRO;
 }
@@ -161,7 +160,7 @@ async function refreshLoyalty() {
   try {
     const c = casinoRO();
     const [free, [tot, earned, used, toNext]] = await Promise.all([
-      c.freeSpinsAvailable(SL.address),
+      c.available(SL.address),
       c.getPlayerSlotState(SL.address),
     ]);
     lastFreeSpinsAvailable = Number(free);
@@ -268,19 +267,9 @@ async function doSpin() {
   updateUI();
   try {
     await connect();
-    const cs = ethers.hexlify(ethers.randomBytes(32));
-    const tx = wantFree
-      ? await SL.casino.placeClusterBet(cs, true, { value: 0 })
-      : await SL.casino.placeClusterBet(cs, false, { value: ethers.parseEther(stake.toFixed(6)) });
-    const rcpt = await tx.wait();
-    let betId;
-    for (const log of rcpt.logs) {
-      try {
-        const p = SL.casino.interface.parseLog(log);
-        if (p && p.name === "BetPlaced") { betId = p.args.betId; break; }
-      } catch (_) {}
-    }
-    populateFairPanel({ clientSeed: cs, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash: tx.hash });
+    // v15: SUGAR.LAB is its own module contract; the SDK resolves the betId.
+    const { betId, txHash, clientSeed: cs } = await SL.placeCluster(stake.toFixed(6), wantFree);
+    populateFairPanel({ clientSeed: cs, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash });
 
     // Quick "spinning" animation: shuffle the grid randomly while we wait.
     const shuffleHandle = setInterval(() => {
@@ -288,7 +277,7 @@ async function doSpin() {
       setGrid(placeholder);
     }, 100);
 
-    const settled = await pollForSettle(betId);
+    const settled = await pollForSpinSettle("cluster", betId);
     clearInterval(shuffleHandle);
     if (!settled || settled.refunded) {
       setText("#lastWin", settled?.refunded ? "- refunded" : "- timed out");

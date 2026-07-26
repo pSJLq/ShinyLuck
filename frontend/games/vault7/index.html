@@ -88,7 +88,7 @@
 <script type="module">
   import { Vault7Slot } from '/games/vault7/api.js?v=fast1';
   import { SL } from '/lib/wallet.js';
-  import { decodeVault7Result } from '/lib/slot-decoders.js';
+  import { decodeVault7Result, syncPayBoosts } from '/lib/slot-decoders.js';
   import { CONFIG } from '/lib/config.js';
   import { clampStake } from '/lib/casino-limits.js';
   import { toast } from '/lib/ui.js';
@@ -192,7 +192,8 @@
           const placeMs = performance.now() - t2;
 
           const t3 = performance.now();
-          const settled = await SL.waitForSettle(placeRes.betId);
+          const settled = await SL.waitForSpinSettle("vault7", placeRes.betId);
+          SL.autoClaim().catch(() => {});   // winnings straight to the wallet
           const waitMs = performance.now() - t3;
 
           const totalMs = performance.now() - tStart;
@@ -216,7 +217,8 @@
           }
           const stake = await clampOrToast(stakeWei, 'slots');
           const placeRes = await SL.buyBonusVault7(Number(stake) / 1e18);
-          const settled = await SL.waitForSettle(placeRes.betId);
+          const settled = await SL.waitForSpinSettle("vault7", placeRes.betId);
+          SL.autoClaim().catch(() => {});   // winnings straight to the wallet
           updateFairPanel(settled, placeRes.betId);
           const result = decodeVault7Result({ settled, stakeWei: stake, isBuyBonus: true });
           // Buy-bonus awards the free-spin credits on-chain - read the real
@@ -240,6 +242,9 @@
       // RtpAdjusted so the hero figure is the real on-chain value, not a
       // baked-in 92%. Mirrors the Sugar page.
       async function refreshRtp() {
+        // Same moment is the right one to pull the live pay boost, so the
+        // per-line payout labels match what the chain actually credited.
+        syncPayBoosts(SL);
         try {
           const rtp = await SL.casino.getReportedRTP(2);
           if (!rtp) return;

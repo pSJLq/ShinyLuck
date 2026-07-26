@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShinyLuck v15 — test bench</title>
+<style>
+  :root { --bg:#0b0b0d; --card:#141418; --line:#26262e; --gold:#d4af37; --txt:#e8e8ea; --dim:#8b8b96; --ok:#3fbf6a; --bad:#e2564d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; padding:20px; }
+  h1 { font-size:20px; margin:0 0 4px; color:var(--gold); letter-spacing:.5px; }
+  .sub { color:var(--dim); margin-bottom:18px; font-size:13px; }
+  .bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:18px; padding:12px; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .card h2 { font-size:14px; margin:0 0 10px; color:var(--gold); text-transform:uppercase; letter-spacing:.6px; }
+  button { background:var(--gold); color:#111; border:0; border-radius:7px; padding:8px 13px; font-weight:600; cursor:pointer; font-size:13px; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button.sec { background:#2a2a33; color:var(--txt); }
+  input, select { background:#0e0e12; border:1px solid var(--line); color:var(--txt); border-radius:7px; padding:7px 9px; font-size:13px; width:100%; }
+  label { display:block; font-size:11px; color:var(--dim); margin:8px 0 3px; text-transform:uppercase; letter-spacing:.4px; }
+  .row { display:flex; gap:8px; align-items:flex-end; }
+  .row > * { flex:1; }
+  .out { margin-top:10px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; white-space:pre-wrap; word-break:break-word; color:var(--dim); max-height:190px; overflow:auto; border-top:1px solid var(--line); padding-top:8px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  #log { margin-top:18px; }
+  .board { display:grid; grid-template-columns:repeat(5,1fr); gap:5px; margin-top:8px; }
+  .cell { aspect-ratio:1; background:#0e0e12; border:1px solid var(--line); border-radius:6px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:16px; }
+  .cell.open { background:#16301f; border-color:var(--ok); }
+  .cell.mine { background:#311715; border-color:var(--bad); }
+  code { color:var(--gold); }
+</style>
+</head>
+<body>
+<h1>ShinyLuck v15 — test bench</h1>
+<div class="sub">Modular casino: one permanent Vault + a contract per game. This page exercises every game end to end against the live chain.</div>
+
+<div class="bar">
+  <button id="connect">Connect wallet</button>
+  <span id="who" class="sub" style="margin:0"></span>
+  <span id="bal" class="sub" style="margin:0"></span>
+  <button id="claim" class="sec">Claim winnings</button>
+  <button id="refresh" class="sec">Refresh</button>
+</div>
+
+<div class="grid" id="games"></div>
+<div class="card" id="log"><h2>Log</h2><div class="out" id="logout">ready.</div></div>
+
+<script type="module">
+import { ethers } from "/vendor/ethers.bundle.js";
+import { CONFIG_V15 } from "../lib/config-v15.js";
+import { ShinyLuckV15, ROULETTE_KIND } from "../lib/shinyluck-sdk-v15.js";
+import { SL as V14, connect as walletConnect } from "../lib/wallet.js";
+
+const logEl = document.getElementById("logout");
+const log = (m, cls = "") => {
+  const t = new Date().toLocaleTimeString();
+  logEl.innerHTML = `<span class="${cls}">[${t}] ${m}</span>\n` + logEl.innerHTML;
+};
+
+// The v15 manifest is written by scripts/deploy-v15.js. Games come from it, so
+// a game added later shows up here with no code change.
+const manifest = { addresses: CONFIG_V15.addresses, games: CONFIG_V15.games };
+let SL = new ShinyLuckV15({ manifest });
+
+// Reuse the site's existing Privy sign-in, then hand the same signer/provider
+// to the v15 SDK (identical wiring to wallet.js's v14 path).
+document.getElementById("connect").onclick = async () => {
+  try {
+    log("connecting…");
+    await walletConnect();
+    SL.provider = V14.provider;
+    SL.signer = V14.signer;
+    SL.address = V14.address;
+    SL._rebuildContracts();
+    document.getElementById("who").textContent = SL.address;
+    log("connected " + SL.address, "ok");
+    await refresh();
+  } catch (e) { log("connect failed: " + (e.shortMessage || e.message), "bad"); }
+};
+
+async function refresh() {
+  try {
+    if (!SL.address) return;
+    const [pending, free] = await Promise.all([SL.getPendingWithdrawal(), SL.freeBankroll()]);
+    document.getElementById("bal").textContent =
+      `claimable ${(+ethers.formatEther(pending)).toFixed(5)} · bankroll ${(+ethers.formatEther(free)).toFixed(3)}`;
+  } catch (e) { log("refresh: " + e.message, "bad"); }
+}
+document.getElementById("refresh").onclick = refresh;
+document.getElementById("claim").onclick = async () => {
+  try { log("claiming…"); await SL.claim(); log("claimed", "ok"); await refresh(); }
+  catch (e) { log("claim: " + (e.shortMessage || e.message), "bad"); }
+};
+
+const has = (n) => CONFIG_V15.games.some((g) => g.name === n);
+const card = (title, html) => {
+  const d = document.createElement("div");
+  d.className = "card";
+  d.innerHTML = `<h2>${title}</h2>${html}<div class="out"></div>`;
+  document.getElementById("games").appendChild(d);
+  return { el: d, out: d.querySelector(".out") };
+};
+const say = (c, m, cls = "") => { c.out.innerHTML = `<span class="${cls}">${m}</span>\n` + c.out.innerHTML; };
+
+// ── DICE ────────────────────────────────────────────────────────────────
+if (has("dice")) {
+  const c = card("Dice", `
+    <label>Stake (STT)</label><input id="d-stake" value="0.01">
+    <div class="row"><div><label>Target 2-98</label><input id="d-target" value="50"></div>
+    <div><label>Direction</label><select id="d-over"><option value="false">under</option><option value="true">over</option></select></div></div>
+    <div style="margin-top:10px"><button id="d-go">Roll</button></div>`);
+  document.getElementById("d-go").onclick = async () => {
+    try {
+      say(c, "placing…");
+      const { betId } = await SL.placeDice(+document.getElementById("d-target").value,
+        document.getElementById("d-over").value === "true", document.getElementById("d-stake").value);
+      say(c, `bet #${betId} placed, waiting for the bot…`);
+      const b = await SL.waitForSettle(betId);
+      const roll = (BigInt(b.randomness) % 100n) + 1n;   // same recipe as DiceModule
+      say(c, `roll ${roll} · ${b.won ? "WON" : "lost"} · payout ${ethers.formatEther(b.payout)} STT`, b.won ? "ok" : "");
+      await refresh();
+    } catch (e) { say(c, "err: " + (e.shortMessage || e.message), "bad"); }
+  };
+}
+
+// ── PLINKO ──────────────────────────────────────────────────────────────
+if (has("plinko")) {
+  const c = card("Plinko", `
+    <label>Stake (STT)</label><input id="p-stake" value="0.01">
+    <label>Risk</label><select id="p-risk"><option value="0">low</option><option value="1">mid</option><option value="2">high</option></select>
+    <div style="margin-top:10px"><button id="p-go">Drop</button></div>`);
+  document.getElementById("p-go").onclick = async () => {
+    try {
+      say(c, "placing…");
+      const { betId } = await SL.placePlinko(+document.getElementById("p-risk").value, document.getElementById("p-stake").value);
+      say(c, `bet #${betId} placed…`);
+      const b = await SL.waitForSettle(betId);
+      say(c, `${b.won ? "WON" : "lost"} · payout ${ethers.formatEther(b.payout)} STT`, b.won ? "ok" : "");
+      await refresh();
+    } catch (e) { say(c, "err: " + (e.shortMessage || e.message), "bad"); }
+  };
+}
+
+// ── SLOTS ───────────────────────────────────────────────────────────────
+for (const [name, title] of [["vault7", "VAULT.7 (slots)"], ["cluster", "SUGAR.LAB (cluster)"]]) {
+  if (!has(name)) continue;
+  const c = card(title, `
+    <label>Stake (STT)</label><input id="${name}-stake" value="0.01">
+    <div style="margin-top:10px"><button id="${name}-go">Spin</button>
+    <button id="${name}-free" class="sec">Free spin</button></div>`);
+  const spin = async (free) => {
+    try {
+      say(c, free ? "free spin…" : "spinning…");
+      const { betId } = name === "vault7"
+        ? await SL.placeSlots(document.getElementById(`${name}-stake`).value, free)
+        : await SL.placeCluster(document.getElementById(`${name}-stake`).value, free);
+      say(c, `spin #${betId} placed…`);
+      const s = await SL.waitForSpinSettle(name, betId);
+      say(c, `payout ${ethers.formatEther(s.payout)} STT`, s.payout > 0n ? "ok" : "");
+      const fs = await SL.freeSpinsAvailable();
+      say(c, `free spins available: ${fs}`);
+      await refresh();
+    } catch (e) { say(c, "err: " + (e.shortMessage || e.message), "bad"); }
+  };
+  document.getElementById(`${name}-go`).onclick = () => spin(false);
+  document.getElementById(`${name}-free`).onclick = () => spin(true);
+}
+
+// ── MINES ───────────────────────────────────────────────────────────────
+if (has("mines")) {
+  const c = card("Mines", `
+    <div class="row"><div><label>Stake (STT)</label><input id="m-stake" value="0.01"></div>
+    <div><label>Mines 1-24</label><input id="m-count" value="3"></div></div>
+    <div style="margin-top:10px"><button id="m-go">New game</button>
+    <button id="m-cash" class="sec" disabled>Cash out</button></div>
+    <div class="board" id="m-board"></div>`);
+  let betId = null;
+  const board = document.getElementById("m-board");
+  const draw = (opened = 0, mines = null) => {
+    board.innerHTML = "";
+    for (let i = 0; i < 25; i++) {
+      const d = document.createElement("div");
+      d.className = "cell";
+      const isOpen = (opened >> i) & 1;
+      if (isOpen) { d.classList.add("open"); d.textContent = "◆"; }
+      if (mines !== null && ((mines >> i) & 1)) { d.classList.add("mine"); d.textContent = "✳"; }
+      d.onclick = () => pick(i);
+      board.appendChild(d);
+    }
+  };
+  draw();
+  const pick = async (i) => {
+    if (betId === null) return say(c, "start a game first");
+    try {
+      say(c, `picking cell ${i}…`);
+      await SL.pickMines(betId, i);
+      const g = await SL.waitForMinesPick(betId);
+      draw(Number(g.openedBitmap));
+      if (g.busted) {
+        say(c, "BOOM — hit a mine", "bad");
+        document.getElementById("m-cash").disabled = true;
+        betId = null;
+      } else { say(c, `safe · opened ${Number(g.openedBitmap).toString(2).split("1").length - 1}`, "ok"); }
+      await refresh();
+    } catch (e) { say(c, "err: " + (e.shortMessage || e.message), "bad"); }
+  };
+  document.getElementById("m-go").onclick = async () => {
+    try {
+      say(c, "placing…");
+      const r = await SL.placeMines(+document.getElementById("m-count").value, document.getElementById("m-stake").value);
+      betId = r.betId;
+      say(c, `game #${betId} placed, waiting for the layout root…`);
+      await SL.waitForMinesRoot(betId);
+      say(c, "root committed — click cells", "ok");
+      draw();
+      document.getElementById("m-cash").disabled = false;
+    } catch (e) { say(c, "err: " + (e.shortMessage || e.message), "bad"); }
+  };
+  document.getElementById("m-cash").onclick = async () => {
+    try {
+      await SL.cashoutMines(betId);
+      say(c, "cashed out", "ok");
+      document.getElementById("m-cash").disabled = true;
+      betId = null;
+      await refresh();
+    } catch (e) { say(c, "err: " + (e.shortMessage || e.message), "bad"); }
+  };
+}
+
+// ── CRASH ───────────────────────────────────────────────────────────────
+if (has("crash")) {
+  const c = card("Crash", `
+    <div class="row"><div><label>Stake (STT)</label><input id="c-stake" value="0.01"></div>
+    <div><label>Auto cashout ×</label><input id="c-auto" value="2.0"></div></div>
+    <div style="margin-top:10px"><button id="c-go">Bet this round</button></div>`);
+  document.getElementById("c-go").onclick = async () => {
+    try {
+      say(c, "opening/joining a round…");
+      await SL.placeCrash(document.getElementById("c-auto").value, document.getElementById("c-stake").value);
+      const rid = Number(await SL.crash().currentRoundId());
+      say(c, `in round ${rid} — waiting for settle…`);
+      const t0 = Date.now();
+      while (Date.now() - t0 < 90_000) {
+        const r = await SL.crash().getRound(rid);
+        if (r.settled) { say(c, `crashed at ${(Number(r.crashPointX100) / 100).toFixed(2)}×`, "ok"); break; }
+        await new Promise((x) => setTimeout(x, 700));
+      }
+      await refresh();
+    } catch (e) { say(c, "err: " + (e.shortMessage || e.message), "bad"); }
+  };
+}
+
+// ── ROULETTE ────────────────────────────────────────────────────────────
+if (has("roulette")) {
+  const c = card("Roulette", `
+    <label>Stake (STT)</label><input id="r-stake" value="0.01">
+    <label>Bet</label><select id="r-kind">
+      <option value="1">RED</option><option value="2">BLACK</option>
+      <option value="3">EVEN</option><option value="4">ODD</option>
+      <option value="5">LOW 1-18</option><option value="6">HIGH 19-36</option>
+      <option value="7">DOZEN 1</option><option value="0">STRAIGHT 17</option></select>
+    <div style="margin-top:10px"><button id="r-go">Spin the wheel</button></div>`);
+  document.getElementById("r-go").onclick = async () => {
+    try {
+      const kind = +document.getElementById("r-kind").value;
+      say(c, "opening/joining a round…");
+      await SL.placeRoulette([{ kind, number: 17, amount: document.getElementById("r-stake").value }]);
+      const rid = Number(await SL.roulette().currentRoundId());
+      say(c, `in round ${rid} — waiting for settle…`);
+      const t0 = Date.now();
+      while (Date.now() - t0 < 90_000) {
+        const r = await SL.roulette().getRound(rid);
+        if (r.settled) {
+          const n = Number(r.resultNumber);
+          say(c, `result: ${n === 37 ? "00" : n}`, "ok");
+          break;
+        }
+        await new Promise((x) => setTimeout(x, 700));
+      }
+      await refresh();
+    } catch (e) { say(c, "err: " + (e.shortMessage || e.message), "bad"); }
+  };
+}
+
+log(`loaded ${CONFIG_V15.games.length} games from the registry · vault ${CONFIG_V15.addresses.vault}`);
+</script>
+</body>
+</html>

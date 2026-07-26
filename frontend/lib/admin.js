@@ -10,6 +10,9 @@ import { SL, connect, shortAddr } from "./wallet.js";
 import { CONFIG } from "./config.js";
 import { provider, fetchLogs, fetchRecentLogs, fetchDeploymentBlock } from "./rpc.js";
 import { POKER_CONFIG } from "/poker/poker-config.js";
+import { vaultAddress, moduleOf } from "./casino-sources.js";
+
+const VAULT_ADDR = vaultAddress();
 
 // Poker rake + tournament fees live on contracts owned by the POKER deployer
 // key (a different account than the casino owner), so the console gates on
@@ -62,32 +65,43 @@ const GAME_NAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.
 const ZERO = "0x0000000000000000000000000000000000000000";
 const LOOKBACK = 20_000;
 
+// v15 CasinoVault. The v14 monolith is frozen, and its owner is a DIFFERENT
+// key — gating this panel on it locked the real owner out with ACCESS DENIED
+// while every control pointed at a contract nobody plays on.
+//
+// Gone in v15 (agent layer dropped, per-game logic moved into modules):
+//   lockedReserve, bonusMode*, gamePaused/pauseGame/unpauseGame,
+//   {roulette,crash}BetWindow  (bet windows now live on their own modules).
+// New here: per-game active flag + per-game budget (the blast-radius cap), and
+// the seed pool, which stops every game when it runs dry.
 const ADMIN_ABI = [
   "function owner() view returns (address)",
   "function freeBankroll() view returns (uint256)",
-  "function lockedReserve() view returns (uint256)",
   "function totalPendingWithdrawals() view returns (uint256)",
-  "function bonusModeActive() view returns (bool)",
-  "function bonusModeUntil() view returns (uint256)",
   "function ownerWithdrawal() view returns (uint128 amount,uint64 readyAt)",
-  "function gameMaxBet(uint8) view returns (uint256)",
-  "function gamePaused(uint8) view returns (bool)",
-  "function pauseGame(uint8) external",
-  "function unpauseGame(uint8) external",
-  "function setGameMaxBet(uint8,uint256) external",
-  "function rouletteBetWindow() view returns (uint256)",
-  "function crashBetWindow() view returns (uint256)",
-  "function setRouletteBetWindow(uint256) external",
-  "function setCrashBetWindow(uint256) external",
-  "function activateBonusMode(uint256 durationMinutes,string reasoning) external",
+  "function paused() view returns (bool)",
+  "function maxBetBps() view returns (uint256)",
+  "function maxExposureBps() view returns (uint256)",
+  "function gameMaxBet(uint16) view returns (uint256)",
+  "function gameActive(uint16) view returns (bool)",
+  "function gameBudget(uint16) view returns (uint256)",
+  "function gameNet(uint16) view returns (int256)",
+  "function seedPoolStatus() view returns (uint256 total,uint256 consumed,uint256 available)",
+  "function setGameActive(uint16,bool) external",
+  "function setGameMaxBet(uint16,uint256) external",
+  "function setGameBudget(uint16,uint256) external",
+  "function setMaxBetBps(uint256) external",
+  "function setMaxExposureBps(uint256) external",
+  "function pauseAll() external",
+  "function unpauseAll() external",
+  "function provisionSeedHashes(bytes32[] hashes) external",
   "function scheduleOwnerWithdraw(uint256 amount) external",
   "function executeOwnerWithdraw() external",
   "function cancelOwnerWithdraw() external",
   "function depositBankroll() payable",
-  "event BetPlaced(uint256 indexed betId,address indexed player,uint8 indexed game,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
-  "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
-  "event ReasoningLog(string thought,uint256 timestamp)",
-  "event AgentRegistered(address indexed player,address indexed vault,bytes32 strategyHash,uint256 dailyLimit,uint256 totalLimit,uint8 allowedGamesMask)",
+  "event BetPlaced(uint256 indexed betId,address indexed player,uint16 indexed gameId,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
+  "event BetSettled(uint256 indexed betId,address indexed player,uint16 indexed gameId,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
+  "event PayoutClamped(uint256 indexed betId,uint256 requested,uint256 credited,string reason)",
 ];
 
 const REGISTRY_ABI = [
@@ -112,7 +126,7 @@ function fmtSTT(wei) {
 }
 
 function casino() {
-  if (!casinoRO) casinoRO = new ethers.Contract(CONFIG.casino, ADMIN_ABI, provider());
+  if (!casinoRO) casinoRO = new ethers.Contract(VAULT_ADDR, ADMIN_ABI, provider());
   return casinoRO;
 }
 function registry() {
@@ -122,12 +136,28 @@ function registry() {
   return registryRO;
 }
 
+// Crash and Roulette own their own bet window in v15 (it left the monolith
+// along with the rest of each game's logic).
+const ROUND_ADMIN_ABI = [
+  "function betWindow() view returns (uint256)",
+  "function setBetWindow(uint256 secs) external",
+];
+const _roundMods = {};
+function roundModule(name) {
+  if (!_roundMods[name]) {
+    const addr = moduleOf(name);
+    if (!addr) throw new Error(`v15 module not configured: ${name}`);
+    _roundMods[name] = new ethers.Contract(addr, ROUND_ADMIN_ABI, provider());
+  }
+  return _roundMods[name];
+}
+
 function withSigner(c) {
   return SL.signer ? c.connect(SL.signer) : c;
 }
 
 async function gateAccess() {
-  if (!CONFIG.casino || CONFIG.casino === ZERO) return;
+  if (!VAULT_ADDR || VAULT_ADDR === ZERO) return;
   if (!casinoOwner) {
     try { casinoOwner = (await casino().owner()).toLowerCase(); }
     catch (e) { console.warn("[admin] owner read:", e.message); return; }
@@ -160,15 +190,17 @@ async function refreshTreasury() {
   if (!isOwner) return;
   const c = casino();
   try {
-    const [bankroll, reserve, pending, contractBal, pw] = await Promise.all([
+    const [bankroll, seeds, pending, contractBal, pw] = await Promise.all([
       c.freeBankroll(),
-      c.lockedReserve(),
+      c.seedPoolStatus(),
       c.totalPendingWithdrawals(),
-      provider().getBalance(CONFIG.casino),
+      provider().getBalance(VAULT_ADDR),
       c.ownerWithdrawal(),
     ]);
     $("[data-sl-adm-bankroll]").textContent = fmtSTT(bankroll);
-    $("[data-sl-adm-reserve]").textContent  = fmtSTT(reserve);
+    // v15 has no lockedReserve. The seed pool is the number that actually
+    // stops the casino, so it takes that slot: bets revert once it hits 0.
+    $("[data-sl-adm-reserve]").textContent  = `${seeds.available} seeds`;
     $("[data-sl-adm-pending]").textContent  = fmtSTT(pending);
     $("[data-sl-adm-balance]").textContent  = fmtSTT(contractBal);
     if (pw.amount > 0n) {
@@ -185,7 +217,8 @@ async function refreshBonus() {
   if (!isOwner) return;
   try {
     const c = casino();
-    const [active, until] = await Promise.all([c.bonusModeActive(), c.bonusModeUntil()]);
+    // v15 dropped bonus mode along with the agent layer.
+    const [active, until] = [false, 0n];
     $("[data-sl-adm-bonus-status]").textContent = active ? "ACTIVE" : "OFF";
     $("[data-sl-adm-bonus-status]").style.color = active ? "var(--green)" : "var(--fg-mute)";
     $("[data-sl-adm-bonus-until]").textContent = Number(until) > 0 ? new Date(Number(until) * 1000).toLocaleString() : "-";
@@ -198,10 +231,12 @@ async function refreshGames() {
   if (!root) return;
   try {
     const c = casino();
-    const maxBets = await Promise.all([0,1,2,3,4,5].map((g) => c.gameMaxBet(g)));
-    const paused  = await Promise.all([0,1,2,3,4,5].map((g) => c.gamePaused(g)));
+    const maxBets = await Promise.all([0,1,2,3,4,5,6].map((g) => c.gameMaxBet(g)));
+    // v15 gates a game with an ACTIVE flag, not a paused flag.
+    const active  = await Promise.all([0,1,2,3,4,5,6].map((g) => c.gameActive(g)));
+    const paused  = active.map((a) => !a);
     root.innerHTML = "";
-    for (let g = 0; g < 6; g++) {
+    for (let g = 0; g < 7; g++) {
       const row = document.createElement("div");
       row.className = "adm-game-row";
       row.innerHTML =
@@ -234,7 +269,7 @@ async function refreshGames() {
         try {
           b.disabled = true;
           const c = withSigner(casino());
-          const tx = isPaused ? await c.unpauseGame(g) : await c.pauseGame(g);
+          const tx = await c.setGameActive(g, isPaused);
           await tx.wait();
           await refreshGames();
         } catch (e) { import("./ui.js").then(({ toast }) => toast(e.shortMessage || e.message, { kind: "error", ttl: 6000 })); }
@@ -348,7 +383,7 @@ async function refreshStats() {
       byGame[g].paid += BigInt(s.args.payout);
     }
     root.innerHTML = "";
-    for (let g = 0; g < 6; g++) {
+    for (let g = 0; g < 7; g++) {
       const row = byGame[g];
       if (row.bets === 0) continue;
       const margin = row.wagered > 0n
@@ -478,8 +513,11 @@ function bindActions() {
     const m = parseInt($("[data-sl-adm-bonus-mins]").value, 10) || 60;
     const reason = $("[data-sl-adm-bonus-reason]").value || "manual";
     try {
-      const tx = await withSigner(casino()).activateBonusMode(m, reason);
-      await tx.wait(); refreshBonus();
+      // v15 dropped bonus mode with the agent layer. Say so instead of
+      // sending a call that can only revert.
+      void m; void reason;
+      import("./ui.js").then(({ toast }) => toast("Bonus mode was removed in casino v15", { kind: "warn", ttl: 5000 }));
+      return;
     } catch (e) { import("./ui.js").then(({ toast }) => toast(e.shortMessage || e.message, { kind: "error", ttl: 6000 })); }
   });
   $("[data-sl-adm-roul-window-set]")?.addEventListener("click", async () => {
@@ -488,7 +526,7 @@ function bindActions() {
     const secs = parseInt($("[data-sl-adm-roul-window-amt]").value, 10);
     if (!(secs >= 5 && secs <= 22)) { import("./ui.js").then(({ toast }) => toast("Window must be 5-22s", { kind: "warn" })); return; }
     try {
-      const tx = await withSigner(casino()).setRouletteBetWindow(secs);
+      const tx = await withSigner(roundModule("roulette")).setBetWindow(secs);
       await tx.wait(); refreshWindows();
     } catch (e) { import("./ui.js").then(({ toast }) => toast(e.shortMessage || e.message, { kind: "error", ttl: 6000 })); }
   });
@@ -498,7 +536,7 @@ function bindActions() {
     const secs = parseInt($("[data-sl-adm-crash-window-amt]").value, 10);
     if (!(secs >= 5 && secs <= 22)) { import("./ui.js").then(({ toast }) => toast("Window must be 5-22s", { kind: "warn" })); return; }
     try {
-      const tx = await withSigner(casino()).setCrashBetWindow(secs);
+      const tx = await withSigner(roundModule("crash")).setBetWindow(secs);
       await tx.wait(); refreshWindows();
     } catch (e) { import("./ui.js").then(({ toast }) => toast(e.shortMessage || e.message, { kind: "error", ttl: 6000 })); }
   });
@@ -506,10 +544,9 @@ function bindActions() {
 
 async function refreshWindows() {
   try {
-    const c = casinoRO || (casinoRO = new ethers.Contract(CONFIG.casino, ADMIN_ABI, provider()));
     const [roul, crash] = await Promise.all([
-      c.rouletteBetWindow().catch(() => null),
-      c.crashBetWindow().catch(() => null),
+      roundModule("roulette").betWindow().catch(() => null),
+      roundModule("crash").betWindow().catch(() => null),
     ]);
     const rEl = $("[data-sl-adm-roul-window]"); if (rEl && roul != null) rEl.textContent = roul.toString();
     const cEl = $("[data-sl-adm-crash-window]"); if (cEl && crash != null) cEl.textContent = crash.toString();

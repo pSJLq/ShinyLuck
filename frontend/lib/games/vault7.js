@@ -2,7 +2,8 @@
 //
 // The reel animation, ticker, particles & big-win overlay are unchanged from
 // the original `slots/game.js` design. The only swap: instead of an in-memory
-// SlotEngine producing the result, we call placeSlotsBet → poll for the
+// SlotEngine producing the result, we call the Vault7 module's placeSpin →
+// poll for the
 // BetSettled event → decode the on-chain grid into the same shape the UI
 // expects, then run the same animations against the real result.
 //
@@ -17,10 +18,11 @@
 import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect } from "../wallet.js";
 import { CONFIG } from "../config.js";
+import { CONFIG_V15 } from "../config-v15.js";
 import { provider, fetchRecentLogs } from "../rpc.js";
 import {
   $, $$, setText, populateFairPanel, clearFairServer, friendlyError,
-  pollForSettle, fmtSTT, explorerTxUrl,
+  pollForSpinSettle, fmtSTT, explorerTxUrl,
 } from "./_base.js";
 import { validateStake } from "../errors.js";
 
@@ -176,14 +178,11 @@ function decodeWinningCells(grid) {
 let _casinoRO = null;
 function casinoRO() {
   if (!_casinoRO) {
-    const abi = [
-      "function freeSpinsAvailable(address) view returns (uint256)",
+    // v15: loyalty counters live in the shared SlotLoyalty contract.
+    _casinoRO = new ethers.Contract(CONFIG_V15.addresses.loyalty, [
+      "function available(address) view returns (uint256)",
       "function getPlayerSlotState(address) view returns (uint64 total,uint64 earned,uint64 used,uint256 toNext)",
-      "function gameMaxBet(uint8) view returns (uint256)",
-      "function houseEdgeBps(uint8) view returns (uint256)",
-      "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
-    ];
-    _casinoRO = new ethers.Contract(CONFIG.casino, abi, provider());
+    ], provider());
   }
   return _casinoRO;
 }
@@ -198,7 +197,7 @@ async function refreshLoyalty() {
   try {
     const c = casinoRO();
     const [free, [tot, earned, used, toNext]] = await Promise.all([
-      c.freeSpinsAvailable(SL.address),
+      c.available(SL.address),
       c.getPlayerSlotState(SL.address),
     ]);
     lastFreeSpinsAvailable = Number(free);
@@ -539,30 +538,16 @@ async function doSpin() {
   updateUI();
   try {
     await connect();
-    const cs = ethers.hexlify(ethers.randomBytes(32));
-    let tx;
-    if (wantFree) {
-      tx = await SL.casino.placeSlotsBet(cs, true, { value: 0 });
-    } else {
-      tx = await SL.casino.placeSlotsBet(cs, false, { value: ethers.parseEther(stake.toFixed(6)) });
-    }
-    const rcpt = await tx.wait();
-    // Find BetPlaced for betId
-    let betId;
-    for (const log of rcpt.logs) {
-      try {
-        const p = SL.casino.interface.parseLog(log);
-        if (p && p.name === "BetPlaced") { betId = p.args.betId; break; }
-      } catch (_) {}
-    }
-    populateFairPanel({ clientSeed: cs, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash: tx.hash });
+    // v15: VAULT.7 is its own module contract; the SDK resolves the betId.
+    const { betId, txHash, clientSeed: cs } = await SL.placeSlots(stake.toFixed(6), wantFree);
+    populateFairPanel({ clientSeed: cs, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash });
     $("#stagePill").querySelector("span:last-child").textContent = "REVEAL…";
     if (!wantFree) {
       totalWagered += stake;
       totalSpinsSession++;
     }
 
-    const settled = await pollForSettle(betId);
+    const settled = await pollForSpinSettle("vault7", betId);
     if (!settled || settled.refunded) {
       $("#stagePill").querySelector("span:last-child").textContent = settled?.refunded ? "REFUNDED" : "TIMED OUT";
       setText("#lastWin", settled?.refunded ? "- refunded" : "- timed out");

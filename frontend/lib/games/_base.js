@@ -13,6 +13,7 @@
 import { ethers } from "/vendor/ethers.bundle.js";
 import { SL } from "../wallet.js";
 import { CONFIG } from "../config.js";
+import { CONFIG_V15 } from "../config-v15.js";
 import { CHAINS } from "../shinyluck-sdk.js";
 import { provider, wsProvider, fetchRecentLogs } from "../rpc.js";
 import { friendlyError } from "../errors.js";
@@ -20,6 +21,9 @@ import { friendlyError } from "../errors.js";
 export { friendlyError };
 
 export const ZERO = "0x0000000000000000000000000000000000000000";
+
+/// v15 money lives in the Vault; this replaces the old single-casino address.
+export const VAULT_ADDR = CONFIG_V15.addresses.vault;
 // Drop poll cadence · fast settle was bottlenecked here, not on-chain.
 // Frontend now subscribes to WS first; this fallback fires every 750ms.
 export const SETTLE_POLL_MS = 750;
@@ -53,18 +57,40 @@ export function explorerTxUrl(hash) {
 
 export function casinoRO() {
   if (casinoRO._c) return casinoRO._c;
+  // v15: the Vault holds money + the single-shot bet registry. Note gameId is
+  // uint16 here (was uint8 on the v14 monolith) — decoding with the old ABI
+  // silently mis-reads every settled event.
   const abi = [
-    "event BetPlaced(uint256 indexed betId,address indexed player,uint8 indexed game,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
-    "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
+    "event BetPlaced(uint256 indexed betId,address indexed player,uint16 indexed gameId,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
+    "event BetSettled(uint256 indexed betId,address indexed player,uint16 indexed gameId,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
     "event BetRefunded(uint256 indexed betId,address indexed player,uint256 amount,string reason)",
-    "event MinesCellOpened(uint256 indexed betId,uint8 cellIdx,uint32 openedBitmap,uint256 multiplierX100)",
-    "event MinesBust(uint256 indexed betId,uint8 cellIdx,uint32 minesBitmap)",
-    "event MinesCashout(uint256 indexed betId,uint8 cellsOpened,uint256 payout,uint256 multiplierX100)",
-    "event MinesSeedRevealed(uint256 indexed betId,uint32 minesBitmap)",
-    "function minesState(uint256) view returns (uint8 mineCount,uint32 openedBitmap,uint32 minesBitmap,bool seedRevealed,bool busted)",
+    "function getBet(uint256) view returns (tuple(address player,uint96 amount,uint16 gameId,uint8 status,uint64 commitBlock,uint64 nonce,uint256 seedIdx,bytes32 clientSeed,bytes params,bytes32 randomness,uint128 payout,bool won))",
+    "function getPlayerBets(address) view returns (uint256[])",
+    "function pendingWithdrawals(address) view returns (uint256)",
+    "function freeBankroll() view returns (uint256)",
+    "function claim()",
   ];
-  casinoRO._c = new ethers.Contract(CONFIG.casino, abi, provider());
+  casinoRO._c = new ethers.Contract(VAULT_ADDR, abi, provider());
   return casinoRO._c;
+}
+
+/// Mines lives in its own module contract in v15, so its state and events are
+/// read from there rather than from the Vault.
+export function minesRO() {
+  if (minesRO._c) return minesRO._c;
+  const g = (CONFIG_V15.games || []).find((x) => x.name === "mines");
+  if (!g) return null;
+  const abi = [
+    "event MinesRootCommitted(uint256 indexed betId,bytes32 root)",
+    "event MinesCellOpened(uint256 indexed betId,uint8 cellIdx,uint32 openedBitmap,uint256 multiplierX100)",
+    "event MinesBust(uint256 indexed betId,uint8 cellIdx)",
+    "event MinesCashout(uint256 indexed betId,uint8 cellsOpened,uint256 payout,uint256 multiplierX100)",
+    "event MinesLayout(uint256 indexed betId,uint32 minesBitmap,bytes32 serverSeed)",
+    "function getGame(uint256) view returns (tuple(address player,uint96 amount,uint8 status,uint8 mineCount,uint8 pendingCell,bool busted,bool finalized,uint32 openedBitmap,uint64 commitBlock,uint64 pickBlock,uint64 nonce,uint256 seedIdx,bytes32 clientSeed,bytes32 layoutRoot,bytes32 entropyHash,bytes32 randomness))",
+    "function totalGames() view returns (uint256)",
+  ];
+  minesRO._c = new ethers.Contract(g.module, abi, provider());
+  return minesRO._c;
 }
 
 // ---------------------------------------------------------------------
@@ -126,12 +152,12 @@ export function clearFairServer() {
 
 /// Pre-fill the fair panel from the player's last settled bet for `gameId`.
 export async function refreshFairFromPlayer(gameId) {
-  if (!SL.address || CONFIG.casino === ZERO) return;
+  if (!SL.address || !VAULT_ADDR) return;
   const c = casinoRO();
   const events = await fetchRecentLogs(c, "BetSettled", {
     minCount: 1,
     filter: (ev) => ev.args.player.toLowerCase() === SL.address.toLowerCase()
-                 && Number(ev.args.game) === gameId,
+                 && Number(ev.args.gameId) === gameId,
   });
   if (events.length === 0) return;
   const ev = events[0];
@@ -149,7 +175,37 @@ export async function refreshFairFromPlayer(gameId) {
 // ---------------------------------------------------------------------
 
 export async function pollForSettle(betId) {
-  const c = casinoRO();
+  return pollSettleOn(casinoRO(), VAULT_ADDR, "BetSettled", "BetRefunded", betId);
+}
+
+/// Wait for a slot spin to settle. Slots live in their own module contract in
+/// v15, so they emit SpinSettled/SpinRefunded there rather than on the Vault.
+/// Returns the SAME shape as pollForSettle so game code is unchanged.
+export async function pollForSpinSettle(name, betId) {
+  const c = slotRO(name);
+  if (!c) return null;
+  return pollSettleOn(c, c.target, "SpinSettled", "SpinRefunded", betId);
+}
+
+/// Read-only slot module (VAULT.7 / SUGAR.LAB).
+export function slotRO(name) {
+  slotRO._c = slotRO._c || {};
+  if (slotRO._c[name]) return slotRO._c[name];
+  const g = (CONFIG_V15.games || []).find((x) => x.name === name);
+  if (!g) return null;
+  const abi = [
+    "event SpinPlaced(uint256 indexed betId,address indexed player,uint256 amount,bool freeSpin,bool buyBonus)",
+    "event SpinSettled(uint256 indexed betId,address indexed player,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes resultData)",
+    "event SpinRefunded(uint256 indexed betId,string reason)",
+    "function getSpin(uint256) view returns (tuple(address player,uint96 amount,uint8 status,bool freeSpin,bool buyBonus,uint64 commitBlock,uint64 nonce,uint256 seedIdx,bytes32 clientSeed,bytes32 randomness,uint128 payout))",
+    "function totalSpins() view returns (uint256)",
+    "function reportedRtpBps() view returns (uint16)",
+  ];
+  slotRO._c[name] = new ethers.Contract(g.module, abi, provider());
+  return slotRO._c[name];
+}
+
+async function pollSettleOn(c, addr, settledName, refundedName, betId) {
   const wantId = betId.toString();
   let resolved = null;
 
@@ -160,13 +216,13 @@ export async function pollForSettle(betId) {
   let wsSettled = null, wsRefunded = null;
   if (ws) {
     try {
-      const settledTopic = c.interface.getEvent("BetSettled").topicHash;
-      const refundedTopic = c.interface.getEvent("BetRefunded").topicHash;
+      const settledTopic = c.interface.getEvent(settledName).topicHash;
+      const refundedTopic = c.interface.getEvent(refundedName).topicHash;
       const onSettled = (log) => {
         try {
           const p = c.interface.parseLog(log);
           if (p.args.betId.toString() === wantId) {
-            wsSettled = { name: "BetSettled", args: p.args, transactionHash: log.transactionHash, blockNumber: log.blockNumber };
+            wsSettled = { name: settledName, args: p.args, transactionHash: log.transactionHash, blockNumber: log.blockNumber };
             resolved = wsSettled;
           }
         } catch (_) {}
@@ -180,12 +236,12 @@ export async function pollForSettle(betId) {
           }
         } catch (_) {}
       };
-      ws.on({ address: CONFIG.casino, topics: [settledTopic] },  onSettled);
-      ws.on({ address: CONFIG.casino, topics: [refundedTopic] }, onRefunded);
+      ws.on({ address: addr, topics: [settledTopic] },  onSettled);
+      ws.on({ address: addr, topics: [refundedTopic] }, onRefunded);
       // schedule a tear-down hook on a Promise we race
       var unsubscribeWs = () => {
-        try { ws.off({ address: CONFIG.casino, topics: [settledTopic] },  onSettled); } catch (_) {}
-        try { ws.off({ address: CONFIG.casino, topics: [refundedTopic] }, onRefunded); } catch (_) {}
+        try { ws.off({ address: addr, topics: [settledTopic] },  onSettled); } catch (_) {}
+        try { ws.off({ address: addr, topics: [refundedTopic] }, onRefunded); } catch (_) {}
       };
     } catch (e) {
       console.warn("[base] settle WS subscribe failed, polling only:", e.message);
@@ -200,7 +256,7 @@ export async function pollForSettle(betId) {
   // Initial check before sleeping · in case settle already happened during
   // the placement round-trip (Sequence + chain mining).
   try {
-    const back = await fetchRecentLogs(c, "BetSettled", {
+    const back = await fetchRecentLogs(c, settledName, {
       minCount: 1, maxLookback: 30,
       filter: (ev) => ev.args.betId.toString() === wantId,
     });
@@ -215,17 +271,17 @@ export async function pollForSettle(betId) {
     try { head = await provider().getBlockNumber(); } catch { continue; }
     if (head < scanFrom) continue;
     try {
-      const settled = await fetchRecentLogs(c, "BetSettled", {
+      const settled = await fetchRecentLogs(c, settledName, {
         minCount: 1,
         maxLookback: head - scanFrom + 2,
         filter: (ev) => ev.args.betId.toString() === wantId,
       });
       if (settled.length > 0) { if (unsubscribeWs) unsubscribeWs(); return settled[0]; }
     } catch (e) {
-      console.warn("[base] settle poll BetSettled:", e.message);
+      console.warn("[base] settle poll " + settledName + ":", e.message);
     }
     try {
-      const refunds = await fetchRecentLogs(c, "BetRefunded", {
+      const refunds = await fetchRecentLogs(c, refundedName, {
         minCount: 1,
         maxLookback: head - scanFrom + 2,
         filter: (ev) => ev.args.betId.toString() === wantId,
@@ -258,12 +314,12 @@ export async function refreshRecentEvents({
 }) {
   const root = document.querySelector(containerSelector);
   if (!root) return;
-  if (CONFIG.casino === ZERO) return;
+  if (!VAULT_ADDR) return;
   const c = casinoRO();
   const events = await fetchRecentLogs(c, "BetSettled", {
     minCount: limit,
     maxLookback,
-    filter: (ev) => Number(ev.args.game) === gameId,
+    filter: (ev) => Number(ev.args.gameId) === gameId,
   });
   root.innerHTML = "";
   if (events.length === 0) {
@@ -310,11 +366,14 @@ let _houseEdgeCache = null;
 async function getHouseEdgeBps(gameId) {
   if (!_houseEdgeCache) _houseEdgeCache = new Map();
   if (_houseEdgeCache.has(gameId)) return _houseEdgeCache.get(gameId);
-  if (CONFIG.casino === ZERO) return HOUSE_EDGE_DEFAULT_BPS[gameId];
+  if (!VAULT_ADDR) return HOUSE_EDGE_DEFAULT_BPS[gameId];
   try {
-    const abi = ["function houseEdgeBps(uint8) view returns (uint256)"];
-    const c = new ethers.Contract(CONFIG.casino, abi, provider());
-    const bps = await c.houseEdgeBps(gameId);
+    // v15: the edge is declared by each game's own module, not the Vault.
+    const NAME_BY_ID = { 0: "dice", 1: "crash", 2: "vault7", 3: "mines", 4: "plinko", 5: "roulette", 6: "cluster" };
+    const g = (CONFIG_V15.games || []).find((x) => x.name === NAME_BY_ID[gameId]);
+    if (!g) return HOUSE_EDGE_DEFAULT_BPS[gameId];
+    const c = new ethers.Contract(g.module, ["function houseEdgeBps() view returns (uint16)"], provider());
+    const bps = await c.houseEdgeBps();
     const n = Number(bps);
     _houseEdgeCache.set(gameId, n);
     return n;

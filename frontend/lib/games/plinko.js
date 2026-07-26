@@ -90,19 +90,24 @@ function slotColor(mult) {
 function pegLayout() {
   const topY = 74, bottomY = PH - 96;
   const rowSpacing = (bottomY - topY) / ROWS;
+  const usableW = PW - 44;
+  // CONSTANT peg spacing = one slot width. A regular triangular grid is what
+  // makes the physics tractable: the ball moves exactly ±spacing/2 per row and
+  // the accumulated walk lands dead-centre over the contract's slot. The old
+  // layout used a per-row-varying spacing (usableW/(count+1)) while the ball
+  // walked in fixed ±0.5 columns — the two never agreed, so the ball skated
+  // around at random. Bottom row = 18 pegs spanning the full width → 17 gaps →
+  // 17 slots, each gap centred over its bucket.
+  const spacing = usableW / SLOTS;
   const pegs = [];
-  // Row k has k+3 pegs centred (bottom row = 18 pegs → 17 slots). Keep a
-  // side margin so the outer pegs + widest buckets aren't clipped.
   for (let row = 0; row < ROWS; row++) {
-    const count = row + 3;
-    const usableW = PW - 44;
-    const spacing = usableW / (count + 1);
-    const x0 = (PW - usableW) / 2;
+    const count = row + 3;                       // 3 pegs at the apex → 18 at the base
+    const y = topY + row * rowSpacing;
     for (let i = 0; i < count; i++) {
-      pegs.push({ row, x: x0 + spacing * (i + 1), y: topY + row * rowSpacing, r: 3.2 });
+      pegs.push({ row, x: PW / 2 + (i - (count - 1) / 2) * spacing, y, r: 3.2 });
     }
   }
-  return { pegs, rowSpacing, topY, bottomY };
+  return { pegs, rowSpacing, topY, bottomY, spacing };
 }
 
 function drawScene(ctx, layout, highlightSlot = -1) {
@@ -160,45 +165,71 @@ function animateBall({ pathBits, finalSlot }) {
     if (!canvas) return resolve();
     const ctx = canvas.getContext("2d");
     const layout = pegLayout();
-    const usableW = PW - 44, x0 = (PW - usableW) / 2;
+    const { spacing, rowSpacing, topY, bottomY } = layout;
+    const usableW = PW - 44, x0 = (PW - usableW) / 2, slotW = usableW / SLOTS;
 
-    // pathBits → left(0)/right(1) per row (same mapping the contract counts).
+    // pathBits → left(0)/right(1) per row (the exact mapping the contract
+    // counts: slot = number of 1-bits). The ball threads the GAPS: each row it
+    // steps ±spacing/2, so after 16 rows the net offset is (2·slot−16)·spacing/2
+    // = (slot−8)·spacing, which is precisely the centre of bucket `slot`. No
+    // clamping, no fudge — the walk is the outcome.
     const decisions = [];
     for (let i = 0; i < ROWS; i++) decisions.push((pathBits >> i) & 1);
 
-    // Replay the column walk so the ball lands over the contract's slot.
-    let col = ROWS / 2;
-    const stops = [{ x: PW / 2, y: layout.topY - 18 }];
+    let bx = PW / 2;
+    const stops = [{ x: bx, y: topY - rowSpacing * 0.9, peg: false }];
     for (let row = 0; row < ROWS; row++) {
-      col = col + (decisions[row] === 1 ? 0.5 : -0.5);
-      const rowPegCount = row + 3;
-      const spacing = usableW / (rowPegCount + 1);
-      const xMid = x0 + spacing * (Math.max(0, Math.min(rowPegCount - 1, Math.floor(col))) + 1);
-      stops.push({ x: xMid + (decisions[row] === 1 ? spacing / 2 : -spacing / 2), y: layout.topY + row * layout.rowSpacing + 16 });
+      bx += (decisions[row] === 1 ? 1 : -1) * (spacing / 2);
+      // resting point in the gap just under row `row`'s pegs
+      stops.push({ x: bx, y: topY + row * rowSpacing + rowSpacing * 0.5, peg: true });
     }
-    const slotW = usableW / SLOTS;
-    stops.push({ x: x0 + slotW * finalSlot + slotW / 2, y: layout.bottomY + 34 });
+    // bx now equals the slot centre; drop into the bucket.
+    stops.push({ x: x0 + slotW * finalSlot + slotW / 2, y: bottomY + 32, peg: false });
 
-    const totalDuration = 2600;
+    const PER_ROW = 130, SETTLE = 480;
+    const segDur = [];
+    for (let i = 0; i < stops.length - 1; i++) segDur.push(i === stops.length - 2 ? SETTLE : PER_ROW);
+    const totalDuration = segDur.reduce((a, b) => a + b, 0);
+
+    const trail = [];
     const start = performance.now();
     function frame(now) {
-      const t = Math.min(1, (now - start) / totalDuration);
-      const segCount = stops.length - 1;
-      const segIdx = Math.min(segCount - 1, Math.floor(t * segCount));
-      const segT = (t * segCount) - segIdx;
-      const a = stops[segIdx], b = stops[segIdx + 1];
-      const x = a.x + (b.x - a.x) * segT;
-      const dip = Math.sin(segT * Math.PI) * 7; // fake gravity between rows
-      const y = a.y + (b.y - a.y) * segT + dip;
-      drawScene(ctx, layout, t > 0.95 ? finalSlot : -1);
+      const elapsed = now - start;
+      // locate the current segment by accumulated time
+      let seg = 0, acc = 0;
+      while (seg < segDur.length - 1 && elapsed > acc + segDur[seg]) { acc += segDur[seg]; seg++; }
+      const segT = Math.min(1, (elapsed - acc) / segDur[seg]);
+      const a = stops[seg], b = stops[seg + 1];
+      // x eases out (the ball slides off the peg then coasts); y accelerates
+      // like gravity (ease-in) so the drop reads as weight, not a slide.
+      const ex = 1 - Math.pow(1 - segT, 2);
+      const ey = segT * segT;
+      const x = a.x + (b.x - a.x) * ex;
+      let y = a.y + (b.y - a.y) * ey;
+      // tiny upward hop right after a peg contact for a springy bounce
+      if (a.peg && segT < 0.5) y -= Math.sin(segT * Math.PI * 2) * 3.5;
+
+      drawScene(ctx, layout, elapsed >= totalDuration - SETTLE ? finalSlot : -1);
+
+      // fading trail
+      trail.push({ x, y }); if (trail.length > 7) trail.shift();
+      for (let i = 0; i < trail.length - 1; i++) {
+        const tp = trail[i];
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(246,241,231,${0.06 * (i + 1)})`;
+        ctx.arc(tp.x, tp.y, 5.2, 0, Math.PI * 2); ctx.fill();
+      }
+      // ball · a slight squash on peg impact
+      const impact = a.peg && segT < 0.22 ? 1 - segT : 0;
       ctx.beginPath();
       ctx.fillStyle = "#F6F1E7";
-      ctx.shadowColor = "rgba(217,185,112,.85)";
-      ctx.shadowBlur = 16;
-      ctx.arc(x, y, 6.5, 0, Math.PI * 2);
+      ctx.shadowColor = "rgba(217,185,112,.9)";
+      ctx.shadowBlur = 15;
+      ctx.ellipse(x, y, 6.4 + impact * 1.4, 6.4 - impact * 1.4, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
-      if (t < 1) requestAnimationFrame(frame);
+
+      if (elapsed < totalDuration) requestAnimationFrame(frame);
       else resolve();
     }
     requestAnimationFrame(frame);
@@ -272,7 +303,7 @@ async function onPlaceBet() {
     const t0 = Date.now();
     while (Date.now() - t0 < 60000) {
       await new Promise((r) => setTimeout(r, 800));
-      try { const b = await SL.casino.getBet(betId); if (Number(b.status) !== 0) { bet = b; break; } } catch (_) {}
+      try { const b = await SL.casino.getBet(betId); if (Number(b.status) !== 0) { bet = b; SL.autoClaim?.().catch(() => {}); break; } } catch (_) {}
     }
     if (!bet) { setStagePill(null, "TIMED OUT"); placeBtn.textContent = "Refresh to retry"; return; }
     if (Number(bet.status) === 2) {

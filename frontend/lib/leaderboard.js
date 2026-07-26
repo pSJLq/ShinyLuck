@@ -7,6 +7,7 @@
 import { ethers } from "/vendor/ethers.bundle.js";
 import { CONFIG } from "./config.js";
 import { provider, fetchLogs, fetchDeploymentBlock } from "./rpc.js";
+import { scanPlaced, scanSettled, deploymentBlock as v15DeployBlock } from "./casino-sources.js";
 
 const GAME_NAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.LAB"];
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -56,7 +57,6 @@ function fmtSTT(wei) {
 function fmtAddr(a) { return `${a.slice(0,6)}…${a.slice(-4)}`; }
 
 async function loadEvents() {
-  if (CONFIG.casino === ZERO) return null;
   const abi = [
     "event BetPlaced(uint256 indexed betId,address indexed player,uint8 indexed game,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
     "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
@@ -67,19 +67,25 @@ async function loadEvents() {
   // lifetime activity, not just the latest redeploy's window. Each contract
   // gets one Shannon Explorer call per event type (parallel via Promise.all)
   // scoped to that contract's lifetime range.
+  // NOTE: these are the FROZEN monoliths (v14 and older). The live casino is
+  // v15, which spreads settlements over six contracts with a different event
+  // signature (`uint16 indexed gameId` vs `uint8 indexed game` = different
+  // topic0), so it is scanned separately below and merged.
   const list = Array.isArray(CONFIG.historicalCasinos) ? CONFIG.historicalCasinos : [];
   const withCurrent = [...list];
-  if (!list.some((e) => e.address.toLowerCase() === CONFIG.casino.toLowerCase())) {
+  if (CONFIG.casino && CONFIG.casino !== ZERO
+      && !list.some((e) => e.address.toLowerCase() === CONFIG.casino.toLowerCase())) {
     withCurrent.push({ address: CONFIG.casino, deploymentBlock: 0 });
   }
   withCurrent.sort((a, b) => a.deploymentBlock - b.deploymentBlock);
 
   const aggPlaced = [], aggSettled = [];
   const fetches = [];
+  const frozenAt = v15DeployBlock() ? v15DeployBlock() - 1 : head;
   withCurrent.forEach((entry, i) => {
     const c = new ethers.Contract(entry.address, abi, provider());
     const from = entry.deploymentBlock || 0;
-    const to = (i + 1 < withCurrent.length) ? withCurrent[i + 1].deploymentBlock - 1 : head;
+    const to = (i + 1 < withCurrent.length) ? withCurrent[i + 1].deploymentBlock - 1 : frozenAt;
     fetches.push(
       fetchLogs(c, "BetPlaced",  from, to).then((evs) => {
         // Tag each event with its source contract so aggregateEvents can
@@ -93,11 +99,15 @@ async function loadEvents() {
       }).catch(() => {}),
     );
   });
-  await Promise.all(fetches);
-  return { placed: aggPlaced, settled: aggSettled };
+  const [, v15Placed, v15Settled] = await Promise.all([
+    Promise.all(fetches),
+    scanPlaced(v15DeployBlock(), head),
+    scanSettled(v15DeployBlock(), head, { onlyWins: false }),
+  ]);
+  return { placed: aggPlaced, settled: aggSettled, v15Placed, v15Settled };
 }
 
-function aggregateEvents({ placed, settled }) {
+function aggregateEvents({ placed, settled, v15Placed = [], v15Settled = [] }) {
   const stakeByBet = new Map();
   const gameByBet = new Map();
   // Namespace by source contract address (stored on ev.__addr by loadEvents)
@@ -124,6 +134,27 @@ function aggregateEvents({ placed, settled }) {
     p.bets += 1;
     p.byGame.set(game, (p.byGame.get(game) || 0) + 1);
   }
+  // ── v15: wagers come from the placed scan, payouts from the settled scan ──
+  // Keeping them separate matters because a busted mines game settles with no
+  // cashout event at all — folding on settlements alone would lose that wager.
+  const ent = (addr) => {
+    const k = addr.toLowerCase();
+    let p = byPlayer.get(k);
+    if (!p) { p = { addr, wagered: 0n, payout: 0n, bets: 0, byGame: new Map() }; byPlayer.set(k, p); }
+    return p;
+  };
+  for (const r of v15Placed) {
+    if (!r.player) continue;
+    const p = ent(r.player);
+    p.wagered += BigInt(r.stake || 0n);
+    p.bets += 1;
+    p.byGame.set(r.gameId, (p.byGame.get(r.gameId) || 0) + 1);
+  }
+  for (const r of v15Settled) {
+    if (!r.player) continue;
+    ent(r.player).payout += BigInt(r.payout || 0n);
+  }
+
   const list = [];
   for (const p of byPlayer.values()) {
     let fav = -1, max = 0;

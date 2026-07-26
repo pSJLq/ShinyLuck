@@ -28,6 +28,7 @@ import { CONFIG } from "./config.js";
 import { provider, wsProvider, fetchLogs } from "./rpc.js";
 import { resolveProfiles, DEFAULT_AVATAR } from "./profiles.js";
 import { POKER_CONFIG } from "/poker/poker-config.js";
+import { sources, deploymentBlock as v15DeployBlock } from "./casino-sources.js";
 
 const CAP_RECENT = 1200; // rows kept by recency (covers Latest + 24h/7d/30d)
 const CAP_BEST = 60;     // biggest payouts ever · survive recent-trimming
@@ -56,11 +57,10 @@ const GAME_META = {
 
 const $ = (s, r = document) => r.querySelector(s);
 
-let casino = null, room = null;
+let room = null;
 function contracts() {
-  if (!casino) casino = new ethers.Contract(CONFIG.casino, CASINO_ABI, provider());
   if (!room && POKER_CONFIG.pokerRoom) room = new ethers.Contract(POKER_CONFIG.pokerRoom, ROOM_ABI, provider());
-  return { casino, room };
+  return { room };
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +131,26 @@ function pushRow(r) {
   return true;
 }
 
+/// Build a feed row from ANY v15 source. `src` knows how to read its own event
+/// shape (the six game contracts emit different events).
+function rowFromSrc(src, ev, stake) {
+  const g = GAME_META[src.game(ev)] || { name: "?", art: null };
+  const payout = src.payout(ev);
+  const player = (src.player(ev) || stakePlayer.get(src.key(ev)) || "0x").toLowerCase();
+  const st = src.stakeDirect ? src.stakeDirect(ev) : stake;
+  return {
+    key: "c:" + ev.transactionHash + ":" + src.key(ev),
+    betId: src.key(ev),
+    src: "casino", gameName: g.name, art: g.art,
+    player,
+    stake: st ?? null,
+    payout,
+    net: st != null ? payout - st : null,
+    block: ev.blockNumber,
+  };
+}
+const stakePlayer = new Map();   // bid -> player, for events that omit it (mines)
+
 function casinoRow(ev, stake) {
   const g = GAME_META[Number(ev.args.game)] || { name: "?", art: null };
   const payout = ev.args.payout;
@@ -184,16 +204,21 @@ function pokerRow(ev, seat, amount) {
 // cold start (explorer indexer) + tail poll (raw RPC · no indexer lag)
 // ---------------------------------------------------------------------------
 async function backfill() {
-  const { casino: c, room: r } = contracts();
+  const { room: r } = contracts();
   const head = await provider().getBlockNumber();
-  const casinoFrom = Math.max(0, Number(CONFIG.historicalCasinos?.at(-1)?.deploymentBlock || 0) - 10);
+  const from = Math.max(0, v15DeployBlock() - 10);
 
-  const [settled, placed] = await Promise.all([
-    fetchLogs(c, "BetSettled", casinoFrom, head).catch(() => []),
-    fetchLogs(c, "BetPlaced", casinoFrom, head).catch(() => []),
-  ]);
-  for (const ev of placed) stakeBy.set(ev.args.betId.toString(), ev.args.amount);
-  for (const ev of settled) pushRow(casinoRow(ev, stakeBy.get(ev.args.betId.toString())));
+  for (const src of sources()) {
+    if (src.placed) {
+      const placed = await fetchLogs(src.c, src.placed, from, head).catch(() => []);
+      for (const ev of placed) {
+        stakeBy.set(src.stakeKey(ev), src.stakeOf(ev));
+        if (ev.args.player) stakePlayer.set(src.stakeKey(ev), ev.args.player);
+      }
+    }
+    const settled = await fetchLogs(src.c, src.settled, from, head).catch(() => []);
+    for (const ev of settled) pushRow(rowFromSrc(src, ev, stakeBy.get(src.key(ev))));
+  }
 
   if (r) {
     const [seated, trnSeated, folds, pots] = await Promise.all([
@@ -215,8 +240,9 @@ async function pollTail() {
   const p = provider();
   const head = await p.getBlockNumber();
   if (head <= lastBlock) return 0;
-  const from = Math.max(lastBlock + 1, head - 5000);
-  const { casino: c, room: r } = contracts();
+  // Somnia caps eth_getLogs at a 1000-block range.
+  const from = Math.max(lastBlock + 1, head - 900);
+  const { room: r } = contracts();
   const grab = async (contract, evName) => {
     const topic = contract.interface.getEvent(evName).topicHash;
     const logs = await p.send("eth_getLogs", [{
@@ -232,9 +258,17 @@ async function pollTail() {
   };
 
   let added = 0;
-  const [placed, settled] = await Promise.all([grab(c, "BetPlaced"), grab(c, "BetSettled")]);
-  for (const ev of placed) stakeBy.set(ev.args.betId.toString(), ev.args.amount);
-  for (const ev of settled) if (pushRow(casinoRow(ev, stakeBy.get(ev.args.betId.toString())))) added++;
+  for (const src of sources()) {
+    if (src.placed) {
+      for (const ev of await grab(src.c, src.placed)) {
+        stakeBy.set(src.stakeKey(ev), src.stakeOf(ev));
+        if (ev.args.player) stakePlayer.set(src.stakeKey(ev), ev.args.player);
+      }
+    }
+    for (const ev of await grab(src.c, src.settled)) {
+      if (pushRow(rowFromSrc(src, ev, stakeBy.get(src.key(ev))))) added++;
+    }
+  }
 
   if (r) {
     const [seated, trnSeated, folds, pots] = await Promise.all([
@@ -273,7 +307,7 @@ function subscribeLive() {
   const ws = wsProvider();
   if (!ws || ws === _subbedTo) return !!ws;
   _subbedTo = ws;
-  const { casino: c, room: r } = contracts();
+  const { room: r } = contracts();
   const on = (contract, evName, handler) => {
     try {
       const topic = contract.interface.getEvent(evName).topicHash;
@@ -287,8 +321,14 @@ function subscribeLive() {
     } catch (_) {}
   };
 
-  on(c, "BetPlaced", (ev) => { stakeBy.set(ev.args.betId.toString(), ev.args.amount); return false; });
-  on(c, "BetSettled", (ev) => pushRow(casinoRow(ev, stakeBy.get(ev.args.betId.toString()))));
+  for (const src of sources()) {
+    if (src.placed) on(src.c, src.placed, (ev) => {
+      stakeBy.set(src.stakeKey(ev), src.stakeOf(ev));
+      if (ev.args.player) stakePlayer.set(src.stakeKey(ev), ev.args.player);
+      return false;
+    });
+    on(src.c, src.settled, (ev) => pushRow(rowFromSrc(src, ev, stakeBy.get(src.key(ev)))));
+  }
   if (r) {
     on(r, "PlayerSeated", (ev) => { recordSeat(Number(ev.args.tableId), Number(ev.args.seat), ev.args.player, ev.blockNumber); return false; });
     on(r, "TournamentSeated", (ev) => { recordSeat(Number(ev.args.tableId), Number(ev.args.seat), ev.args.player, ev.blockNumber); return false; });

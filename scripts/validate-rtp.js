@@ -38,8 +38,12 @@ const SEED = process.env.SEED || `sim-${Date.now()}`;
 // `slots-from-design/slots/engine.js`, `frontend/games/sugar/engine.js`,
 // `frontend/games/vault7/engine.js`, `contracts/Casino.sol` (CLUSTER /
 // SLOTS payout multipliers).
-const SUGAR_PAY_BOOST = 3.2;
-const VAULT_PAY_BOOST = 5.6;
+// v15 retuned these on chain with setPayBoost (contract defaults are still
+// 332/560). Measuring with the old numbers reports an RTP nobody is playing —
+// keep them equal to the deployed `payBoostX100` / 100 and re-measure whenever
+// a boost changes.
+const SUGAR_PAY_BOOST = 3.40;   // cluster payBoostX100 = 340
+const VAULT_PAY_BOOST = 5.89;   // vault7  payBoostX100 = 589
 
 const C_SYMBOLS = {
   WILD: { id: 'WILD', pay5: 0.4,  pay15: 18 },

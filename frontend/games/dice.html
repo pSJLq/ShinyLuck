@@ -16,6 +16,18 @@
 <script type="module" src="../lib/livedata.js"></script>
 <script type="module" src="../lib/games/dice.js"></script>
   <script type="module" src="/lib/i18n.js"></script>
+<style>
+  .dice-preset {
+    cursor: pointer; user-select: none;
+    font: 600 10px var(--mono); letter-spacing: .1em;
+    padding: 5px 9px; border-radius: 7px;
+    border: 1px solid var(--line-2); color: var(--fg-faint);
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .dice-preset:hover { color: var(--fg-strong); border-color: var(--fg-faint); background: rgba(255,255,255,.04); }
+  .dice-preset.gold { color: var(--gold); border-color: rgba(255,210,85,.35); }
+  .dice-preset.gold:hover { background: rgba(255,210,85,.1); }
+</style>
 </head>
 <body data-active-page="lobby">
 <div data-page-shell>
@@ -50,8 +62,23 @@
                 <span style="flex:1"></span>
                 <span style="font:500 10px var(--mono);color:var(--fg-faint);letter-spacing:.14em">WIN CHANCE <b data-sl-winchance style="color:var(--fg)">50%</b></span>
               </div>
-              <input type="range" min="2" max="98" value="50" data-sl-targetinput aria-label="Dice target" style="width:100%;--p:50%">
+              <input type="range" min="0.01" max="99.99" step="0.01" value="50" data-sl-targetinput aria-label="Dice target" style="width:100%;--p:50%">
               <div style="display:flex;justify-content:space-between;margin-top:6px;font:600 8.5px var(--mono);letter-spacing:.16em;color:var(--fg-ghost)"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+              <!-- The slider cannot resolve the long-odds end: 0.01-2% is 2% of
+                   the track. Typing the target exactly, and one tap for the
+                   classic long shots, is how you actually reach 9900x. -->
+              <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap">
+                <span style="font:500 10px var(--mono);color:var(--fg-faint);letter-spacing:.14em">EXACT</span>
+                <input type="number" min="0.01" max="99.99" step="0.01" value="50" data-sl-targetexact
+                       aria-label="Exact dice target"
+                       style="width:96px;background:rgba(255,255,255,.03);border:1px solid var(--line-2);border-radius:8px;padding:6px 8px;font:600 13px var(--mono);color:var(--fg-strong)">
+                <span style="flex:1"></span>
+                <span data-sl-target-preset="50" class="dice-preset">50%</span>
+                <span data-sl-target-preset="5" class="dice-preset">5%</span>
+                <span data-sl-target-preset="1" class="dice-preset">1%</span>
+                <span data-sl-target-preset="0.1" class="dice-preset">0.1%</span>
+                <span data-sl-target-preset="0.01" class="dice-preset gold">0.01%</span>
+              </div>
               <div style="display:flex;gap:22px;margin-top:16px;flex-wrap:wrap">
                 <span style="font:500 10px var(--mono);color:var(--fg-faint);letter-spacing:.14em">PAYOUT <b data-sl-payout style="color:var(--gold)">-</b></span>
                 <span style="font:500 10px var(--mono);color:var(--fg-faint);letter-spacing:.14em">EV <b data-sl-ev style="color:var(--red)">-</b></span>
@@ -126,12 +153,28 @@
 </div>
 
 <script>
-/* keep the gold range-fill in sync with the slider position (visual only) */
+/* Keep the slider, the exact-value box and the presets showing one target.
+   Everything dispatches `input` on the slider, which is what lib/games/dice.js
+   listens to — so there is a single source of truth for the placed bet. */
 (function () {
   const s = document.querySelector('[data-sl-targetinput]');
+  const box = document.querySelector('[data-sl-targetexact]');
   if (!s) return;
   const paint = () => { s.style.setProperty('--p', s.value + '%'); };
-  s.addEventListener('input', paint);
+  const push = (v) => {
+    const n = Math.min(99.99, Math.max(0.01, Math.round(Number(v) * 100) / 100));
+    if (!Number.isFinite(n)) return;
+    s.value = String(n);
+    if (box) box.value = String(n);
+    paint();
+    s.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  s.addEventListener('input', () => { if (box) box.value = s.value; paint(); });
+  box?.addEventListener('change', () => push(box.value));
+  box?.addEventListener('keydown', (e) => { if (e.key === 'Enter') push(box.value); });
+  document.querySelectorAll('[data-sl-target-preset]').forEach((el) => {
+    el.addEventListener('click', () => push(el.dataset.slTargetPreset));
+  });
   paint();
 })();
 

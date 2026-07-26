@@ -13,20 +13,36 @@ import { clampStakeStr, applyMaxToInput } from "../casino-limits.js";
 
 const DICE = 0;
 let direction = "over";
-let target = 50;
+let target = 50;   // percent, hundredths allowed (0.01 .. 99.99)
+
+/// Trim the trailing zeros so a whole target reads "50", not "50.00".
+const fmtTarget = (v) => (Number.isInteger(v) ? String(v) : String(Number(v.toFixed(2))));
+
+/// Clamp to a target that actually has winning space in this direction.
+function clampTarget(v, dir) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 50;
+  const lo = dir === "over" ? 0.01 : 0.02;
+  const hi = dir === "over" ? 99.98 : 99.99;
+  return Math.min(hi, Math.max(lo, Math.round(n * 100) / 100));
+}
 let lastBetId = null;
 
 function recalcSummary() {
-  const winChance = direction === "over" ? (100 - target) : (target - 1);
+  // Hundredths, exactly as the module counts them: outcomes are 1..10000, and
+  // the target itself never wins.
+  const bps = Math.round(target * 100);
+  const winCount = direction === "over" ? (10000 - bps) : (bps - 1);
+  const winChance = winCount / 100;
   const winChancePct = winChance > 0 ? winChance.toFixed(2) : "0.00";
   const payoutMultiplier = winChance > 0 ? 99 / winChance : 0;
   const stakeStr = readStakeStr();
   const stakeNum = parseFloat(stakeStr) || 0;
   const profit = stakeNum > 0 && winChance > 0 ? stakeNum * payoutMultiplier - stakeNum : 0;
 
-  setText("[data-sl-target]", String(target));
+  setText("[data-sl-target]", fmtTarget(target));
   setText("[data-sl-winchance]", winChancePct + "%");
-  setText("[data-sl-payout]", payoutMultiplier.toFixed(2) + "×");
+  setText("[data-sl-payout]", (payoutMultiplier >= 1000 ? Math.round(payoutMultiplier).toLocaleString("en-US") : payoutMultiplier.toFixed(2)) + "×");
   setText("[data-sl-winchance-right]", winChancePct + " %");
   $$("[data-sl-profit]").forEach((el) => {
     el.textContent = (profit >= 0 ? "+ " : "− ") + fmtSTTfromString(String(Math.abs(profit))) + " STT";
@@ -41,7 +57,16 @@ function recalcSummary() {
 
 function decodeDiceResult(resultData) {
   try {
-    const [roll] = ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], resultData);
+    // The module emits a bare roll on the legacy percent shape and
+    // (roll, scale) on the hundredths one — 32 vs 64 bytes.
+    const dec = ethers.AbiCoder.defaultAbiCoder();
+    const bytes = ethers.getBytes(resultData).length;
+    if (bytes > 32) {
+      const [roll, scale] = dec.decode(["uint256", "uint256"], resultData);
+      // Report it on the percent scale so "37.42" lines up with the target.
+      return Number(roll) / (Number(scale) / 100);
+    }
+    const [roll] = dec.decode(["uint256"], resultData);
     return Number(roll);
   } catch { return null; }
 }
@@ -62,7 +87,7 @@ function diceAnimStop(roll) {
   // old pip-pattern path (roll % 6) was visually misleading: a player who
   // rolled 57 would see 3 pips, which doesn't match the banner.
   const numEl = el.querySelector(".dice-num");
-  if (numEl) numEl.textContent = (roll != null ? String(roll) : "?");
+  if (numEl) numEl.textContent = (roll != null ? fmtTarget(roll) : "?");
 }
 
 async function refreshRecent() {
@@ -71,7 +96,7 @@ async function refreshRecent() {
     gameId: DICE,
     decode: (ev) => {
       const roll = decodeDiceResult(ev.args.resultData);
-      return { label: roll != null ? roll.toString() : "?", won: ev.args.won };
+      return { label: roll != null ? fmtTarget(roll) : "?", won: ev.args.won };
     },
     emptyLabel: "no recent rolls",
     latestBetId: lastBetId,
@@ -92,7 +117,7 @@ async function onPlaceBet() {
     delete placeBtn.dataset.locked;
     return;
   }
-  const t = Math.max(2, Math.min(98, target));
+  const t = clampTarget(target, direction);
 
   // INSTANT UX: dice starts shaking the moment user clicks · the chain
   // tx happens silently in the background. Whether Sequence (~27s) or
@@ -110,7 +135,11 @@ async function onPlaceBet() {
     await connect();
     // Clamp stake to live maxBet (defense in depth · Casino will revert with
     // BetTooLarge if bankroll drops further between this read and submit).
-    const finalStake = await clampStakeStr(stake, "dice");
+    // Long odds pay up to 9900x, so the binding limit is the Vault's max
+    // PAYOUT, not its max stake. Tell the limiter this bet's ceiling.
+    const winCount = direction === "over" ? (10000 - Math.round(t * 100)) : (Math.round(t * 100) - 1);
+    const capX100 = winCount > 0 ? BigInt(Math.ceil((9900 * 10000) / winCount)) : null;
+    const finalStake = await clampStakeStr(stake, "dice", capX100 ? { capX100 } : {});
     if (finalStake == null) {
       diceAnimStop(null);
       setStagePill("ready", "READY");
@@ -124,6 +153,7 @@ async function onPlaceBet() {
     populateFairPanel({ clientSeed, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash });
 
     const settled = await pollForSettle(betId);
+    SL.autoClaim?.().catch(() => {});   // winnings straight to the wallet
     const roll = settled && !settled.refunded ? decodeDiceResult(settled.args.resultData) : null;
     diceAnimStop(roll || 0);
 
@@ -182,8 +212,11 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   const slider = $("[data-sl-targetinput]");
   if (slider) {
-    target = parseInt(slider.value, 10) || 50;
-    slider.addEventListener("input", () => { target = parseInt(slider.value, 10) || 50; recalcSummary(); });
+    target = clampTarget(parseFloat(slider.value), direction);
+    slider.addEventListener("input", () => {
+      target = clampTarget(parseFloat(slider.value), direction);
+      recalcSummary();
+    });
   }
   const stakeEl = $("[data-sl-stake]");
   if (stakeEl) {

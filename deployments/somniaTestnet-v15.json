@@ -1,0 +1,126 @@
+{
+  "version": "v15",
+  "network": "somniaTestnet",
+  "chainId": "50312",
+  "deployer": "0xce09E3A56B88A24AD69EAEAEe1D3b0fDBC0a37e1",
+  "deploymentBlock": 443910973,
+  "addresses": {
+    "vault": "0x6497D80cCd713F0BD4d8B22CE96Eae0F92EC7Cca",
+    "loyalty": "0xDc75211541dF47D5023ae74A873194ad5296c22a",
+    "timelock": null
+  },
+  "games": [
+    {
+      "id": 0,
+      "name": "dice",
+      "kind": "single-shot",
+      "module": "0x531b7BB7076Bb7181f374A5D4E0CEc7a57CBa66B",
+      "cashier": "0x1866Fa1fD324332d5f1EEA20ABd930A0adCEE7fB",
+      "budget": "5000000000000000000"
+    },
+    {
+      "id": 1,
+      "name": "crash",
+      "kind": "round",
+      "module": "0xb96Fb6e3C6fb82acB448e53a3cb59e09f2B0ABD3",
+      "cashier": "0x4Bd0ee6bF4370Fc921c1f0Ad45A75337eb91f010",
+      "budget": "5000000000000000000"
+    },
+    {
+      "id": 2,
+      "name": "vault7",
+      "kind": "slot",
+      "module": "0xEB0221E338ba0b054571a00282f875f729E69A6A",
+      "cashier": "0xE53717cfaF3454dd4f10F834BD4F0DCB39F6067C",
+      "budget": "5000000000000000000"
+    },
+    {
+      "id": 3,
+      "name": "mines",
+      "kind": "multi-step",
+      "module": "0x3B958cFfe3b282908BdD85E2f8cEAf94CBcc87E8",
+      "cashier": "0x949EA354dC44C287795114CA5c5fC1926c1ee535",
+      "budget": "5000000000000000000"
+    },
+    {
+      "id": 4,
+      "name": "plinko",
+      "kind": "single-shot",
+      "module": "0x47026C7FF5393BB962f26179FA89E5498F2b29A6",
+      "cashier": "0xDc3Bf34527ABa869C0F6212190353fE7BFFD77B7",
+      "budget": "5000000000000000000"
+    },
+    {
+      "id": 5,
+      "name": "roulette",
+      "kind": "round",
+      "module": "0xEA30b4c708A780A600D8dE792ae0D1F0D1ab37DF",
+      "cashier": "0xFc02eC912d245e4109506202B758C9f900c6B02B",
+      "budget": "5000000000000000000"
+    },
+    {
+      "id": 6,
+      "name": "cluster",
+      "kind": "slot",
+      "module": "0x37d984410718BA70066aE9A897C6DfeC57049dC4",
+      "cashier": "0x2AF48F77437415922dB7daCD03a83Fea82867C20",
+      "budget": "5000000000000000000"
+    }
+  ],
+  "seedBatch": {
+    "size": 400,
+    "firstHashIdx": 0,
+    "deterministic": true
+  },
+  "deployedAt": "2026-07-25T06:05:38.674Z",
+  "moduleSwaps": [
+    {
+      "at": "2026-07-25",
+      "reason": "kill-switch gate (GameGate) + crash first-exit cashout",
+      "swapped": [
+        {
+          "name": "vault7",
+          "id": 2,
+          "old": "0x0d8DfE977893A3d53552cA93f0f6e4B090d5DB14",
+          "next": "0xEB0221E338ba0b054571a00282f875f729E69A6A"
+        },
+        {
+          "name": "cluster",
+          "id": 6,
+          "old": "0x6C03aB85F121D9f576ec1DD117D822e769c9d1C1",
+          "next": "0x37d984410718BA70066aE9A897C6DfeC57049dC4"
+        },
+        {
+          "name": "mines",
+          "id": 3,
+          "old": "0x10F76C3D9eF3E694bCEF3A5d171D39eb539E7f58",
+          "next": "0x3B958cFfe3b282908BdD85E2f8cEAf94CBcc87E8"
+        },
+        {
+          "name": "crash",
+          "id": 1,
+          "old": "0x469281C5DE93ff1cB6C876D2a03f5733AE3dbC27",
+          "next": "0xb96Fb6e3C6fb82acB448e53a3cb59e09f2B0ABD3"
+        },
+        {
+          "name": "roulette",
+          "id": 5,
+          "old": "0x38d52FFBE6884B50B22e4964C60Cb2495a3b67eb",
+          "next": "0xEA30b4c708A780A600D8dE792ae0D1F0D1ab37DF"
+        }
+      ]
+    },
+    {
+      "at": "2026-07-26",
+      "reason": "dice: hundredths targets (0.01% .. 99.99%, up to 9900x) on a versioned params shape",
+      "swapped": [
+        {
+          "name": "dice",
+          "id": 0,
+          "old": "0xcB9fCE13969da659b871D245dF1436e78ecD1bEe",
+          "next": "0x531b7BB7076Bb7181f374A5D4E0CEc7a57CBa66B"
+        }
+      ]
+    }
+  ]
+}

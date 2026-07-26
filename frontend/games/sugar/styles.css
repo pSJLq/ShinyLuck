@@ -17,6 +17,32 @@ body {
   font-family: var(--mono); color: var(--ink-0); background: var(--bg-0);
   min-height: 100vh; overflow-x: hidden;
 }
+/* Embedded in the SPA shell: the shell owns the viewport and sizes this iframe
+   from the reported content height. Keeping min-height:100vh here makes the
+   frame demand a full viewport of its own, so the shell grows the iframe past
+   the real viewport and a SECOND scrollbar appears on the right. */
+html.sl-embed, html.sl-embed body { min-height: 0; height: auto; }
+
+/* ---- Embedded density ------------------------------------------------------
+   Inside the shell this page sits under the site header, so the full-height
+   marketing hero pushed the machine down far enough that the SPIN button and
+   the VAULT CHARGE rail were never on screen together.
+
+   What gets removed is only what the shell already provides or what is pure
+   marketing: the long lede, and the vertical padding around the hero. The
+   type, the board and every control keep their real size — shrinking those
+   made the game look cheap rather than compact.
+
+   NOTHING here may use vh/dvh. The shell sizes this iframe from the height the
+   page reports, so a viewport unit INSIDE the frame feeds its own output back
+   in: content grows, the frame is told to grow, the unit grows again. That is
+   what made the board jitter and creep bigger during win animations.         */
+@media (min-width: 761px) {
+  html.sl-embed .sugar-shell { padding: 12px 28px 26px; }
+  html.sl-embed .game-hero { margin-bottom: 12px; align-items: center; }
+  html.sl-embed .game-hero .lede { display: none; }
+  html.sl-embed .charge-rail { margin-bottom: 12px; }
+}
 
 /* ============== AMBIENT ============== */
 .ambient { position:fixed; inset:0; z-index:-1; pointer-events:none;

@@ -51,6 +51,14 @@
      exists by the time PrivyProvider reads it. Without this the Privy
      bundle throws "Cannot initialize the Privy provider with an invalid
      Privy app ID" on cold load. -->
+<script>
+  /* Set before first paint so the embed CSS applies without a reflow flash. */
+  try {
+    if (new URLSearchParams(location.search).get("embed") === "1" || window.top !== window.self) {
+      document.documentElement.classList.add("sl-embed");
+    }
+  } catch (_) { document.documentElement.classList.add("sl-embed"); }
+</script>
 <script type="module" src="/lib/config.js"></script>
 <style>
   /* Use native OS cursor on slot pages - the shared custom cursor's
@@ -223,7 +231,7 @@
 <script type="module">
   import { SugarSlot } from '/games/sugar/api.js?v=fast1';
   import { SL } from '/lib/wallet.js';
-  import { decodeSugarLabResult, extractChargeMeterEvent } from '/lib/slot-decoders.js';
+  import { decodeSugarLabResult, extractChargeMeterEvent, syncPayBoosts } from '/lib/slot-decoders.js';
   import { CONFIG } from '/lib/config.js';
   import { clampStake } from '/lib/casino-limits.js';
   import { toast } from '/lib/ui.js';
@@ -315,7 +323,8 @@
           const placeMs = performance.now() - t2;
 
           const t3 = performance.now();
-          const settled = await SL.waitForSettle(placeRes.betId);
+          const settled = await SL.waitForSpinSettle("cluster", placeRes.betId);
+          SL.autoClaim().catch(() => {});   // winnings straight to the wallet
           const waitMs = performance.now() - t3;
 
           // Update the Provably-fair side panel with the actual on-chain
@@ -341,7 +350,8 @@
           // no visible difference.
           SL.provider.getTransactionReceipt(settled.txHash)
             .then((rec) => {
-              const ev = extractChargeMeterEvent(SL.casino, rec?.logs || []);
+              // Cluster module interface: the meter events are emitted there.
+              const ev = extractChargeMeterEvent(SL.clusterModule(), rec?.logs || []);
               if (ev && currentSlot && typeof currentSlot.applyChargeEvent === 'function') {
                 try { currentSlot.applyChargeEvent(ev); } catch (_) {}
               }
@@ -367,11 +377,14 @@
           }
           const stake = await clampOrToast(stakeWei, 'cluster');
           const placeRes = await SL.buyBonusCluster(Number(stake) / 1e18);
-          const settled = await SL.waitForSettle(placeRes.betId);
+          const settled = await SL.waitForSpinSettle("cluster", placeRes.betId);
+          SL.autoClaim().catch(() => {});   // winnings straight to the wallet
           let chargeEvent = null;
           try {
             const rec = await SL.provider.getTransactionReceipt(settled.txHash);
-            chargeEvent = extractChargeMeterEvent(SL.casino, rec?.logs || []);
+            // Must be the CLUSTER module's interface — the meter events are
+            // emitted there, not on the Vault.
+            chargeEvent = extractChargeMeterEvent(SL.clusterModule(), rec?.logs || []);
           } catch (_) {}
           return decodeSugarLabResult({ settled, stakeWei: stake, chargeEvent, isBuyBonus: true });
         },
@@ -462,6 +475,9 @@
       // mount + subscribe to RtpAdjusted so any agent-driven change shows
       // up without a refresh. Cluster = game id 6.
       async function refreshRtp() {
+        // Same moment is the right one to pull the live pay boost, so the
+        // per-cluster payout labels match what the chain actually credited.
+        syncPayBoosts(SL);
         try {
           const rtp = await SL.casino.getReportedRTP(6);
           if (!rtp) return;

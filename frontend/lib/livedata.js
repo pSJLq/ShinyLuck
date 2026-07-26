@@ -20,6 +20,7 @@ import {
   provider, wsProvider, fetchLogs, fetchRecentLogs, fetchDeploymentBlock,
   cacheGet, cacheSet,
 } from "./rpc.js";
+import { scanSettled, sources, vaultAddress, deploymentBlock as v15DeployBlock } from "./casino-sources.js";
 
 const GAME_BY_NAME = { dice: 0, crash: 1, slots: 2, mines: 3, plinko: 4, roulette: 5, cluster: 6 };
 const GAME_NAMES = ["DICE","CRASH","VAULT.7","MINES","PLINKO","ROULETTE","SUGAR.LAB"];
@@ -64,7 +65,22 @@ let _historicalContracts = null;     // [{ contract, deploymentBlock, isCurrent 
 let _totalSettled = 0;
 let _allPlayers = new Set();
 
-function deployed() { return CONFIG.casino && CONFIG.casino !== ZERO; }
+// The LIVE casino is the v15 Vault. `CONFIG.casino` still names the v14
+// monolith and is now only a history source, so gating on it would blank every
+// page the moment v14 stopped taking bets.
+function deployed() { return Boolean(vaultAddress()) && vaultAddress() !== ZERO; }
+
+// Reads for the LIVE casino (v15 Vault). Kept separate from CASINO_ABI below,
+// which describes the frozen v14-and-older monoliths: their `BetSettled` takes
+// `uint8 indexed game` where v15 takes `uint16 indexed gameId`, so the two hash
+// to different topic0 and one ABI silently returns zero logs for the other.
+const VAULT_ABI = [
+  "function freeBankroll() view returns (uint256)",
+  "function maxBetBps() view returns (uint256)",
+  "function maxExposureBps() view returns (uint256)",
+  "function gameMaxBet(uint16) view returns (uint256)",
+  "function totalPendingWithdrawals() view returns (uint256)",
+];
 
 const CASINO_ABI = [
   "function freeBankroll() view returns (uint256)",
@@ -87,7 +103,7 @@ const CASINO_ABI = [
 
 function casino() {
   if (!_casino) {
-    _casino = new ethers.Contract(CONFIG.casino, CASINO_ABI, provider());
+    _casino = new ethers.Contract(vaultAddress(), VAULT_ABI, provider());
   }
   return _casino;
 }
@@ -194,12 +210,13 @@ export async function refreshLiveStats() {
   if (!deployed()) return;
   try {
     const c = casino();
-    const [bankroll, bonusActive, blockNumber, maxBetBps] = await Promise.all([
+    const [bankroll, blockNumber, maxBetBps] = await Promise.all([
       c.freeBankroll(),
-      c.bonusModeActive(),
       provider().getBlockNumber(),
       c.maxBetBps().catch(() => 100n),
     ]);
+    // v15 dropped the agent layer, and bonus mode went with it.
+    const bonusActive = false;
     // The contract caps every bet at min(gameMaxBet, freeBankroll * maxBetBps).
     // On a small bankroll that bps cap is the REAL limit, so showing the raw
     // gameMaxBet (e.g. 5 STT) overstates what a player can actually wager
@@ -373,6 +390,29 @@ function eventsToRows(settled, stakeMap, contractAddress) {
   });
 }
 
+/// v15 rows, in the shape the feed renderer already speaks.
+///
+/// A v15 win can come from six contracts, so the scanner returns a normalised
+/// row and this only re-labels the fields. `key` is already unique across
+/// sources, which is what the dedup map needs (module bet ids are local, so a
+/// bare betId would collide between vault7 and cluster).
+async function v15FeedRows(from, to) {
+  const rows = await scanSettled(from, to, { onlyWins: false });
+  return rows.map((r) => ({
+    uid: `${r.txHash}:${r.key}`,
+    betId: r.key,
+    contract: r.srcId,
+    player: r.player,
+    game: r.gameId,
+    won: r.payout > 0n,
+    payout: BigInt(r.payout),
+    stake: BigInt(r.stake ?? 0n),
+    blockNumber: r.block,
+    logIndex: 0,
+    transactionHash: r.txHash,
+  }));
+}
+
 function mergeFeedRows(newRows) {
   const seen = new Set(_feedRows.map((r) => r.uid));
   let added = false;
@@ -438,6 +478,7 @@ export async function refreshLiveFeed() {
     // contract address so eventsToRows can build a contract-namespaced
     // stake-map key (betIds collide across contracts otherwise).
     let perContract = []; // [{ contract: addr, settled: [...], placed: [...] }]
+    let v15Rows = [];     // the live casino, from its six contracts
     if (_lastFeedBlock === 0) {
       // COLD BOOT: scan ALL historical casinos via Shannon Explorer (one HTTP
       // per contract). With 3 contracts and ~640 BetSettled across all-time,
@@ -450,7 +491,10 @@ export async function refreshLiveFeed() {
         // at `head` for the current contract. This is correct AND keeps each
         // explorer call's response small enough to fit one page (1000 logs).
         const next = contracts.find((x) => x.deploymentBlock > entry.deploymentBlock);
-        const to = next ? next.deploymentBlock - 1 : head;
+        // The newest monolith (v14) is frozen at the block v15 went live, so
+        // scanning it up to `head` only walks empty ranges.
+        const frozenAt = v15DeployBlock() ? v15DeployBlock() - 1 : head;
+        const to = next ? next.deploymentBlock - 1 : frozenAt;
         const addr = entry.contract.target;
         fetches.push(
           fetchLogs(entry.contract, "BetSettled", from, to).then((evs) => ({ kind: "settled", addr, evs })),
@@ -458,6 +502,7 @@ export async function refreshLiveFeed() {
         );
       }
       const results = await Promise.all(fetches);
+      v15Rows = await v15FeedRows(v15DeployBlock(), head);
       // Bucket per-contract so stake/settled live in the same scope.
       const byAddr = new Map();
       const bucket = (addr) => {
@@ -471,7 +516,7 @@ export async function refreshLiveFeed() {
         else                      b.placed.push(...r.evs);
       }
       perContract = [...byAddr.values()];
-      const totalSettled = perContract.reduce((n, b) => n + b.settled.length, 0);
+      const totalSettled = perContract.reduce((n, b) => n + b.settled.length, 0) + v15Rows.length;
       if (totalSettled === 0) {
         const body = document.querySelector("#feed-body");
         if (body && _feedRows.length === 0) body.innerHTML = `<tr><td class="dim" colspan="5">no settled bets yet - be the first</td></tr>`;
@@ -493,16 +538,10 @@ export async function refreshLiveFeed() {
       _totalSettled = 0;
       _allPlayers = new Set();
     } else if (head > _lastFeedBlock) {
-      // INCREMENTAL: only the current contract can have new events (older
-      // ones are frozen). Use Shannon Explorer for the small (last, head]
-      // delta - one HTTP per event type.
-      const c = currentContract.contract;
-      const fromBlock = Math.max(_lastFeedBlock + 1, currentContract.deploymentBlock || 0);
-      const [settled, placed] = await Promise.all([
-        fetchLogs(c, "BetSettled", fromBlock, head),
-        fetchLogs(c, "BetPlaced",  fromBlock, head),
-      ]);
-      perContract = [{ contract: c.target, settled, placed }];
+      // INCREMENTAL: only the LIVE casino can have new events — every monolith
+      // in `historicalContracts()`, v14 included, is frozen now.
+      const fromBlock = Math.max(_lastFeedBlock + 1, v15DeployBlock());
+      v15Rows = await v15FeedRows(fromBlock, head);
     } else {
       return;
     }
@@ -517,6 +556,7 @@ export async function refreshLiveFeed() {
       if (b.settled.length) anySettled = true;
       allNewRows.push(...eventsToRows(b.settled, _stakeByBet, b.contract));
     }
+    if (v15Rows.length) { anySettled = true; allNewRows.push(...v15Rows); }
     if (!anySettled) { _lastFeedBlock = head; return; }
     const newRows = allNewRows;
     const animate = _lastFeedBlock > 0; // first cold load: no animation, just render
@@ -749,38 +789,26 @@ async function startFeedRealtime() {
   const ws = wsProvider();
   if (ws) {
     try {
-      const c = casino();
-      const wsContract = new ethers.Contract(CONFIG.casino, c.interface.fragments, ws);
-      const settledTopic = c.interface.getEvent("BetSettled").topicHash;
-      const placedTopic  = c.interface.getEvent("BetPlaced").topicHash;
-      const currentLower = CONFIG.casino.toLowerCase();
-      ws.on({ address: CONFIG.casino, topics: [placedTopic] }, (log) => {
+      // v15 spreads settlements over six contracts with three different event
+      // shapes, so instead of decoding each one here we subscribe to all of
+      // them and let the (already correct) scanner build the row. The push is
+      // still instant; only the decode moved.
+      const srcs = sources();
+      if (!srcs.length) throw new Error("no v15 sources");
+      // Two games settling in the same instant must BOTH land. A plain
+      // in-flight flag would drop the second one, and with WS active there is
+      // no poll behind it to pick the row up later — so hits that arrive
+      // during a decode are coalesced into a pending block range instead.
+      let busy = false, queuedFrom = 0, queuedTo = 0;
+
+      const drain = async () => {
+        if (busy || !queuedTo) return;
+        busy = true;
+        const [from, to] = [queuedFrom, queuedTo];
+        queuedFrom = queuedTo = 0;
         try {
-          const parsed = c.interface.parseLog(log);
-          // Namespace by current-casino address; matches the cold-boot key
-          // scheme used in eventsToRows / refreshLiveFeed.
-          _stakeByBet.set(`${currentLower}::${parsed.args.betId.toString()}`, parsed.args.amount);
-        } catch (_) {}
-      });
-      ws.on({ address: CONFIG.casino, topics: [settledTopic] }, (log) => {
-        try {
-          const parsed = c.interface.parseLog(log);
-          const betIdStr = parsed.args.betId.toString();
-          const row = {
-            uid: `${log.transactionHash}:${log.logIndex}`,
-            betId: betIdStr,
-            contract: currentLower,
-            player: parsed.args.player,
-            game: Number(parsed.args.game),
-            won: parsed.args.won,
-            payout: BigInt(parsed.args.payout),
-            stake: BigInt(_stakeByBet.get(`${currentLower}::${betIdStr}`) || 0n),
-            blockNumber: log.blockNumber,
-            logIndex: log.logIndex,
-            transactionHash: log.transactionHash,
-          };
-          const added = mergeFeedRows([row]);
-          if (added) {
+          for (const row of await v15FeedRows(from, to)) {
+            if (!mergeFeedRows([row])) continue;
             const body = document.querySelector("#feed-body");
             if (body) {
               if (body.querySelector("td.dim")) body.innerHTML = "";
@@ -807,8 +835,24 @@ async function startFeedRealtime() {
             document.querySelectorAll('[data-count][data-sl-role="totalBets"]').forEach((el) => { el.textContent = fmtNum(_totalSettled); });
             document.querySelectorAll('[data-count][data-sl-role="playersOnline"]').forEach((el) => { el.textContent = fmtNum(_allPlayers.size); });
           }
-        } catch (e) { console.warn("[livedata] ws settled parse:", e.message); }
-      });
+        } catch (e) {
+          console.warn("[livedata] ws settled decode:", e.message);
+        } finally {
+          busy = false;
+          if (queuedTo) drain();     // something arrived while we were decoding
+        }
+      };
+
+      const onHit = (log) => {
+        const b = Number(log.blockNumber);
+        queuedFrom = queuedFrom ? Math.min(queuedFrom, b) : b;
+        queuedTo = Math.max(queuedTo, b);
+        drain();
+      };
+      for (const s of srcs) {
+        const topic = s.c.interface.getEvent(s.settled).topicHash;
+        ws.on({ address: s.c.target, topics: [topic] }, onHit);
+      }
       return;
     } catch (e) {
       console.warn("[livedata] WS log subscribe failed, falling back to poll:", e.message);

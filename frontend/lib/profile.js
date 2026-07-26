@@ -12,6 +12,7 @@ import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect, signOut, shortAddr } from "/lib/wallet.js";
 import { POKER_CONFIG } from "/poker/poker-config.js";
 import { CONFIG } from "/lib/config.js";
+import { CONFIG_V15 } from "/lib/config-v15.js";
 import { invalidateProfile } from "/lib/profiles.js";
 
 // Casino wins are pull-payment: the contract credits pendingWithdrawals and the
@@ -37,11 +38,29 @@ const AV_ABI = [
   "function avatarOf(address) view returns (bytes)",
 ];
 
+/** Every casino that ever credited a player, newest first, minus the live one. */
+function legacyCasinos() {
+  const live = (CONFIG_V15.addresses?.vault || "").toLowerCase();
+  const seen = new Set([live]);
+  const out = [];
+  for (const a of [CONFIG.casino, ...(CONFIG.historicalCasinos || []).map((h) => h.address)]) {
+    const lower = (a || "").toLowerCase();
+    if (!lower || lower === ZERO_ADDR || seen.has(lower)) continue;
+    seen.add(lower);
+    out.push(a);
+  }
+  return out;
+}
+const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
+
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 
 let connected = false;
 let myProfile = { handle: "", avatar: 0 };
+// Retired casinos that still owe the connected player, resolved by
+// refreshClaimable() so the claim button does not re-scan 20+ contracts.
+let _legacyOwed = [];
 let avatarUrl = null;
 let pollTimer = null;
 
@@ -53,7 +72,13 @@ const fmtBal = (wei) => {
 function contracts(write) {
   const runner = write ? SL.signer : SL.provider;
   return {
-    casino: new ethers.Contract(CONFIG.casino, CASINO_ABI, runner),
+    // v15: winnings are credited in the Vault, not the old monolith.
+    casino: new ethers.Contract(CONFIG_V15.addresses.vault, CASINO_ABI, runner),
+    // Winnings from RETIRED casinos are still owed and still claimable — the
+    // pull-payment balance lives in whichever contract credited it. Pointing
+    // the drawer at the live Vault alone made that money look like it vanished
+    // (v14 was holding ~2.4 STT of player winnings after the v15 cutover).
+    legacy: write ? [] : legacyCasinos().map((addr) => new ethers.Contract(addr, CASINO_ABI, runner)),
     room: new ethers.Contract(POKER_CONFIG.pokerRoom, ROOM_ABI, runner),
     pp: POKER_CONFIG.playerProfile ? new ethers.Contract(POKER_CONFIG.playerProfile, PP_ABI, runner) : null,
     av: POKER_CONFIG.avatarStore ? new ethers.Contract(POKER_CONFIG.avatarStore, AV_ABI, runner) : null,
@@ -92,7 +117,18 @@ async function refreshClaimable() {
   const box = $("[data-claim-box]");
   if (!box || !connected || !SL.address || !SL.provider) return;
   try {
-    const owed = await contracts(false).casino.pendingWithdrawals(SL.address);
+    const c = contracts(false);
+    // There are 20+ retired casinos, so resolve WHICH of them owe this player
+    // once here and hand the list to the claim button — otherwise the button
+    // would re-read every contract on click and crawl.
+    const [vaultOwed, ...legacyOwed] = await Promise.all([
+      c.casino.pendingWithdrawals(SL.address),
+      ...c.legacy.map((x) => x.pendingWithdrawals(SL.address).catch(() => 0n)),
+    ]);
+    _legacyOwed = legacyOwed
+      .map((amt, i) => ({ addr: legacyCasinos()[i], amt }))
+      .filter((x) => x.amt > 0n);
+    const owed = _legacyOwed.reduce((a, b) => a + b.amt, vaultOwed);
     if (owed > 0n) {
       box.style.display = "";
       const el = $("[data-claim-amt]");
@@ -206,6 +242,26 @@ document.addEventListener("click", async (e) => {
     btn.disabled = true;
     try {
       setMsg("[data-claim-msg]", "Claiming…", true);
+      // Sweep the retired casinos first — those balances are frozen and easy to
+      // forget; the live Vault is claimed last so its receipt is the one the
+      // player sees confirmed.
+      const ro = contracts(false);
+      let swept = 0n;
+      for (const { addr, amt } of _legacyOwed) {
+        try {
+          await (await new ethers.Contract(addr, CASINO_ABI, SL.signer).claim()).wait();
+          swept += amt;
+        } catch (e) { console.warn("[profile] legacy claim skipped:", e.shortMessage || e.message); }
+      }
+      // `claim()` reverts with "nothing to claim" on a zero balance, so a player
+      // whose winnings were ALL on a retired casino would see an error after a
+      // successful sweep. Only call it when the Vault actually owes something.
+      if ((await ro.casino.pendingWithdrawals(SL.address)) === 0n) {
+        setMsg("[data-claim-msg]", swept > 0n ? "Claimed ✓" : "nothing to claim", swept > 0n);
+        if (swept > 0n) refreshBalances();
+        await refreshClaimable();
+        return;
+      }
       const tx = await contracts(true).casino.claim();
       await tx.wait();
       setMsg("[data-claim-msg]", "Claimed ✓", true);

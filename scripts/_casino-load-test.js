@@ -15,7 +15,7 @@
 //
 // Player wallets come from the hardhat dev mnemonic by default (local rig).
 // Against a real network set PLAYER_MASTER_KEY to derive funded wallets.
-require("dotenv").config();
+try { require("dotenv").config(); } catch (_) { /* env passed inline is fine */ }
 const { ethers } = require("ethers");
 const fs = require("fs");
 const path = require("path");
@@ -129,7 +129,7 @@ async function main() {
   async function runPlayer(w, idx) {
     const c = new ethers.Contract(casinoAddr, ABI, w);
     await sleep(Math.random() * 1500);              // players don't arrive in lockstep
-    let nonce = await provider.getTransactionCount(w.address);
+    let nonce = await provider.getTransactionCount(w.address, "pending");
     while (Date.now() < deadline) {
       const game = MIX[Math.floor(Math.random() * MIX.length)];
       const seed = ethers.hexlify(ethers.randomBytes(32));
@@ -143,7 +143,7 @@ async function main() {
         placeFails++;
         const why = (e.shortMessage || e.message || "?").slice(0, 90);
         placeFailReasons.set(why, (placeFailReasons.get(why) || 0) + 1);
-        nonce = await provider.getTransactionCount(w.address);
+        nonce = await provider.getTransactionCount(w.address, "pending");
         await sleep(1000); continue;
       }
       let rc;
