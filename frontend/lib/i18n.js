@@ -68,6 +68,15 @@ const RU = {
   "Moves between wallet and poker settle instantly on Somnia.":
     "Переводы между кошельком и покером проходят мгновенно в Somnia.",
 
+  // ---- infofi (mindshare board) ----
+  // The three view-switch labels and the legend. Account names themselves are
+  // never translated: the treemap and the tables sit under data-no-i18n.
+  "Everyone": "Все",
+  "Projects": "Проекты",
+  "Users": "Пользователи",
+  "Ecosystem project": "Проект экосистемы",
+  "Community voice": "Голос сообщества",
+
   // ---- settings modal ----
   "Audio": "Звук",
   "Sound": "Звук",

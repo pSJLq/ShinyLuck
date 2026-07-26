@@ -15,6 +15,13 @@
 html, body { margin:0; padding:0; }
 body { font-family: var(--mono); color: var(--ink-0); background: var(--bg-0); min-height: 100vh; overflow-x: hidden; }
 
+/* Embedded in the SPA shell: the shell owns the viewport and sizes this iframe
+   from the height the page reports. Keeping min-height:100vh here makes the
+   frame demand a full viewport of its own while it sits under the shell's 64px
+   header, so the shell grows the iframe past the real viewport and a SECOND
+   scrollbar appears. Same fix as games/sugar/styles.css, which hit it for real. */
+html.sl-embed, html.sl-embed body { min-height: 0; height: auto; }
+
 /* ambient (shared shape with sugar) */
 .ambient { position:fixed; inset:0; z-index:-1; pointer-events:none;
   background:
