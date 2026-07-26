@@ -1,0 +1,80 @@
+# ShinyLuck / ShinyPoker web front — Caddy v2.
+#
+# Lives in the repo on purpose: the previous copy existed only on the VPS and
+# died with it (2026-07-26). Deployed to /root/poker-web/Caddyfile.
+#
+#   caddy validate --config /root/poker-web/Caddyfile
+#   pm2 restart poker-web          # graceful; certs are kept in /root/.local/share/caddy
+
+{
+	# No global email: ACME registers fine without one and this file is public.
+	admin off
+}
+
+shinyluck.win {
+	encode zstd gzip
+
+	# Without an explicit Cache-Control, Caddy sends only ETag + Last-Modified and
+	# browsers fall back to HEURISTIC freshness: they may reuse a stale copy for
+	# hours without ever asking the server. A deploy then reaches the page but not
+	# its scripts, and the mismatch renders as a half-broken page that only a hard
+	# refresh fixes - which is exactly what happened to /infofi on 2026-07-26.
+	# "no-cache" does not disable caching: it forces a revalidation, so unchanged
+	# files still cost one 304 and nothing more.
+	# Pictures and fonts keep a real TTL - they change by getting a new name.
+	@static path *.png *.jpg *.jpeg *.webp *.svg *.ico *.woff *.woff2
+	header @static Cache-Control "public, max-age=86400"
+
+	# Everything ELSE revalidates. Stated as a negation rather than a list of
+	# extensions because `header` runs BEFORE `rewrite` in Caddy's directive
+	# order, so an SPA route still looks like bare "/infofi" here and would miss
+	# an "*.html" matcher entirely.
+	@revalidate not path *.png *.jpg *.jpeg *.webp *.svg *.ico *.woff *.woff2
+	header @revalidate Cache-Control "no-cache"
+
+	# Poker dealer API. The bot serves BARE paths (/health, /lobby, /snapshot,
+	# /zk/*, /chat, /holes, /faucet), while the frontend calls them under
+	# /dealer — so the prefix is stripped here, not forwarded.
+	handle_path /dealer/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	# All player chain traffic goes through our own proxy (retry + upstream
+	# failover). It absorbs the Somnia gateway's periodic 502 waves and gives
+	# VPN players a route that Somnia's Google LB does not cut off.
+	handle /rpc {
+		reverse_proxy 127.0.0.1:3003
+	}
+
+	# WebSocket straight to Somnia — the proxy is HTTP-only.
+	handle_path /rpc/ws* {
+		rewrite * /ws
+		reverse_proxy https://api.infra.testnet.somnia.network {
+			header_up Host api.infra.testnet.somnia.network
+		}
+	}
+
+	# SPA shell routes. index.html owns them and iframes the real page with
+	# ?embed=1, so a hard refresh on /dice must still land on the shell.
+	# Exact paths only — /poker/table.html keeps serving the real file.
+	@spa path /poker /dice /mines /plinko /crash /roulette /vault7 /sugar /docs /fair /leaderboard /predictions /infofi
+	rewrite @spa /index.html
+
+	root * /root/poker-web/frontend
+
+	# Extensionless standalone pages (/admin -> admin.html). Must come after the
+	# SPA rewrite: /docs has to reach the shell, not docs.html directly.
+	try_files {path} {path}.html {path}/index.html
+
+	file_server
+}
+
+# Old domain: permanent redirect, path preserved. Invite links handed out before
+# the rename still work.
+shinia.mom {
+	redir https://shinyluck.win{uri} permanent
+}
+
+www.shinyluck.win {
+	redir https://shinyluck.win{uri} permanent
+}

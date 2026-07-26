@@ -1,0 +1,7 @@
+{
+  "name": "hardhat",
+  "version": "0.0.0-shim",
+  "private": true,
+  "main": "index.js",
+  "description": "Local stand-in for hardhat so the v15 settlement bot can run without the full toolchain. See deploy/README.md step 3."
+}
