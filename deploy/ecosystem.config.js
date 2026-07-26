@@ -38,6 +38,16 @@ module.exports = {
       env: { PORT: "3003" },
     },
     {
+      // Owner-signed editor for the InfoFi account lists, behind /infofi-admin.
+      // Writes into the predictions tree, so it needs that path; the owner set
+      // is read from chain, never configured.
+      name: "infofi-admin",
+      cwd: "/root/shinyluck",
+      script: "scripts/infofi-admin.js",
+      autorestart: true,
+      env: { PORT: "3005", INFOFI_DIR: "/root/predictions/infofi", PRED_DIR: "/root/predictions" },
+    },
+    {
       // Casino v15 settlement: one cashier wallet (own nonce lane) per game,
       // plus gas auto-refuel and seed-pool top-up (both need V15_OWNER_KEY).
       name: "casino-reveal-v15",

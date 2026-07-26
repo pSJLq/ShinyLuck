@@ -216,6 +216,34 @@
     </div>
 
     <div class="adm-card" style="grid-column: span 2;">
+      <h3>InfoFi · tracked accounts</h3>
+      <div class="adm-row">
+        <span class="l">List</span>
+        <span style="flex:1">
+          <button class="adm-btn" data-sl-adm-if-list="projects">Projects</button>
+          <button class="adm-btn" data-sl-adm-if-list="voices">Voices</button>
+          <button class="adm-btn" data-sl-adm-if-list="tags">Context tags</button>
+        </span>
+      </div>
+      <div class="adm-row">
+        <span class="l">Handle</span>
+        <span style="flex:1"><input class="adm-input" style="width:100%" type="text" placeholder="somnia_network (no @)" data-sl-adm-if-handle /></span>
+      </div>
+      <div class="adm-row">
+        <button class="adm-btn" data-sl-adm-if-add>Add to list</button>
+        <button class="adm-btn danger" data-sl-adm-if-remove>Remove from list</button>
+        <span class="v" data-sl-adm-if-status style="margin-left:10px"></span>
+      </div>
+      <div data-sl-adm-if-rows style="margin-top:8px"></div>
+      <div class="m" style="opacity:.5; margin-top:10px; font-size:11px; line-height:1.5;">
+        Drives the mindshare board. <b>Projects</b> are measured on all of their own posts; <b>voices</b> only on
+        activity that mentions a <b>context tag</b>, so a tag change re-scopes every voice. Writes are signed with
+        your wallet and accepted from any of the three project owner keys · no transaction, no gas. The next daily
+        collection picks the change up, and new accounts get their avatar mirrored then.
+      </div>
+    </div>
+
+    <div class="adm-card" style="grid-column: span 2;">
       <h3>Stats · per-game wagered / paid / margin</h3>
       <table class="adm-table">
         <thead><tr><th>Game</th><th>Bets</th><th>Wagered</th><th>Paid out</th><th>House margin</th></tr></thead>

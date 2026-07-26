@@ -39,6 +39,12 @@ shinyluck.win {
 		reverse_proxy 127.0.0.1:3002
 	}
 
+	# InfoFi list editor for /admin. Owner-gated by signature inside the service
+	# itself, not here - Caddy has no idea who is connected.
+	handle_path /infofi-admin/* {
+		reverse_proxy 127.0.0.1:3005
+	}
+
 	# All player chain traffic goes through our own proxy (retry + upstream
 	# failover). It absorbs the Somnia gateway's periodic 502 waves and gives
 	# VPN players a route that Somnia's Google LB does not cut off.

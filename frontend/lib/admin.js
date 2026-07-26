@@ -462,6 +462,13 @@ function bindActions() {
       refreshPredictions();
     } catch (e) { ptoast(e.shortMessage || e.message); }
   });
+  // ---- InfoFi tracked accounts -------------------------------------------
+  // These are plain text files the daily collector reads, not chain state, so
+  // the edit is a SIGNED REQUEST rather than a transaction: no gas, instant.
+  // The service re-derives the owner set from chain and accepts any of the same
+  // three keys that open this console.
+  $("[data-sl-adm-if-list]") && bindInfofi(toast);
+
   $("[data-sl-adm-pred-curated-toggle]")?.addEventListener("click", async () => {
     if (!isPredOwner) return ptoast("Connect the PREDICTIONS deployer account", "warn");
     await connect();
@@ -611,6 +618,106 @@ async function setCreator(addr, allow) {
     toast(`${allow ? "Allowed" : "Revoked"} ${shortAddr(addr)}`, "success");
     refreshPredictions();
   } catch (e) { toast(e.shortMessage || e.message); }
+}
+
+/* ---------------- InfoFi tracked accounts ----------------
+ * The mindshare board is driven by three text files on the box. Editing them
+ * is an owner-signed HTTP request, not a transaction - there is nothing on
+ * chain to change, and making the owner pay gas to add a handle would be silly.
+ * The signature covers the exact action, so it cannot be replayed as another. */
+const IF_API = "/infofi-admin";
+const IF_LABEL = { projects: "Projects", voices: "Voices", tags: "Context tags" };
+let ifList = "projects";
+let ifCache = null;
+
+function ifStatus(msg, kind) {
+  const el = $("[data-sl-adm-if-status]");
+  if (!el) return;
+  el.textContent = msg || "";
+  el.style.color = kind === "error" ? "var(--red)" : kind === "success" ? "var(--green)" : "var(--fg-faint)";
+}
+
+function ifPaint() {
+  document.querySelectorAll("[data-sl-adm-if-list]").forEach((b) => {
+    const on = b.getAttribute("data-sl-adm-if-list") === ifList;
+    b.style.borderColor = on ? "var(--gold-dark)" : "";
+    b.style.color = on ? "var(--gold-hi)" : "";
+  });
+  const box = $("[data-sl-adm-if-rows]");
+  if (!box) return;
+  const items = (ifCache && ifCache[ifList]) || [];
+  box.innerHTML = items.length
+    ? `<div style="display:flex;flex-wrap:wrap;gap:6px">` + items.map((h) =>
+        `<span data-no-i18n style="font:500 11px var(--mono);color:var(--fg-dim);border:1px solid var(--bd);border-radius:999px;padding:3px 9px">@${String(h).replace(/[&<>"]/g, "")}</span>`
+      ).join("") + `</div>`
+    : `<span class="dim" style="font-size:11px">${ifCache ? "empty" : "loading…"}</span>`;
+}
+
+async function refreshInfofi() {
+  try {
+    const r = await fetch(IF_API + "/lists", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    ifCache = await r.json();
+  } catch (_) {
+    ifCache = null;   // service down: show "loading" rather than a wrong empty
+  }
+  ifPaint();
+}
+
+function bindInfofi(toast) {
+  document.querySelectorAll("[data-sl-adm-if-list]").forEach((b) => {
+    b.addEventListener("click", () => {
+      ifList = b.getAttribute("data-sl-adm-if-list");
+      ifStatus("");
+      ifPaint();
+    });
+  });
+  const run = async (action) => {
+    const handle = ($("[data-sl-adm-if-handle]")?.value || "").trim().replace(/^@/, "");
+    if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) {
+      return ifStatus("handle must be 1-15 of A-Z a-z 0-9 _", "error");
+    }
+    try {
+      await connect();
+      if (!SL.signer) return ifStatus("connect a wallet first", "error");
+      const ts = Math.floor(Date.now() / 1000);
+      // Must match scripts/infofi-admin.js signMessage() byte for byte.
+      const message = [
+        "ShinyLuck InfoFi admin",
+        `action: ${action}`,
+        `list: ${ifList}`,
+        `handle: ${handle}`,
+        `ts: ${ts}`,
+      ].join("\n");
+      ifStatus("sign the request in your wallet…");
+      const signature = await SL.signer.signMessage(message);
+      const r = await fetch(IF_API + "/edit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action, list: ifList, handle, ts, signature }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        ifStatus(body.error || `HTTP ${r.status}`, "error");
+        return;
+      }
+      if (body.lists) ifCache = { ...(ifCache || {}), ...body.lists };
+      ifPaint();
+      if (body.changed) {
+        ifStatus(`@${handle} ${action === "add" ? "added to" : "removed from"} ${IF_LABEL[ifList]}`, "success");
+        toast(`@${handle} ${action === "add" ? "added" : "removed"} · applies on the next daily collection`, "success");
+      } else {
+        ifStatus(body.reason || "no change", "warn");
+      }
+    } catch (e) {
+      // A user closing the signature prompt is not an error worth shouting about.
+      const m = e.shortMessage || e.message || String(e);
+      ifStatus(/reject|denied|4001/i.test(m) ? "signature cancelled" : m, /reject|denied|4001/i.test(m) ? "warn" : "error");
+    }
+  };
+  $("[data-sl-adm-if-add]")?.addEventListener("click", () => run("add"));
+  $("[data-sl-adm-if-remove]")?.addEventListener("click", () => run("remove"));
+  refreshInfofi();
 }
 
 async function refreshAll() {

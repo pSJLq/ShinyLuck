@@ -19,6 +19,7 @@ list now live here so that never costs a day again.
 | `poker-web` | `/root/poker-web` | 80/443 | Caddy: static site, TLS, `/dealer` + `/rpc` routing |
 | `poker` | `/root/shinyluck` | 3002 | poker dealer bot + `/dealer` API |
 | `rpc-proxy` | `/root/shinyluck` | 3003 | chain proxy for players (retry + upstream failover) |
+| `infofi-admin` | `/root/shinyluck` | 3005 | owner-signed editor for the InfoFi account lists (`/infofi-admin`) |
 | `casino-reveal-v15` | `/root/casino-bot` | — | casino v15 settlement, one cashier lane per game |
 | `pred-keeper` | `/root/predictions` | — | resolves / voids prediction markets |
 | `pred-oracle` | `/root/predictions` | — | measures X metrics, publishes JSON |
@@ -121,6 +122,23 @@ Cron (InfoFi daily roll-up):
 ⚠️ The X scraper account was previously trusted on the old datacenter IP. A new
 IP can trigger a login challenge — check `pred-oracle` logs after the move and
 re-add cookies if it complains.
+
+## 4b. InfoFi list editor
+
+`scripts/infofi-admin.js` lets the owner add and remove tracked accounts from
+`/admin` instead of over SSH. It edits `projects.txt` / `voices.txt` /
+`tags.txt` in `/root/predictions/infofi`.
+
+There is no API key. Each write carries an EIP-191 `personal_sign` over a message
+naming the exact action, and the recovered address must be one of the project's
+three on-chain owners — read live from `CasinoVault.owner()`,
+`PokerRoom.owner()` and the prediction market's `owner()`, so rotating a key
+cannot leave a stale allowlist behind. With no owner readable it fails CLOSED.
+Signatures are single-use and expire after 120 seconds.
+
+`INFOFI_ADMIN_OWNERS` accepts a comma-separated allowlist on top of the chain
+set. Leave it unset in production; it exists for a missing manifest and for
+testing the auth path.
 
 ## 5. Secrets
 
