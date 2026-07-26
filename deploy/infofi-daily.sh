@@ -24,8 +24,21 @@ fi
 echo "[$(date -Is)] collecting"
 cd "$PRED" || exit 1
 
-if ! "$PY" infofi/collect.py --discover; then
-	echo "[$(date -Is)] collector FAILED — keeping the previous snapshot live"
+# A throttled run is normal now and takes hours: X hands fresh scraper accounts a
+# tiny timeline quota, so the collector spends most of its time waiting out
+# 15-minute windows. The cap is generous enough not to kill a legitimately slow
+# run, and short enough that a WEDGED one always releases the lock before the
+# next nightly fire - otherwise one stuck process silently eats every following
+# day's collection.
+MAX_RUN_S=${INFOFI_MAX_RUN_S:-36000}   # 10h
+
+if ! timeout -k 30 "$MAX_RUN_S" "$PY" infofi/collect.py --discover; then
+	rc=$?
+	if [ "$rc" -eq 124 ]; then
+		echo "[$(date -Is)] collector hit the ${MAX_RUN_S}s cap and was stopped — previous snapshot stays live"
+	else
+		echo "[$(date -Is)] collector FAILED (exit $rc) — keeping the previous snapshot live"
+	fi
 	exit 1
 fi
 
