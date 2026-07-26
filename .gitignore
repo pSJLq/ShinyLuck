@@ -158,3 +158,10 @@ frontend/poker/*.compiled.js
 
 # Screenshots the user drops in for Claude to look at — local only
 /images for claude/
+
+# X bot account credentials (login:password:email:email_pass:token:2FA).
+# Never commit: this is a public repo. Used once to seed the scraper pool ON
+# THE VPS, never from a local machine.
+Accounts.txt
+accounts*.txt
+!*.example.txt
