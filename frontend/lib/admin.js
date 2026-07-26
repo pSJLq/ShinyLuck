@@ -698,8 +698,8 @@ async function ifRefreshStatus() {
   if (btn) btn.disabled = !!st.running;
   if (el) {
     if (st.running) {
-      const m = st.elapsedSec == null ? "" : ` · ${Math.floor(st.elapsedSec / 60)}m ${st.elapsedSec % 60}s`;
-      el.textContent = `collecting…${m} (15-25 min, you can close this page)`;
+      const m = st.elapsedSec == null ? "" : ` · ${Math.floor(st.elapsedSec / 60)}m`;
+      el.textContent = `collecting…${m} · X throttles this, expect hours · safe to close the page`;
       el.style.color = "var(--gold-mid)";
     } else {
       el.textContent = "";
