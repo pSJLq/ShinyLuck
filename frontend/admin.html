@@ -235,11 +235,22 @@
         <span class="v" data-sl-adm-if-status style="margin-left:10px"></span>
       </div>
       <div data-sl-adm-if-rows style="margin-top:8px"></div>
+      <div class="adm-row" style="margin-top:12px">
+        <span class="l">Snapshot</span>
+        <span class="v" data-sl-adm-if-snapshot>-</span>
+      </div>
+      <div class="adm-row" style="border-bottom:none">
+        <button class="adm-btn" data-sl-adm-if-collect>Collect now</button>
+        <span class="v" data-sl-adm-if-run style="margin-left:10px"></span>
+      </div>
       <div class="m" style="opacity:.5; margin-top:10px; font-size:11px; line-height:1.5;">
         Drives the mindshare board. <b>Projects</b> are measured on all of their own posts; <b>voices</b> only on
         activity that mentions a <b>context tag</b>, so a tag change re-scopes every voice. Writes are signed with
-        your wallet and accepted from any of the three project owner keys · no transaction, no gas. The next daily
-        collection picks the change up, and new accounts get their avatar mirrored then.
+        your wallet and accepted from any of the three project owner keys · no transaction, no gas.
+        <br/>A collection runs nightly at 04:17 UTC and picks up whatever the lists say then. <b>Collect now</b>
+        runs the same job immediately · it walks every tracked timeline on X, so it takes <b>15-25 minutes</b> and
+        you can close this page while it works. Avatars are mirrored during the run, so a newly added account gets
+        its picture as part of it.
       </div>
     </div>
 

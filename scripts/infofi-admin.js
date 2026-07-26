@@ -18,10 +18,15 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const { spawn, execFile } = require("child_process");
 const { ethers } = require("ethers");
 
 const PORT = Number(process.env.PORT || 3005);
 const INFOFI_DIR = process.env.INFOFI_DIR || "/root/predictions/infofi";
+const PRED_DIR = process.env.PRED_DIR || "/root/predictions";
+const DAILY = process.env.INFOFI_DAILY || path.join(PRED_DIR, "infofi-daily.sh");
+const RUN_LOG = "/tmp/infofi-manual.log";
+const SNAPSHOT = process.env.INFOFI_SNAPSHOT || "/root/poker-web/frontend/infofi-data.json";
 const RPC = process.env.RPC_TESTNET || "https://api.infra.testnet.somnia.network";
 const REPO = path.join(__dirname, "..");
 
@@ -175,6 +180,72 @@ function applyEdit(list, action, handle) {
   throw new Error("unknown action");
 }
 
+/* ---------------------------------------------------------- collection ---
+ * A run walks every tracked account's timeline on X and takes 15-25 minutes, so
+ * this is fire-and-poll: /collect starts it, /status reports on it. The work
+ * itself is the SAME script cron runs, which already holds a flock - two
+ * collections must never share accounts.db or history.json. */
+let run = { child: null, startedAt: 0, by: "" };
+
+/// The daily script may also have been started by cron or by hand, in which case
+/// we have no child handle - ask the process table instead of guessing.
+function collectorRunning() {
+  return new Promise((resolve) => {
+    execFile("pgrep", ["-f", "infofi/collect.py"], (err, stdout) => {
+      resolve(!err && String(stdout).trim().length > 0);
+    });
+  });
+}
+
+async function runStatus() {
+  const running = (run.child && run.child.exitCode === null) || (await collectorRunning());
+  let snapshot = null;
+  try {
+    const d = JSON.parse(fs.readFileSync(SNAPSHOT, "utf8"));
+    const rows = d.projects || [];
+    snapshot = {
+      generated: d.generated,
+      accounts: rows.length,
+      withAvatar: rows.filter((r) => r.avatar).length,
+      windowHours: d.window_hours,
+    };
+  } catch (_) {}
+  let log = "";
+  try { log = fs.readFileSync(RUN_LOG, "utf8").split(/\r?\n/).filter(Boolean).slice(-6).join("\n"); } catch (_) {}
+  return {
+    running,
+    startedAt: run.startedAt || null,
+    elapsedSec: run.startedAt && running ? Math.round((Date.now() - run.startedAt) / 1000) : null,
+    startedBy: run.by || null,
+    snapshot,
+    log,
+  };
+}
+
+function startCollection(by) {
+  // Detached with its own stdio: the run outlives this request, and it must also
+  // outlive a restart of this service.
+  const out = fs.openSync(RUN_LOG, "w");
+  // INFOFI_SHELL exists so the test can substitute an interpreter it can
+  // actually spawn; production leaves it alone and gets bash.
+  const child = spawn(process.env.INFOFI_SHELL || "bash", [DAILY], {
+    cwd: PRED_DIR,
+    detached: true,
+    stdio: ["ignore", out, out],
+  });
+  // A spawn failure (no bash, unreadable script) arrives as an EVENT, and an
+  // unhandled one takes the whole service down with it. Never acceptable for a
+  // button that only kicks off a background job.
+  child.on("error", (e) => {
+    console.warn("[infofi-admin] collection failed to start:", e.message);
+    try { fs.appendFileSync(RUN_LOG, `\nfailed to start: ${e.message}\n`); } catch (_) {}
+    run = { child: null, startedAt: 0, by: "" };
+  });
+  child.unref();
+  run = { child, startedAt: Date.now(), by };
+  return child.pid;
+}
+
 const json = (res, code, body) => {
   const s = JSON.stringify(body);
   res.writeHead(code, {
@@ -216,6 +287,44 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, out);
     }
 
+    if (req.method === "GET" && url.pathname === "/status") {
+      return json(res, 200, await runStatus());
+    }
+
+    // Same signature scheme as /edit, so there is one auth path rather than two.
+    // The message keeps its five-line shape with placeholders in the unused
+    // slots - a "collect" signature can never be replayed as an edit.
+    if (req.method === "POST" && url.pathname === "/collect") {
+      const body = JSON.parse(await readBody(req) || "{}");
+      const ts = Number(body.ts);
+      const signature = String(body.signature || "");
+      if (!Number.isFinite(ts)) return json(res, 400, { error: "missing ts" });
+      const skew = Math.abs(Date.now() / 1000 - ts);
+      if (skew > SIG_WINDOW_S) return json(res, 401, { error: `signature is ${Math.round(skew)}s old - check your clock and retry` });
+      if (!signature) return json(res, 401, { error: "missing signature" });
+
+      let signer;
+      try {
+        signer = ethers.verifyMessage(
+          signMessage({ action: "collect", list: "-", handle: "-", ts }), signature).toLowerCase();
+      } catch (_) { return json(res, 401, { error: "bad signature" }); }
+
+      const o = await owners();
+      if (!o.set.size) return json(res, 503, { error: "cannot read owners from chain - refusing to authorise" });
+      if (!o.set.has(signer)) return json(res, 403, { error: "signer is not a project owner", signer });
+      // Burned only once the request is going to be acted on: a rejected call
+      // must not cost the owner their signature and force a re-sign.
+      if (!markUsed(signature)) return json(res, 401, { error: "signature already used" });
+
+      if (!fs.existsSync(DAILY)) return json(res, 500, { error: `collector script missing at ${DAILY}` });
+      const st = await runStatus();
+      if (st.running) return json(res, 409, { error: "a collection is already running", ...st });
+
+      const pid = startCollection(signer);
+      console.log(`[infofi-admin] ${signer} started a collection (pid ${pid})`);
+      return json(res, 202, { started: true, pid, ...(await runStatus()) });
+    }
+
     if (req.method === "POST" && url.pathname === "/edit") {
       const body = JSON.parse(await readBody(req) || "{}");
       const action = String(body.action || "");
@@ -232,7 +341,6 @@ const server = http.createServer(async (req, res) => {
       const skew = Math.abs(Date.now() / 1000 - ts);
       if (skew > SIG_WINDOW_S) return json(res, 401, { error: `signature is ${Math.round(skew)}s old - check your clock and retry` });
       if (!signature) return json(res, 401, { error: "missing signature" });
-      if (!markUsed(signature)) return json(res, 401, { error: "signature already used" });
 
       let signer;
       try { signer = ethers.verifyMessage(signMessage({ action, list, handle, ts }), signature).toLowerCase(); }
@@ -241,6 +349,9 @@ const server = http.createServer(async (req, res) => {
       const o = await owners();
       if (!o.set.size) return json(res, 503, { error: "cannot read owners from chain - refusing to authorise" });
       if (!o.set.has(signer)) return json(res, 403, { error: "signer is not a project owner", signer });
+      // See /collect: consumed only when the request is authorised, so a bad
+      // one cannot spend a good signature.
+      if (!markUsed(signature)) return json(res, 401, { error: "signature already used" });
 
       const result = applyEdit(list, action, handle);
       console.log(`[infofi-admin] ${signer} ${action} @${handle} ${list} -> ${result.changed ? "ok" : result.reason}`);

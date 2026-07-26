@@ -20,9 +20,28 @@ fs.writeFileSync(path.join(dir, "tags.txt"), "Somnia_Network\n");
 const owner = ethers.Wallet.createRandom();
 const stranger = ethers.Wallet.createRandom();
 
+// /collect really launches the collector, so point it at a stand-in that just
+// sleeps - a test must never start a 20-minute walk of X. Driven through
+// INFOFI_SHELL with node as the interpreter so this runs on Windows too, where
+// `bash` is not on the spawn PATH.
+const fakeDaily = path.join(dir, "fake-daily.js");
+fs.writeFileSync(fakeDaily, "setTimeout(() => console.log('fake collection done'), 8000);\n");
+fs.writeFileSync(path.join(dir, "snapshot.json"), JSON.stringify({
+  generated: new Date(0).toISOString(), window_hours: 168,
+  projects: [{ handle: "a", avatar: "/x.jpg" }, { handle: "b", avatar: "" }],
+}));
+
 const srv = spawn(process.execPath, [path.join(REPO, "scripts", "infofi-admin.js")], {
   cwd: REPO,
-  env: { ...process.env, PORT: String(PORT), INFOFI_DIR: dir, INFOFI_ADMIN_OWNERS: owner.address },
+  env: {
+    ...process.env, PORT: String(PORT), INFOFI_DIR: dir,
+    INFOFI_ADMIN_OWNERS: owner.address,
+    INFOFI_DAILY: fakeDaily,
+    INFOFI_SHELL: process.execPath,
+    // spawn cwd must exist; the default /root/predictions does not, on Windows
+    PRED_DIR: dir,
+    INFOFI_SNAPSHOT: path.join(dir, "snapshot.json"),
+  },
   stdio: ["ignore", "pipe", "pipe"],
 });
 srv.stdout.on("data", (d) => process.env.VERBOSE && console.log("  [srv]", String(d).trim()));
@@ -109,6 +128,45 @@ check(fs.readFileSync(path.join(dir, "projects.txt"), "utf8").includes("Somnia_N
 const lists = await (await fetch(base + "/lists")).json();
 check(Array.isArray(lists.projects) && Array.isArray(lists.voices) && Array.isArray(lists.tags),
   "GET /lists returns all three", JSON.stringify(lists));
+
+// --- manual collection ---------------------------------------------------
+const collectMsg = (ts) => msg({ action: "collect", list: "-", handle: "-", ts });
+const collect = async (wallet, tsOverride) => {
+  const ts = tsOverride ?? now();
+  const signature = await wallet.signMessage(collectMsg(ts));
+  const r = await fetch(base + "/collect", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ts, signature }),
+  });
+  return { status: r.status, body: await r.json() };
+};
+
+let st = await (await fetch(base + "/status")).json();
+check(st.running === false, "status reports idle before any run", JSON.stringify(st.running));
+check(st.snapshot && st.snapshot.accounts === 2 && st.snapshot.withAvatar === 1,
+  "status summarises the published snapshot", JSON.stringify(st.snapshot));
+
+r = await collect(stranger);
+check(r.status === 403, "a non-owner cannot start a collection", JSON.stringify(r.body));
+
+// a collect signature must not be usable as a list edit
+const ctsFixed = now();
+const collectSig = await owner.signMessage(collectMsg(ctsFixed));
+r = await fetch(base + "/edit", {
+  method: "POST", headers: { "content-type": "application/json" },
+  body: JSON.stringify({ action: "add", list: "projects", handle: "sneaky", ts: ctsFixed, signature: collectSig }),
+});
+check(r.status === 401 || r.status === 403, "a collect signature is not accepted as an edit", String(r.status));
+check(!fs.readFileSync(path.join(dir, "projects.txt"), "utf8").includes("sneaky"), "and it changed nothing");
+
+r = await collect(owner, ctsFixed + 1);
+check(r.status === 202 && r.body.started === true, "the owner can start a collection", JSON.stringify(r.body));
+
+st = await (await fetch(base + "/status")).json();
+check(st.running === true, "status reports the run as live", JSON.stringify(st.running));
+
+r = await collect(owner, ctsFixed + 2);
+check(r.status === 409, "a second collection is refused while one runs", JSON.stringify(r.body));
 
 srv.kill();
 console.log(fails ? `\n${fails} FAILURE(S)` : "\nALL AUTH TESTS PASS");

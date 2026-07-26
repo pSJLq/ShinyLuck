@@ -667,6 +667,47 @@ async function refreshInfofi() {
     ifCache = null;   // service down: show "loading" rather than a wrong empty
   }
   ifPaint();
+  ifRefreshStatus();
+}
+
+/* A collection walks every tracked timeline on X and takes 15-25 minutes, so the
+ * button starts it and this polls. Polling only tightens WHILE a run is live -
+ * the rest of the time the 15s console refresh is plenty. */
+let ifPoll = null;
+async function ifRefreshStatus() {
+  let st;
+  try {
+    const r = await fetch(IF_API + "/status", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    st = await r.json();
+  } catch (_) {
+    const el = $("[data-sl-adm-if-run]");
+    if (el) el.textContent = "";
+    return;
+  }
+
+  const snap = $("[data-sl-adm-if-snapshot]");
+  if (snap) {
+    snap.textContent = st.snapshot
+      ? `${st.snapshot.accounts} accounts · ${st.snapshot.withAvatar} with avatar · ${new Date(st.snapshot.generated).toLocaleString()}`
+      : "none published yet";
+  }
+
+  const el = $("[data-sl-adm-if-run]");
+  const btn = $("[data-sl-adm-if-collect]");
+  if (btn) btn.disabled = !!st.running;
+  if (el) {
+    if (st.running) {
+      const m = st.elapsedSec == null ? "" : ` · ${Math.floor(st.elapsedSec / 60)}m ${st.elapsedSec % 60}s`;
+      el.textContent = `collecting…${m} (15-25 min, you can close this page)`;
+      el.style.color = "var(--gold-mid)";
+    } else {
+      el.textContent = "";
+    }
+  }
+
+  clearTimeout(ifPoll);
+  if (st.running) ifPoll = setTimeout(ifRefreshStatus, 5000);
 }
 
 function bindInfofi() {
@@ -726,6 +767,43 @@ function bindInfofi() {
   };
   $("[data-sl-adm-if-add]")?.addEventListener("click", () => run("add"));
   $("[data-sl-adm-if-remove]")?.addEventListener("click", () => run("remove"));
+
+  $("[data-sl-adm-if-collect]")?.addEventListener("click", async () => {
+    try {
+      await connect();
+      if (!SL.signer) return ifStatus("connect a wallet first", "error");
+      const ts = Math.floor(Date.now() / 1000);
+      // Same five-line shape as an edit, with placeholders in the unused slots,
+      // so a collect signature can never be replayed as a list change.
+      const message = [
+        "ShinyLuck InfoFi admin",
+        "action: collect",
+        "list: -",
+        "handle: -",
+        `ts: ${ts}`,
+      ].join("\n");
+      ifStatus("sign the request in your wallet…");
+      const signature = await SL.signer.signMessage(message);
+      const r = await fetch(IF_API + "/collect", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ts, signature }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (r.status === 409) ifStatus("a collection is already running", "warn");
+      else if (!r.ok) ifStatus(body.error || `HTTP ${r.status}`, "error");
+      else {
+        ifStatus("collection started", "success");
+        toast("Collection started · 15-25 min, the board updates when it finishes", "success");
+      }
+      ifRefreshStatus();
+    } catch (e) {
+      const m = e.shortMessage || e.message || String(e);
+      const cancelled = /reject|denied|4001/i.test(m);
+      ifStatus(cancelled ? "signature cancelled" : m, cancelled ? "warn" : "error");
+    }
+  });
+
   refreshInfofi();
 }
 
