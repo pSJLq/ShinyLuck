@@ -72,8 +72,35 @@ class Bot {
     const v = { ok: true }; this.chainOk.set(dealId, v); return v;
   }
   _bad(dealId) { const v = { ok: false }; this.chainOk.set(dealId, v); return v; }
+  /// The browser answers an on-chain accusation by posting the demanded share
+  /// itself (zk-agent.js selfRescue). The rig needs the same reflex or a
+  /// disconnect test measures the RIG's inability to come back rather than the
+  /// product's ability to let it. Returns true when a rescue was posted.
+  async selfRescue() {
+    let acc;
+    try { acc = await this.room.accusationOf(this.t); } catch { return false; }
+    if (!acc.active) return false;
+    const mySeat = Number(await this.room.seatOf(this.t, this.addr));
+    if (mySeat === 255 || Number(acc.offenderSeat) !== mySeat) return false;
+    const dealId = String(await this.zkd.dealIdForHand(this.t, acc.handId));
+    if (dealId === "0") return false;
+    const sec = this.byDeal.get(dealId);
+    if (!sec) { console.log(`[rescue] ${this.addr.slice(0, 8)}: secret for deal ${dealId} is GONE — cannot rescue`); return false; }
+    const info = await this.zkd.dealInfo(dealId);
+    const part = info.seats.map(Number).indexOf(mySeat);
+    if (part < 0) return false;
+    const idx = Number(acc.cardIdx);
+    const ct = { A: zkDrv.parsePt({ x: acc.ctA[0], y: acc.ctA[1] }), B: zkDrv.parsePt({ x: acc.ctB[0], y: acc.ctB[1] }) };
+    const sh = this.zk.decryptionShare(ct, sec.x, this.G1.BASE.multiply(sec.x), `SPZK:${dealId}:share:${idx}:${part}`);
+    const c = (P) => { const a = this.zk.aff(P); return [a.x, a.y]; };
+    await (await this.room.connect(this.signer).proveResponsive(this.t, c(sh.d), c(sh.proof.R1), c(sh.proof.R2), sh.proof.s)).wait();
+    console.log(`[rescue] ${this.addr.slice(0, 8)} answered the accusation on card ${idx} — hand continues`);
+    return true;
+  }
+
   async step(dealId) {
     if (!dealId) return;
+    if (Date.now() < (this.offlineUntil || 0)) return; // simulated disconnect
     const sig = await this.sign(dealId);
     // Long-poll exactly like the browser agent: park only while the last answer
     // had nothing to do, so the rig measures the product's reaction time and
@@ -310,9 +337,16 @@ async function main() {
           await sleep(200);
         }
       })(),
+      (async () => { // accusation watch — the browser does this every ~3.5s
+        while (!done) {
+          try { if (Date.now() >= (b.offlineUntil || 0)) await b.selfRescue(); } catch (_) {}
+          await sleep(2500);
+        }
+      })(),
       (async () => { // acting
         while (!done) {
           try {
+            if (Date.now() < (b.offlineUntil || 0)) { await sleep(400); continue; } // disconnected
             const h = await room.getHand(TABLE);
             if (h.inProgress && Number(h.actingSeat) === b.seat && Number(h.street) <= 3) {
               const sh = await room.getSeatHand(TABLE, b.seat);
@@ -329,6 +363,30 @@ async function main() {
     ];
     await Promise.all(lanes);
   }
+  // Opt-in disconnect drill: DISCONNECT_MS=20000 takes bot A off the network
+  // once a flop is out, then brings it back with its per-hand secret intact —
+  // the wifi blip / phone-sleep / refresh case, which is the one that actually
+  // happens. (Losing the secret too is the tab-CLOSE case; the contract is
+  // meant to forfeit there, and the table warns before it.)
+  const DISC_MS = Number(process.env.DISCONNECT_MS || 0);
+  if (DISC_MS > 0) {
+    (async () => {
+      const victim = bots[0];
+      const start = Number((await room.getHand(TABLE)).handId);
+      while (!done) {
+        const h = await room.getHand(TABLE);
+        if (h.inProgress && Number(h.handId) > start && Number(h.street) >= 1) {
+          console.log(`\n[disconnect] ${victim.addr.slice(0, 8)} goes offline for ${DISC_MS}ms mid-hand ${h.handId} (street ${h.street})`);
+          victim.offlineUntil = Date.now() + DISC_MS;
+          await sleep(DISC_MS + 500);
+          console.log(`[disconnect] ${victim.addr.slice(0, 8)} is back\n`);
+          return;
+        }
+        await sleep(300);
+      }
+    })();
+  }
+
   const runners = bots.map(runBot);
 
   // stop after HANDS settle
