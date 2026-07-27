@@ -75,12 +75,12 @@ shinyluck.win {
 	file_server
 }
 
-# Old domain: permanent redirect, path preserved. Invite links handed out before
-# the rename still work.
-shinia.mom {
-	redir https://shinyluck.win{uri} permanent
-}
-
-www.shinyluck.win {
+# Old domain and the www forms: permanent redirect, path preserved. Tournament
+# invite links handed out before the rename still work.
+#
+# www.shinia.mom is listed even though nothing links to it: its DNS record points
+# here, and a hostname Caddy does not know gets no certificate and no site, which
+# fails worse than a redirect.
+shinia.mom, www.shinia.mom, www.shinyluck.win {
 	redir https://shinyluck.win{uri} permanent
 }
