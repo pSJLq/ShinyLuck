@@ -68,8 +68,8 @@ class Bot {
     if (!this.sigs.has(k)) this.sigs.set(k, await this.signer.signMessage(`ShinyPoker:zk:${this.t}:${dealId}`));
     return this.sigs.get(k);
   }
-  async post(p, body) {
-    const r = await fetch(`${BASE}${p}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(9000) });
+  async post(p, body, timeoutMs = 9000) {
+    const r = await fetch(`${BASE}${p}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(out.error || `${p} ${r.status}`);
     return out;
@@ -108,7 +108,19 @@ class Bot {
   async step(dealId) {
     if (!dealId) return;
     const sig = await this.sign(dealId);
-    let task; try { task = await this.post("/zk/task", { tableId: this.t, dealId, signature: sig }); } catch { return; }
+    // long-poll exactly like the browser agent: park only while the last answer
+    // had nothing to do, so this measures the relay's reaction, not our timer
+    const key = String(dealId);
+    if (!this.etags) this.etags = new Map();
+    const parkOn = this.etags.get(key);
+    let task;
+    try {
+      task = await this.post("/zk/task",
+        parkOn ? { tableId: this.t, dealId, signature: sig, wait: 5000, etag: parkOn } : { tableId: this.t, dealId, signature: sig },
+        parkOn ? 12_000 : 9000);
+    } catch { return; }
+    if (task.etag !== undefined && !task.do && !task.myHoles) this.etags.set(key, task.etag);
+    else this.etags.delete(key);
     if (task.observer || task.phase === "none" || task.participant === undefined) return;
     if (task.do === "key") {
       const kg = this.zk.keygen(task.domain); this.byDeal.set(dealId, { x: kg.x, X: kg.X });
@@ -216,33 +228,67 @@ async function main() {
     for (const t of tablesCache.list) { const s = Number(await room.seatOf(t, addr)); if (s !== 255) return { t, seat: s }; }
     return null;
   }
-  async function dealIdFor(t) {
-    try { const r = await fetch(`${BASE}/snapshot?t=${t}`, { signal: AbortSignal.timeout(4000) }); if (!r.ok) return null; const s = await r.json(); return s.zk && s.zk.dealId ? s.zk.dealId : null; }
+  async function snapOf(t) {
+    try { const r = await fetch(`${BASE}/snapshot?t=${t}`, { signal: AbortSignal.timeout(4000) }); if (!r.ok) return null; return await r.json(); }
     catch { return null; }
   }
 
-  // 5. bot loop
+  // 5. bot loop — THREE INDEPENDENT LANES, like the browser.
+  // This used to be one loop with a 700ms sleep that never touched the pre-deal
+  // at all, so the rig itself missed protocol deadlines: bots got struck out and
+  // the between-hands gaps it reported were its own, not the product's. A stress
+  // test whose slowest part is the test tells you nothing about the thing under
+  // test - and here it actively fabricated failures.
   let finished = false;
   async function runBot(b) {
-    while (!finished) {
-      try {
-        const mt = await myTable(b.addr);
-        if (!mt) { await sleep(2500); continue; } // not seated yet / busted / moving
-        b.t = mt.t;
-        const dealId = await dealIdFor(mt.t);
-        if (dealId) await b.step(dealId);
-        const h = await room.getHand(mt.t);
-        if (h.inProgress && Number(h.actingSeat) === mt.seat && Number(h.street) <= 3) {
-          const seat = await room.getSeat(mt.t, mt.seat);
-          const sh = await room.getSeatHand(mt.t, mt.seat);
-          const cards = dealId ? b.holes.get(dealId) : null;
-          const bb = (await room.getTable(mt.t)).bigBlind;
-          const d = decide(cards, h, sh, seat.stack, bb);
-          try { await (await room.connect(b.signer).act(mt.t, d.action, 0)).wait(); } catch (_) {}
+    let mt = null, snap = null;
+    const lanes = [
+      (async () => { // where am I sitting, and what is on that table
+        while (!finished) {
+          try {
+            mt = await myTable(b.addr);
+            if (mt) { b.t = mt.t; snap = await snapOf(mt.t); }
+          } catch (_) {}
+          await sleep(mt ? 300 : 2500);
         }
-      } catch (_) {}
-      await sleep(700);
-    }
+      })(),
+      (async () => { // live deal
+        while (!finished) {
+          try { const d = snap && snap.zk && snap.zk.dealId; if (d) await b.step(d); } catch (_) {}
+          await sleep(100);
+        }
+      })(),
+      (async () => { // the NEXT hand's setup, which the old rig ignored entirely
+        while (!finished) {
+          try {
+            const d = snap && snap.zk && snap.zk.dealId;
+            const nd = snap && snap.zk && snap.zk.next && snap.zk.next.dealId;
+            if (nd && nd !== d) await b.step(nd);
+          } catch (_) {}
+          await sleep(200);
+        }
+      })(),
+      (async () => { // acting
+        while (!finished) {
+          try {
+            if (mt) {
+              const h = await room.getHand(mt.t);
+              if (h.inProgress && Number(h.actingSeat) === mt.seat && Number(h.street) <= 3) {
+                const seat = await room.getSeat(mt.t, mt.seat);
+                const sh = await room.getSeatHand(mt.t, mt.seat);
+                const cards = b.holes.get(snap && snap.zk ? snap.zk.dealId : null);
+                const bb = (await room.getTable(mt.t)).bigBlind;
+                const d = decide(cards, h, sh, seat.stack, bb);
+                await (await room.connect(b.signer).act(mt.t, d.action, 0)).wait();
+                fetch(`${BASE}/poke?t=${mt.t}`, { signal: AbortSignal.timeout(3000) }).catch(() => {});
+              }
+            }
+          } catch (_) {}
+          await sleep(250);
+        }
+      })(),
+    ];
+    await Promise.all(lanes);
   }
 
   // 6. monitor + narrate
