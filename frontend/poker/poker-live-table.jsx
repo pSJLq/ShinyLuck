@@ -205,6 +205,27 @@ function LiveTable() {
   // it reveals a card, so 600ms here is the real reveal→pixels latency).
   useEffect(() => SP.sdk.watch(tableId, setSnap, 600), [tableId]);
 
+  // Closing the TAB mid-hand is not the same as refreshing it. This hand's
+  // decryption secret lives in sessionStorage, which dies with the tab: without
+  // it the player cannot hand over their share, the hand stalls into an
+  // accusation, the rescue window expires, and the contract forfeits the chips
+  // they had already put in. That is the right answer to a ragequit and a cruel
+  // one to a mis-click, so warn while a hand is actually running. Leaving the
+  // page also stops answering for the OTHERS at the table, which is reason
+  // enough on its own. Between hands there is nothing to lose and no prompt.
+  useEffect(() => {
+    const on = (e) => {
+      if (!snap || !snap.hand.inProgress || snap.mySeat < 0) return;
+      const me = snap.seats[snap.mySeat];
+      if (!me || !me.occupied) return;
+      e.preventDefault();
+      e.returnValue = ""; // required by Chrome/Safari to show the dialog
+      return "";
+    };
+    window.addEventListener("beforeunload", on);
+    return () => window.removeEventListener("beforeunload", on);
+  }, [snap]);
+
   // A community card opened locally by the zk agent arrives on its own event,
   // not on a snapshot — without this the card would sit in memory until the
   // next poll and the whole point (showing it before the chain does) is lost.
