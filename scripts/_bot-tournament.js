@@ -188,38 +188,51 @@ async function main() {
     const w = new ethers.Wallet(ethers.keccak256(ethers.solidityPacked(["bytes32", "string"], [master, `arena-${process.env.WALLET_TAG || "a"}-bot-${i}`])), p);
     bots.push(new Bot(zk, G1, w, room, zkd));
   }
+  // JOIN mode: TRN_ID drives an EXISTING tournament instead of creating one —
+  // that is how a human host rehearses their own event with the rest of the
+  // field filled out by bots. Funding and registration are already done by
+  // _trn-fill.js, so this only attaches the players; WALLET_TAG must match.
+  const JOIN = process.env.TRN_ID !== undefined ? Number(process.env.TRN_ID) : null;
+
   const buyIn = ethers.parseEther("0.01"), fee = ethers.parseEther("0.001");
-  const need = buyIn + fee + ethers.parseEther("0.25"); // + gas
-  console.log(`[arena] funding ${N} bots (${ethers.formatEther(need)} STT each)...`);
-  let nonce = await deployer.getNonce("latest");
-  const fundTxs = [];
-  for (const b of bots) {
-    const have = await p.getBalance(b.addr);
-    if (have < need) fundTxs.push(deployer.sendTransaction({ to: b.addr, value: need - have, nonce: nonce++ }).then((t) => t.wait()));
+  let trnId;
+  if (JOIN !== null) {
+    trnId = JOIN;
+    const i0 = await trn.info(trnId);
+    console.log(`[arena] JOIN #${trnId} — ${["REGISTERING", "RUNNING", "FINISHED", "CANCELLED"][Number(i0.status)]}, ${Number(i0.registered)} registered, driving ${N} wallets (tag "${process.env.WALLET_TAG || "a"}")`);
+  } else {
+    const need = buyIn + fee + ethers.parseEther("0.25"); // + gas
+    console.log(`[arena] funding ${N} bots (${ethers.formatEther(need)} STT each)...`);
+    let nonce = await deployer.getNonce("latest");
+    const fundTxs = [];
+    for (const b of bots) {
+      const have = await p.getBalance(b.addr);
+      if (have < need) fundTxs.push(deployer.sendTransaction({ to: b.addr, value: need - have, nonce: nonce++ }).then((t) => t.wait()));
+    }
+    await Promise.all(fundTxs);
+    console.log(`[arena] funded.`);
+
+    // 2. create a turbo tournament
+    const turbo = process.env.TURBO === "1" || N >= 20;
+    const params = {
+      buyIn, fee, maxPlayers: N, seatsPerTable: 6, startStack: 1000n,
+      sbStart: turbo ? 25n : 10n, bbStart: turbo ? 50n : 20n, anteStart: turbo ? 5n : 0n,
+      levelDur: turbo ? 90n : 180n, growthBps: 15000, startTime: 0n, // 0 = the coordinator auto-starts the instant it fills
+      approvalRequired: false, actionSecs: 20, payoutBps: [5000, 3000, 2000], structure: [], hostBps: 0,
+    };
+    const idBefore = Number(await trn.count());
+    await (await trn.createTournament(params, { value: 0 })).wait();
+    trnId = idBefore; // new tournament id
+    console.log(`[arena] created tournament #${trnId} — ${N} max, 6-max tables, ${turbo ? "TURBO" : "normal"} (${params.sbStart}/${params.bbStart} +${params.anteStart} ante, ${params.startStack} chips)`);
+
+    // 3. all bots register (buy in)
+    console.log(`[arena] registering ${N} bots...`);
+    const regs = [];
+    for (const b of bots) regs.push(trn.connect(b.signer).register(trnId, { value: buyIn + fee }).then((t) => t.wait()).catch((e) => console.log(`  reg ${b.addr.slice(0, 8)} failed: ${e.shortMessage || e.message}`)));
+    await Promise.all(regs);
+    const info0 = await trn.info(trnId);
+    console.log(`[arena] registered ${Number(info0.registered)}/${N}. Waiting for the LIVE bot to auto-start + seat + deal...`);
   }
-  await Promise.all(fundTxs);
-  console.log(`[arena] funded.`);
-
-  // 2. create a turbo tournament
-  const turbo = process.env.TURBO === "1" || N >= 20;
-  const params = {
-    buyIn, fee, maxPlayers: N, seatsPerTable: 6, startStack: 1000n,
-    sbStart: turbo ? 25n : 10n, bbStart: turbo ? 50n : 20n, anteStart: turbo ? 5n : 0n,
-    levelDur: turbo ? 90n : 180n, growthBps: 15000, startTime: 0n, // 0 = the coordinator auto-starts the instant it fills
-    approvalRequired: false, actionSecs: 20, payoutBps: [5000, 3000, 2000], structure: [], hostBps: 0,
-  };
-  const idBefore = Number(await trn.count());
-  await (await trn.createTournament(params, { value: 0 })).wait();
-  const trnId = idBefore; // new tournament id
-  console.log(`[arena] created tournament #${trnId} — ${N} max, 6-max tables, ${turbo ? "TURBO" : "normal"} (${params.sbStart}/${params.bbStart} +${params.anteStart} ante, ${params.startStack} chips)`);
-
-  // 3. all bots register (buy in)
-  console.log(`[arena] registering ${N} bots...`);
-  const regs = [];
-  for (const b of bots) regs.push(trn.connect(b.signer).register(trnId, { value: buyIn + fee }).then((t) => t.wait()).catch((e) => console.log(`  reg ${b.addr.slice(0, 8)} failed: ${e.shortMessage || e.message}`)));
-  await Promise.all(regs);
-  const info0 = await trn.info(trnId);
-  console.log(`[arena] registered ${Number(info0.registered)}/${N}. Waiting for the LIVE bot to auto-start + seat + deal...`);
 
   // 4. find-my-table helper
   const tablesCache = { list: [], at: 0 };
