@@ -246,6 +246,7 @@ const SP_I18N_RU = {
   "table settings": "настройки стола", "Table theme": "Тема стола", "Sound effects": "Звуки",
   "4-color deck": "4-цветная колода", "Turbo animations": "Турбо-анимации", "Reduced motion": "Меньше анимаций",
   "Larger interface": "Крупный интерфейс",
+  "Extra large interface": "Очень крупный интерфейс",
   "Stacks in big blinds": "Стеки в блайндах (BB)",
   "Language": "Язык", "Close": "Закрыть",
   "Sit at seat": "Сесть на место", "Buy-in": "Бай-ин", "Cancel": "Отмена", "Take seat": "Сесть",

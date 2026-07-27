@@ -1387,11 +1387,16 @@ function mountScale() {
     // bottom without scrolling. The canvas ASPECT follows the viewport (width
     // stretches between sane poker proportions) so the scaled stage fills the
     // screen edge-to-edge instead of leaving dead side bands on 16:9.
-    // "Larger interface" (bigui) shrinks the canvas ~18% and the scale-up
-    // compensates: same fit, every element ~18% bigger, less on screen.
+    // Shrink the canvas, let the scale-up compensate: same fit, everything
+    // bigger, less on screen. What used to be the "Larger interface" setting
+    // (1.18) is now the DEFAULT — players read the table at a glance and the
+    // old baseline was simply too small — and the setting goes further still
+    // for anyone who needs it. Kept well under the point where the fixed-height
+    // chrome (top bar, tournament strip, action bar) would start eating the
+    // felt: at 1.34 the felt still gets ~580 of the 746px canvas.
     const availW = window.innerWidth - 16;
     const availH = window.innerHeight - (embedNow ? 16 : 84);
-    const k = big ? 1.18 : 1;
+    const k = big ? 1.34 : 1.18;
     const H = Math.round(1000 / k);
     const W = Math.round(Math.min(2.05 * H, Math.max(1.45 * H, (availW / Math.max(1, availH)) * H)));
     const s = Math.min(availW / W, availH / H);

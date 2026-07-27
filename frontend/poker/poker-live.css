@@ -74,7 +74,9 @@
   font-family: var(--label, 'Source Code Pro', monospace); font-size: 12px; color: var(--muted, #9a9aa8);
   background: linear-gradient(90deg, rgba(217,171,74,.14), rgba(217,171,74,.05)); border-bottom: 1px solid var(--accent-32, rgba(217,171,74,.32)); }
 .trn-hud .tag { color: var(--accent-soft, #f2d78a); letter-spacing: .1em; font-size: 10.5px; }
-.trn-hud b { color: var(--text, #e6e6ee); font-family: var(--mono, 'IBM Plex Mono', monospace); font-weight: 600; margin-left: 2px; }
+/* blinds, level and player counts — the numbers people check mid-hand, so they
+   get their own size instead of inheriting the label's */
+.trn-hud b { color: var(--text, #e6e6ee); font-family: var(--mono, 'IBM Plex Mono', monospace); font-weight: 700; font-size: 14.5px; margin-left: 3px; }
 .trn-hud .done { color: var(--gold, #e8c15a); letter-spacing: .1em; }
 
 /* funding box in the cashier / fund modal */

@@ -23,6 +23,8 @@
   .topbar .group .metapill:first-child, .topbar .group .metapill:nth-child(3) { display: none; }
   .metapill { height: 28px; padding: 0 8px; font-size: 10px; white-space: nowrap; }
   .metapill b, .metapill .k { white-space: nowrap; }
+  /* desktop gives the blinds 14px; a 28px pill on a phone takes 12px */
+  .metapill b { font-size: 12px; }
   .wallet { height: 30px; padding: 0 8px 0 7px; gap: 6px; }
   .wallet .net { display: none; }
   .iconbtn { width: 32px; height: 32px; flex-shrink: 0; }
@@ -49,8 +51,19 @@
   .avatar, [data-dir="b"] .seatcard .avatar { width: 30px; height: 30px; font-size: 11px; }
   .avatar .em, [data-dir="b"] .seatcard .avatar .em { font-size: 16px; }
   .seatinfo .nm { font-size: 9.5px; max-width: 88px; }
-  .seatinfo .stack { font-size: 12px; }
+  /* the stack still gets the "read this first" treatment, just within what a
+     102px seat card can hold — phones have no stage scaling to fall back on */
+  .seatinfo .stack { font-size: 13.5px; }
   .seatinfo .status { font-size: 8.5px; }
+  /* "Larger interface" on a phone: the desktop step (21px) would burst the
+     seat card, so it gets its own, tighter set. These must out-specify the
+     .app[data-bigui="1"] rules in styles.css, hence .app twice. */
+  .app.app[data-bigui="1"] .seatinfo .stack { font-size: 15.5px; }
+  .app.app[data-bigui="1"] .seatinfo .nm { font-size: 10.5px; max-width: 88px; }
+  .app.app[data-bigui="1"] .heroinfo .meta .stack { font-size: 19px; }
+  .app.app[data-bigui="1"] .metapill b { font-size: 13px; }
+  .app.app[data-bigui="1"] .metapill { height: 30px; }
+  .app.app[data-bigui="1"] .trn-hud b { font-size: 13px; }
   .btnmark { width: 18px; height: 18px; font-size: 8.5px; }
   .board { gap: 4px; }
   .board .card, .board .slot { width: 42px; height: 60px; }
@@ -64,6 +77,7 @@
   .herozone { bottom: 168px; gap: 5px; }
   .heroinfo { padding: 5px 8px 5px 6px; gap: 8px; }
   .heroinfo .avatar { width: 30px; height: 30px; }
+  .heroinfo .meta .stack { font-size: 17px; } /* desktop 21px is too wide here */
   .winbanner { top: 58%; }
   .winbanner .hand { font-size: 19px; }
   .actchip { font-size: 9px; padding: 2px 8px; }
