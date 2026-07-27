@@ -248,10 +248,11 @@
         activity that mentions a <b>context tag</b>, so a tag change re-scopes every voice. Writes are signed with
         your wallet and accepted from any of the three project owner keys · no transaction, no gas.
         <br/>A collection runs nightly at 04:17 UTC and picks up whatever the lists say then. <b>Collect now</b>
-        runs the same job immediately. It walks every tracked timeline on X, and X rate-limits the scraper accounts
-        hard, so expect <b>hours, not minutes</b> · most of that time is spent waiting out 15-minute windows.
-        Close the page if you like, it keeps going. Avatars are mirrored during the run, so a newly added account
-        gets its picture as part of it.
+        runs the same job immediately: it walks every tracked timeline on X, which takes <b>about 20 minutes</b>
+        with healthy scraper accounts. It can take far longer, or stall outright, when X rate-limits or bans one ·
+        the elapsed counter is how you tell the difference, and a run is stopped after 10 hours so a wedged one
+        cannot block the next night. Close the page if you like, it keeps going. Avatars are mirrored during the
+        run, so a newly added account gets its picture as part of it.
       </div>
     </div>
 

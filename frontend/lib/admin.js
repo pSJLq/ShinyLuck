@@ -698,8 +698,17 @@ async function ifRefreshStatus() {
   if (btn) btn.disabled = !!st.running;
   if (el) {
     if (st.running) {
-      const m = st.elapsedSec == null ? "" : ` · ${Math.floor(st.elapsedSec / 60)}m`;
-      el.textContent = `collecting…${m} · X throttles this, expect hours · safe to close the page`;
+      // Past ~40 min the run is not on the normal ~20 min path any more, which
+      // almost always means an account is rate-limited or banned. Say so rather
+      // than let the counter tick up silently.
+      const mins = st.elapsedSec == null ? null : Math.floor(st.elapsedSec / 60);
+      const late = mins != null && mins > 40;
+      el.textContent = mins == null
+        ? "collecting… · safe to close the page"
+        : `collecting… ${mins}m` + (late
+          ? " · longer than usual, an X account is probably throttled"
+          : " of ~20m · safe to close the page");
+      el.style.color = late ? "var(--red)" : "var(--gold-mid)";
       el.style.color = "var(--gold-mid)";
     } else {
       el.textContent = "";
