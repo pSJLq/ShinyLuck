@@ -165,3 +165,7 @@ frontend/poker/*.compiled.js
 Accounts.txt
 accounts*.txt
 !*.example.txt
+
+# Raw samples written by scripts/_probe-latency.js — a measurement artefact,
+# regenerated on every run. The numbers that matter live in HANDOFF.md.
+scripts/probe-out.json

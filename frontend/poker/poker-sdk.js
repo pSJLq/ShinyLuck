@@ -811,10 +811,16 @@ export class ShinyPoker {
   /// instead of ~14 RPC calls per tick, so hundreds of watchers don't melt the
   /// public RPC. Any failure/staleness falls back to direct chain reads and the
   /// dealer path is retried after a cool-down · the table NEVER goes blind.
-  async snapshotSmart(t) {
+  /// `sinceRev > 0` asks the dealer to hold the request until the table
+  /// actually changes, instead of answering with the revision we already have.
+  /// That turns a revealed card from "visible on the next timer tick" into
+  /// "visible on the open connection" — the poll interval was the last fixed
+  /// cost in the reveal path and it bought nothing.
+  async snapshotSmart(t, sinceRev = 0) {
     if (this.cfg.dealerApiUrl && Date.now() >= (this._snapSrcDownUntil || 0)) {
       try {
-        const r = await fetch(`${this.cfg.dealerApiUrl}/snapshot?t=${t}`, { signal: AbortSignal.timeout(2500) });
+        const url = `${this.cfg.dealerApiUrl}/snapshot?t=${t}` + (sinceRev ? `&rev=${sinceRev}` : "");
+        const r = await fetch(url, { signal: AbortSignal.timeout(sinceRev ? 15000 : 2500) });
         if (r.ok) {
           const raw = await r.json();
           if (Date.now() - raw.ts < 8000) return this._hydrateSnapshot(raw);
@@ -823,6 +829,15 @@ export class ShinyPoker {
       this._snapSrcDownUntil = Date.now() + 30_000;
     }
     return this.snapshot(t);
+  }
+
+  /// Tell the dealer a table may have moved. A player's action changes the
+  /// CHAIN, not the dealer's state, so without this it only finds out on its
+  /// own poll — dead time on every single street before a share is even asked
+  /// for. Fire-and-forget: it is an optimisation, never a correctness step.
+  poke(t) {
+    if (!this.cfg.dealerApiUrl) return;
+    try { fetch(`${this.cfg.dealerApiUrl}/poke?t=${t}`, { signal: AbortSignal.timeout(3000) }).catch(() => {}); } catch (_) {}
   }
 
   /// Rebuild the exact snapshot() shape from the dealer's JSON (BigInts arrive
@@ -847,7 +862,9 @@ export class ShinyPoker {
       inHand: !!s.inHand, folded: !!s.folded, allIn: !!s.allIn, committedStreet: B(s.committedStreet),
     }));
     const mySeat = this.address ? seats.findIndex((s) => s.player.toLowerCase() === this.address.toLowerCase()) : -1;
-    return { tableId: Number(raw.tableId), cfg, hand, seats, board: (raw.board || []).map(Number), mySeat };
+    // `rev` rides along so watch() can park on it; chain-read snapshots have no
+    // revision and simply fall back to the timed poll.
+    return { tableId: Number(raw.tableId), cfg, hand, seats, board: (raw.board || []).map(Number), mySeat, rev: Number(raw.rev || 0) };
   }
 
   /// The lobby feed from the dealer cache (tables + tournaments in one GET).
@@ -948,19 +965,23 @@ export class ShinyPoker {
     // contract-call path costs ~3 extra round-trips (getTransactionCount +
     // getFeeData + estimateGas ≈ +850ms) · the reason a naive action felt ~1.7s.
     if (this.sessionActive && this.sessionWallet) {
-      try { return await this._fastAct(t, action, amt); }
+      try { const r = await this._fastAct(t, action, amt); this.poke(t); return r; }
       catch (e) {
         // Only fall back when the tx NEVER hit the chain (pre-broadcast failure)
         // · otherwise the action is already in flight and re-sending would
         // double-submit. A post-broadcast issue (e.g. receipt timeout) rethrows.
         if (e && e._preBroadcast) {
           console.warn("[poker] fast act pre-broadcast fail, falling back:", e.shortMessage || e.message || e);
-          return (await this.roomSession.act(t, action, amt)).wait();
+          const r = await (await this.roomSession.act(t, action, amt)).wait();
+          this.poke(t);
+          return r;
         }
         throw e;
       }
     }
-    return (await this.roomWrite.act(t, action, amt)).wait();
+    const r = await (await this.roomWrite.act(t, action, amt)).wait();
+    this.poke(t);
+    return r;
   }
 
   /// Prime the session's cached nonce + gas price (one round-trip each, done
@@ -1020,10 +1041,17 @@ export class ShinyPoker {
   // ---- live polling ----
   watch(t, cb, intervalMs = 1200) {
     let stopped = false;
+    let rev = 0; // >0 once we know this dealer supports the parked poll
     const tick = async () => {
       if (stopped) return;
-      try { cb(await this.snapshotSmart(t)); } catch (e) { console.warn("[poker] snapshot failed", e); }
-      if (!stopped) setTimeout(tick, intervalMs);
+      try {
+        const s = await this.snapshotSmart(t, rev);
+        if (s) { if (s.rev) rev = s.rev; cb(s); }
+      } catch (e) { console.warn("[poker] snapshot failed", e); }
+      // Parked polls already spent their wait inside the request, so we go
+      // straight round again; the small floor keeps a misbehaving relay from
+      // turning that into a spin. Relays without `rev` keep the old cadence.
+      if (!stopped) setTimeout(tick, rev ? 60 : intervalMs);
     };
     tick();
     return () => { stopped = true; };

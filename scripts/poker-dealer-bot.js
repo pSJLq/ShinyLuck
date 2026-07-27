@@ -201,10 +201,67 @@ function pushChat(tableId, who, text, dealer = false, addr = null) {
 // ---------------------------------------------------------------------------
 const SNAPS = new Map(); // tableId -> snapshot object (ts inside)
 const WATCHED = new Map(); // tableId -> last /snapshot request ts (watched tables refresh hot)
+// Long-poll waiters: GET /snapshot?t=N&since=<ts> parks here instead of
+// answering with the state the caller already has, so a revealed card reaches
+// the felt on the next packet rather than on the client's next poll tick. The
+// poll interval was the last fixed cost in the reveal path — a 600ms timer
+// added ~300ms on average to EVERY street, for nothing.
+const SNAP_WAIT = new Map(); // tableId -> Set(resolve)
+const SNAP_SIG = new Map(); // tableId -> content signature of the last publish
+// `ts` moves on every rebuild and the zk deadline counts down continuously, so
+// neither can decide "something happened". Waiters key off `rev`, which only
+// advances when a watcher would actually see a difference.
+function snapSig(s) {
+  const zk = s.zk ? { ...s.zk, deadlineAt: 0 } : null;
+  return jsonBig({ h: s.hand, se: s.seats, b: s.board, z: zk });
+}
+function publishSnap(t, s) {
+  const prev = SNAPS.get(t);
+  const sig = snapSig(s);
+  const changed = SNAP_SIG.get(t) !== sig;
+  s.rev = ((prev && prev.rev) || 0) + (changed ? 1 : 0);
+  SNAP_SIG.set(t, sig);
+  SNAPS.set(t, s);
+  if (!changed) return;
+  const w = SNAP_WAIT.get(t);
+  if (!w || !w.size) return;
+  SNAP_WAIT.delete(t);
+  for (const r of w) { try { r(s); } catch (_) {} }
+}
+/// Park until this table's snapshot advances past `rev` (or `ms` elapses).
+function waitForSnap(t, rev, ms) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      const set = SNAP_WAIT.get(t);
+      if (set) set.delete(finish);
+      resolve(v || SNAPS.get(t));
+    };
+    const timer = setTimeout(() => finish(null), ms);
+    let set = SNAP_WAIT.get(t);
+    if (!set) { set = new Set(); SNAP_WAIT.set(t, set); }
+    set.add(finish);
+    const cur = SNAPS.get(t);
+    if (cur && cur.rev > rev) finish(cur); // advanced between the check and the park
+  });
+}
 const LOBBY = { ts: 0, obj: null };
 const CTL = new Map(); // tableId -> controller address (immutable after creation)
 const STATUS = { startedAt: Date.now(), lastLoopEndAt: 0, gasWei: "0", tables: 0, spawned: 0, snapErrors: 0, workerGas: new Map() };
 const jsonBig = (v) => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x));
+// Short change-token for a /zk/task answer. The answer itself carries whole
+// ciphertexts, so echoing it back as the long-poll cursor would double the
+// traffic on the one path we are trying to make fast. FNV-1a is plenty: this
+// only has to notice that something changed, and a miss costs one held poll.
+function etagOf(v) {
+  const s = jsonBig(v);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(36) + s.length.toString(36);
+}
 
 async function controllerOf(room, t) {
   if (!CTL.has(t)) CTL.set(t, (await room.tableController(t)).toLowerCase());
@@ -248,7 +305,24 @@ function startSnapshotCache(provider, room, dealerC, trn, zkCtx = {}) {
 
   let busy = false;
   let again = false; // poked mid-pass → run one more pass right after
-  async function refresh() {
+  // One build per table at a time. Without this, a targeted refresh racing the
+  // full pass would read the same table twice and the loser's (older) result
+  // could land last, briefly serving a board that just lost a card.
+  const building = new Map(); // tableId -> in-flight promise
+  function buildOnce(t) {
+    const cur = building.get(t);
+    if (cur) return cur;
+    const p = buildTable(t)
+      .then((s) => publishSnap(t, s))
+      .catch(() => { STATUS.snapErrors++; })
+      .finally(() => building.delete(t));
+    building.set(t, p);
+    return p;
+  }
+  /// `only` rebuilds ONE table and skips the lobby — that's the post-reveal
+  /// path, which must not wait behind a 50-table sweep to show a card.
+  async function refresh(only) {
+    if (only !== undefined) return buildOnce(only);
     if (busy) { again = true; return; }
     busy = true;
     try {
@@ -267,7 +341,7 @@ function startSnapshotCache(provider, room, dealerC, trn, zkCtx = {}) {
         if (prev && !active && !watched && Date.now() - prev.ts < 8000) continue;
         due.push(t);
       }
-      await Promise.all(due.map((t) => buildTable(t).then((s) => SNAPS.set(t, s)).catch(() => { STATUS.snapErrors++; })));
+      await Promise.all(due.map(buildOnce));
       await refreshLobby();
     } catch (_) { STATUS.snapErrors++; }
     finally {
@@ -394,8 +468,28 @@ async function main() {
   const provider = new ethers.JsonRpcProvider(fetchReq);
   // ethers v6 defaults pollingInterval to 4000ms → every tx.wait() waits up to
   // 4s for the next poll AFTER it mines. That, times N serial writes, was the
-  // bulk of the multi-table lag. 400ms makes each confirmation near-instant.
-  provider.pollingInterval = 400;
+  // bulk of the multi-table lag. Measured on Somnia from this box: a tx lands
+  // exactly 5 blocks (~550ms) after broadcast, so 400ms of poll granularity was
+  // adding up to another 400ms on top of a 550ms fact. 150ms costs a handful of
+  // extra receipt reads while a tx is in flight and buys most of that back.
+  provider.pollingInterval = 150;
+
+  // Somnia's baseFee is a FIXED 6 gwei (checked across 200 blocks, and again
+  // here), so asking the gateway what gas costs before every reveal bought
+  // nothing and cost ~150ms on the one path players are watching. Cached, with
+  // a periodic refresh so a network that starts moving its fees is still
+  // followed. A stale-but-generous price only ever means we overpay slightly.
+  let feeCache = null, feeAt = 0, feeInflight = null;
+  async function cachedFees() {
+    if (feeCache && Date.now() - feeAt < 30_000) return feeCache;
+    if (!feeInflight) {
+      feeInflight = provider.getFeeData()
+        .then((f) => { if (f && f.maxFeePerGas) { feeCache = f; feeAt = Date.now(); } return feeCache; })
+        .catch(() => feeCache)
+        .finally(() => { feeInflight = null; });
+    }
+    return (await feeInflight) || feeCache;
+  }
   const wallet = new ethers.Wallet(KEY, provider);
   // Throughput model: tables are advanced CONCURRENTLY (their reads run in
   // parallel), but every state-changing tx is funnelled through `runTx`, a
@@ -450,6 +544,12 @@ async function main() {
       const rawSend = w.sendTransaction.bind(w);
       w.sendTransaction = async (tx) => {
         if (nextNonce === null) { syncing = syncing || w.getNonce("pending").then((n) => { nextNonce = n; syncing = null; }); await syncing; }
+        // Pre-fill the price so ethers' populateTransaction skips its own fee
+        // round-trip. An explicit override on the call still wins.
+        if (tx.maxFeePerGas == null && tx.gasPrice == null) {
+          const f = await cachedFees();
+          if (f && f.maxFeePerGas) { tx.maxFeePerGas = f.maxFeePerGas; tx.maxPriorityFeePerGas = f.maxPriorityFeePerGas ?? 0n; }
+        }
         const nonce = nextNonce++; // atomic allocation (nextNonce++ can't yield) → broadcasts run CONCURRENTLY
         for (let a = 0; ; a++) {
           try { return await rawSend({ ...tx, nonce }); }
@@ -622,11 +722,52 @@ async function main() {
       console.error("[poker-bot] tableCount failed:", e.shortMessage || e.message);
       return;
     }
-    const trnAddrLc = trn ? (await trn.getAddress()).toLowerCase() : null;
+    // Advance all due tables CONCURRENTLY — reads run in parallel, writes stay
+    // serialized by runTx. A slow/idle table no longer blocks the others.
+    // COLD tables (nobody seated, no live hand, no page open, no deal in
+    // setup) are skipped on most passes: each one costs ~10 eth_calls, and at
+    // 50 tables that was ~1000 reads/s of pure idling. That traffic is what
+    // made a live table's poke queue behind a full sweep — the single biggest
+    // reason a revealed card took a second longer than it had to.
+    const nowT = Date.now();
+    const due = [];
+    for (let t = 0; t < tableCount; t++) {
+      if (foreignTable.get(t)) continue;
+      if ((tableBackoffUntil.get(t) || 0) > nowT) continue;
+      if (!isHotTable(t)) {
+        if (nowT - (coldTickAt.get(t) || 0) < COLD_TICK_MS) continue;
+        coldTickAt.set(t, nowT);
+      }
+      due.push(t);
+    }
+    await Promise.all(due.map(tickOne));
+  }
 
-    // Advance each playable table, one awaited tx at a time (see the sequential
-    // note where the wallet is created).
-    async function processTable(t) {
+  // A table is "hot" while anything can happen on it: a hand in flight, a deal
+  // being set up, someone seated, or someone's page open. Anything else can be
+  // looked at lazily — a player sitting down pokes us directly, so the lazy
+  // cadence is a backstop, not the discovery path.
+  const COLD_TICK_MS = 1500;
+  const coldTickAt = new Map();
+  const lastTag = new Map(); // tableId -> what the last tick said
+  function isHotTable(t) {
+    if (Date.now() - (WATCHED.get(t) || 0) < 30_000) return true;
+    if (ZK_MODE && (zkState.has(t) || zkState.has(`next:${t}`))) return true;
+    // Coldness comes from the last tick's own verdict, NOT from the snapshot
+    // cache: that cache deliberately lets quiet tables go 8s stale, and keying
+    // off it would have let a tournament seat its players into a table the
+    // dealer had decided to stop looking at.
+    const tag = lastTag.get(t);
+    if (tag === undefined) return true; // never ticked — look before judging
+    return tag !== "idle"; // "idle" == fewer than 2 eligible seats, read on-chain
+  }
+
+  // Advance each playable table, one awaited tx at a time (see the sequential
+  // note where the wallet is created). Hoisted out of the sweep so ONE table
+  // can be advanced on demand (see tickOne / requestTick).
+  let trnAddrLc;
+  async function processTable(t) {
+    if (trnAddrLc === undefined) trnAddrLc = trn ? (await trn.getAddress()).toLowerCase() : null;
       try {
         // Tables controlled by an ORPHANED tournament contract (pre-redeploy)
         // must not be dealt — we can't report their busts, so hands would burn
@@ -648,6 +789,7 @@ async function main() {
           : tickTable(room, dealer, MASTER, state, t, { tx: runTx, noNewHands: freeze.has(t) });
         tickP.catch(() => {}); // if the race is lost, the zombie tick must not become an unhandledRejection
         const tag = await Promise.race([tickP.finally(() => clearTimeout(tickTimer)), tickTimeout]);
+        lastTag.set(t, tag); // feeds isHotTable — an on-chain verdict, not a cached guess
         if (tag && tag !== "idle" && tag !== "wait" && !/^(keys:|shuffle:|holeshares|board-wait|showdown-collect|showdown-wait|prep|inter-hand|hold)/.test(tag)) {
           console.log(`[poker-bot] table ${t}: ${tag}`);
         }
@@ -655,7 +797,7 @@ async function main() {
         // revealed holes, pot/settle) → rebuild the served snapshot NOW so the
         // next client poll shows it, instead of up to a full cache pass later
         if (tag && /^(started|board:|holes:|settled|showdown-ready|timeout|hand-ended|cancelled|strike|recovered|rescued)/.test(tag)) {
-          snapCache.refresh();
+          snapCache.refresh(t); // just this table — a card must not queue behind a 50-table sweep
         }
         if (tag === "timeout") {
           const n = (timeoutStreak.get(t) || 0) + 1;
@@ -687,17 +829,23 @@ async function main() {
         const live = !!(snap && snap.hand && snap.hand.inProgress);
         tableBackoffUntil.set(t, Date.now() + (live ? 5_000 : 30_000));
       }
-    }
+  }
 
-    // Advance all due tables CONCURRENTLY — reads run in parallel, writes stay
-    // serialized by runTx. A slow/idle table no longer blocks the others.
-    const due = [];
-    for (let t = 0; t < tableCount; t++) {
-      if (foreignTable.get(t)) continue;
-      if ((tableBackoffUntil.get(t) || 0) > Date.now()) continue;
-      due.push(t);
+  // One tick per table at a time. A poke that lands mid-tick is remembered and
+  // re-run right after, never dropped (dropping it would put the artifact that
+  // just arrived — the last flop share — back on the slow interval) and never
+  // recursed into, so a burst of posts can't grow the stack.
+  const ticking = new Map(); // tableId -> { again }
+  async function tickOne(t) {
+    const cur = ticking.get(t);
+    if (cur) { cur.again = true; return; }
+    const rec = { again: false };
+    ticking.set(t, rec);
+    try { await processTable(t); }
+    finally {
+      ticking.delete(t);
+      if (rec.again) setTimeout(() => tickOne(t), 25);
     }
-    await Promise.all(due.map(processTable));
   }
 
   // Non-overlapping loop, driven two ways: the POLL_MS interval (baseline
@@ -724,8 +872,32 @@ async function main() {
     }
   }
   setInterval(runLoop, POLL_MS);
+
+  // Fast lane for tables that have people at them. A street opens when a player
+  // acts, which changes the CHAIN and not us, so the only way we find out is by
+  // looking — and at POLL_MS that was up to half a second of dead time before a
+  // single decryption share had even been asked for. Now that quiet tables are
+  // skipped, looking often at the two or three busy ones is cheap: a tick is a
+  // couple of reads, and tickOne's per-table lock keeps it from stacking up on
+  // itself or racing the full sweep.
+  const FAST_MS = Math.max(120, parseInt(process.env.FAST_POLL_MS || "200", 10));
+  setInterval(() => {
+    const n = STATUS.tables || 0;
+    for (let t = 0; t < n; t++) {
+      if (foreignTable.get(t)) continue;
+      if ((tableBackoffUntil.get(t) || 0) > Date.now()) continue;
+      if (!isHotTable(t)) continue;
+      tickOne(t);
+    }
+  }, FAST_MS);
+
   let pokeTimer = null; // coalesce a burst of client posts into ONE early run
-  zkCtx.requestTick = () => {
+  // A poke that names its table advances THAT table immediately. It used to
+  // schedule a whole sweep, so the last flop share arriving mid-pass waited out
+  // every other table before its reveal tx went out — up to a second of pure
+  // queueing on the one path players actually watch.
+  zkCtx.requestTick = (t) => {
+    if (typeof t === "number" && Number.isFinite(t) && t >= 0) { tickOne(t); return; }
     if (pokeTimer) return;
     pokeTimer = setTimeout(() => { pokeTimer = null; runLoop(); }, 50);
   };
@@ -821,7 +993,28 @@ function startCardServer(room, state, zkCtx = {}) {
         const t = Number(body.tableId);
         const addr = await resolveSigner(`ShinyPoker:zk:${t}:${body.dealId}`, body.signature);
         let out;
-        if (req.url.startsWith("/zk/task")) out = zkDrv.zkTask(zkCtx.zkState, t, addr, body.dealId);
+        if (req.url.startsWith("/zk/task")) {
+          out = zkDrv.zkTask(zkCtx.zkState, t, addr, body.dealId);
+          // LONG-POLL. `zkTask` is pure in-memory, so re-running it is free —
+          // holding the request while the answer is still the one the client
+          // already acted on turns "post your flop shares" from a poll-tick
+          // discovery (up to a full client cadence, and the client may be busy
+          // proving the NEXT deal's shuffle) into one packet after the street
+          // opens. Old clients send no `wait` and get today's behaviour.
+          let cur = etagOf(out);
+          if (body.wait && body.etag) {
+            let aborted = false;
+            req.on("close", () => { aborted = true; });
+            const until = Date.now() + Math.min(10_000, Math.max(500, Number(body.wait) || 4000));
+            while (cur === body.etag && Date.now() < until && !aborted) {
+              await new Promise((r) => setTimeout(r, 80));
+              out = zkDrv.zkTask(zkCtx.zkState, t, addr, body.dealId);
+              cur = etagOf(out);
+            }
+            if (aborted) return;
+          }
+          out = { ...out, etag: cur };
+        }
         else if (req.url.startsWith("/zk/key")) out = zkDrv.zkPostKey(zkCtx.zkState, t, addr, body);
         else if (req.url.startsWith("/zk/shuffleproof")) out = await zkDrv.zkPostShuffleProof(zkCtx.zkState, t, addr, body); // async: proof verified in a worker · before /zk/shuffle (prefix!)
         else if (req.url.startsWith("/zk/shuffle")) out = zkDrv.zkPostShuffle(zkCtx.zkState, t, addr, body);
@@ -832,7 +1025,7 @@ function startCardServer(room, state, zkCtx = {}) {
         // polls) pokes the main loop: the tick that consumes this artifact
         // (phase advance, prepareDeal, board/hole reveal) runs now, not up to
         // POLL_MS later. Biggest win: the last flop share → reveal tx gap.
-        if (zkCtx.requestTick && !req.url.startsWith("/zk/task") && !req.url.startsWith("/zk/chain")) zkCtx.requestTick();
+        if (zkCtx.requestTick && !req.url.startsWith("/zk/task") && !req.url.startsWith("/zk/chain")) zkCtx.requestTick(t);
         res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
         return res.end(JSON.stringify(out));
       } catch (e) {
@@ -870,10 +1063,39 @@ function startCardServer(room, state, zkCtx = {}) {
       const u = new URL(req.url, "http://x");
       const t = Number(u.searchParams.get("t") || 0);
       WATCHED.set(t, Date.now()); // keep watched tables on the hot refresh path
-      const s = SNAPS.get(t);
+      // `rev=N` = "I already have revision N, park me until there's more". The
+      // reveal path bumps the rev the instant the card lands, so the card
+      // reaches the felt on the open connection instead of on the client's next
+      // timer. Callers that send no rev keep the plain immediate answer.
+      const wantRev = Number(u.searchParams.get("rev") || 0);
+      let s = SNAPS.get(t);
+      if (wantRev && s && s.rev <= wantRev) {
+        (async () => {
+          let aborted = false;
+          req.on("close", () => { aborted = true; });
+          const got = await waitForSnap(t, wantRev, 12_000);
+          if (aborted) return;
+          if (!got || Date.now() - got.ts > 15_000) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: "snapshot not ready" })); }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(jsonBig(got));
+        })();
+        return;
+      }
       if (!s || Date.now() - s.ts > 15_000) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: "snapshot not ready" })); }
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(jsonBig(s));
+    }
+    // A player's action changes the chain, not our state — without this the bot
+    // only noticed on its own interval, so every street opened up to a poll
+    // late before a single share was even asked for. The acting client calls
+    // this the moment its tx confirms. Cheap and idempotent: worst case it
+    // advances a table that had nothing to do.
+    if (req.method === "GET" && req.url.startsWith("/poke")) {
+      const u = new URL(req.url, "http://x");
+      const t = Number(u.searchParams.get("t") || 0);
+      if (Number.isFinite(t) && t >= 0 && zkCtx.requestTick) zkCtx.requestTick(t);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end('{"ok":true}');
     }
     if (req.method === "GET" && req.url.startsWith("/lobby")) {
       if (!LOBBY.obj || Date.now() - LOBBY.ts > 20_000) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: "lobby not ready" })); }

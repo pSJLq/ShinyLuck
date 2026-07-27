@@ -29,8 +29,11 @@ const parseCt = (o) => ({ A: parsePt(o.A), B: parsePt(o.B) });
 const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
 const cardStr = (c) => RANKS[Math.floor(c / 4)] + ["c", "d", "h", "s"][c % 4];
 
-// SDK reads decrypted cards from here (same shape the v1 /holes endpoint had)
-window.__SPZK = window.__SPZK || { holes: {}, status: {} };
+// SDK reads decrypted cards from here (same shape the v1 /holes endpoint had).
+// `board` holds community cards this tab opened ITSELF from the relayed shares,
+// ahead of the on-chain reveal — see the board block in runDeal.
+window.__SPZK = window.__SPZK || { holes: {}, status: {}, board: {} };
+if (!window.__SPZK.board) window.__SPZK.board = {};
 
 const ZKD_ABI = [
   "function ctHash(uint256 dealId, uint16 cardIdx) view returns (bytes32)",
@@ -318,15 +321,24 @@ export function startZkAgent(sdk, getTableId) {
     return { x: kg.x, X: kg.X, pok: kg.pok };
   }
 
-  async function post(pathname, body) {
+  async function post(pathname, body, timeoutMs = 8000) {
     const r = await fetch(`${api}${pathname}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body), signal: AbortSignal.timeout(8000),
+      body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs),
     });
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(out.error || `zk ${pathname} ${r.status}`);
     return out;
   }
+
+  // ---- long-poll bookkeeping ----------------------------------------------
+  // The relay parks a /zk/task request while its answer is still the one we
+  // already acted on, so "post your flop shares" arrives one packet after the
+  // street opens instead of on our next timer tick. We remember the last answer
+  // per deal and hand it back as the etag. A relay that predates this ignores
+  // both fields and replies immediately — old behaviour, no version coupling.
+  const taskEtag = new Map(); // dealId -> etag of the last task we handled
+  const TASK_WAIT_MS = 5000;
 
   async function iteration() {
     const t = Number(getTableId());
@@ -342,17 +354,35 @@ export function startZkAgent(sdk, getTableId) {
     const zs = snap && snap.zk;
     window.__SPZK.status[t] = zs || null;
     if (!zs || !zs.dealId) return;
-    await runDeal(t, zs.dealId);
+    // TWO INDEPENDENT LANES. These used to run back-to-back in one lane, so the
+    // NEXT hand's Wikström proof (~300ms of BN254, more on a phone) sat in
+    // front of THIS hand's board shares — the card everyone is staring at
+    // waited on setup for a hand that hasn't been dealt. Nothing is shared
+    // between the lanes but the per-deal caches, which are keyed by dealId.
+    startLane("live", () => runDeal(t, zs.dealId));
     // pre-deal: while the live hand shows down, the bot runs the NEXT hand's
     // setup under a second dealId · same protocol, same secrecy gates (that
     // deal has no live hand yet, so the street gate reads -1: own-hole and
     // board shares stay locked; only the harmless others'-holes pre-collect
     // and the shuffle itself go out early).
     if (zs.next && zs.next.dealId && zs.next.dealId !== zs.dealId) {
-      try { await runDeal(t, zs.next.dealId); } catch (e) {
-        if (!/stale dealId|not collecting|not your/i.test(e.message || "")) console.warn("[zk-agent] predeal:", e.message || e);
-      }
+      startLane("next", () => runDeal(t, zs.next.dealId));
     }
+  }
+
+  const lanes = { live: false, next: false };
+  function startLane(name, fn) {
+    if (lanes[name]) return; // that lane is still working (or parked in a long-poll)
+    lanes[name] = true;
+    Promise.resolve()
+      .then(fn)
+      .catch((e) => {
+        const msg = e.message || String(e);
+        if (/stale dealId|not collecting|not your|aborted|signal timed out/i.test(msg)) return;
+        if (name === "next") { console.warn("[zk-agent] predeal:", msg); return; }
+        logErrOnce(msg);
+      })
+      .finally(() => { lanes[name] = false; });
   }
 
   // Deals whose ON-CHAIN data is gone (a strike re-deal replaces the deal and
@@ -375,7 +405,18 @@ export function startZkAgent(sdk, getTableId) {
   async function runDeal(t, dealId) {
     if ((deadDeals.get(String(dealId)) || 0) > Date.now()) return;
     const signature = await sign(t, dealId);
-    const task = await post("/zk/task", { tableId: t, dealId, signature });
+    // Park only when the LAST answer had nothing for us — that is when waiting
+    // is free and the wake-up is the whole point. Right after we do a step we
+    // want the follow-up answer immediately, so the cursor is dropped below.
+    const key = String(dealId);
+    const parkOn = taskEtag.get(key);
+    const task = await post(
+      "/zk/task",
+      parkOn ? { tableId: t, dealId, signature, wait: TASK_WAIT_MS, etag: parkOn } : { tableId: t, dealId, signature },
+      parkOn ? TASK_WAIT_MS + 6000 : 8000,
+    );
+    if (task.etag !== undefined && !task.do && !task.myHoles) taskEtag.set(key, task.etag);
+    else taskEtag.delete(key);
     if (task.observer || task.phase === "none" || task.participant === undefined) return;
 
     // while OTHERS shuffle, verify the posted stages in the background so the
@@ -500,6 +541,60 @@ export function startZkAgent(sdk, getTableId) {
         items.push({ idx, d: serPt(sh.d), R1: serPt(sh.proof.R1), R2: serPt(sh.proof.R2), s: hex(sh.proof.s) });
       }
       if (items.length) await post("/zk/shares", { tableId: t, dealId, signature, items });
+    }
+
+    // COMMUNITY CARDS, opened locally. The relay hands over every share for a
+    // slot the moment it holds them all; the on-chain reveal that follows takes
+    // ~5 blocks, and waiting for it was a second of dead felt on every street.
+    // Nothing here is taken on trust: the ciphertext is checked against the
+    // ON-CHAIN commitment, and every share against its sender's key, exactly as
+    // for my own hole cards. A failure just skips — the reveal lands shortly
+    // and the snapshot shows the card the normal way.
+    if (task.board && task.prepared !== false) {
+      const bkey = String(dealId);
+      if (!window.__SPZK.board[bkey]) {
+        // one small object per hand — prune so a long session doesn't hoard them
+        const keys = Object.keys(window.__SPZK.board);
+        if (keys.length > 8) for (const k of keys.slice(0, keys.length - 8)) delete window.__SPZK.board[k];
+        window.__SPZK.board[bkey] = {};
+      }
+      const seen = window.__SPZK.board[bkey];
+      const pubkeys = (task.pubkeys || []).map(parsePt);
+      let opened = 0;
+      for (const key of Object.keys(task.board)) {
+        const slot = Number(key);
+        if (seen[slot] !== undefined) continue;
+        const b = task.board[key];
+        try {
+          const ct = parseCt(b.ct);
+          const a = zk.aff(ct.A), bb = zk.aff(ct.B);
+          const packed = ethers.concat([ethers.toBeHex(a.x, 32), ethers.toBeHex(a.y, 32), ethers.toBeHex(bb.x, 32), ethers.toBeHex(bb.y, 32)]);
+          let want;
+          try { want = await zkd.ctHash(dealId, b.idx); }
+          catch (e) {
+            if (/Panic|ARRAY_RANGE|CALL_EXCEPTION|missing revert data/i.test(e.message || "")) break; // deal gone — the holes path parks it
+            throw e;
+          }
+          if (ethers.keccak256(packed) !== want) { console.warn("[zk-agent] board ct != on-chain commitment · ignoring"); continue; }
+          const ds = [];
+          let ok = true;
+          for (const s of b.shares) {
+            if (!s || !pubkeys[s.i]) { ok = false; break; }
+            const d = parsePt(s.d);
+            const share = { d, proof: { R1: parsePt(s.proof.R1), R2: parsePt(s.proof.R2), s: BigInt(s.proof.s) } };
+            if (!zk.verifyShare(ct, pubkeys[s.i], share, `SPZK:${dealId}:share:${b.idx}:${s.i}`)) { ok = false; break; }
+            ds.push(d);
+          }
+          if (!ok) { console.warn("[zk-agent] relayed board share failed verification · ignoring"); continue; }
+          const card = zk.pointToCard(zk.decryptWithShares(ct, ds, null), zk.deckPoints());
+          if (card < 0) continue;
+          seen[slot] = card;
+          opened++;
+        } catch (_) { /* fall back to the on-chain reveal for this slot */ }
+      }
+      if (opened) {
+        try { window.dispatchEvent(new CustomEvent("shinypoker:zk-board", { detail: { tableId: t, dealId } })); } catch (_) {}
+      }
     }
 
     // my own hole cards: verify everything, then decrypt locally. Never before

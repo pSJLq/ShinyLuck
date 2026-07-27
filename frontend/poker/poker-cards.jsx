@@ -224,6 +224,7 @@ const SP_I18N_RU = {
   "Seats are assigned by the tournament; register on its page to play": "Места раздаёт турнир · зарегистрируйтесь на его странице, чтобы играть",
   "Showdown · settling on-chain": "Шоудаун · расчёт он-чейн",
   "Waiting for your turn": "Ожидание вашего хода",
+  "Revealing": "Раскрываем",
   "Waiting for the next hand": "Ожидание следующей руки",
   "Your chips & action are safe on-chain": "Ваши фишки и действия защищены он-чейн",
   "Pre-action armed · fires instantly on your turn": "Пре-действие взведено · сработает в ваш ход",

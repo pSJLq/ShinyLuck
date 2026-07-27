@@ -108,6 +108,19 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     return { owner, coordinator, alice, bob, room, zkd, roomC, zkdC, state, clients, tick, stepAll };
   }
 
+  /// The NEXT hand's prepareDeal is fired WITHOUT being awaited — it is the
+  /// heaviest tx we send and it must never hold the live hand's tick while a
+  /// street is waiting on a card. So tests wait for it to land rather than
+  /// assuming the tick that started it also finished it.
+  async function awaitPrepared(state, key, ms = 10_000) {
+    const t0 = Date.now();
+    for (;;) {
+      const s = state.get(key);
+      if (!s || s.prepared || Date.now() - t0 > ms) return s;
+      await new Promise((r) => setTimeout(r, 40));
+    }
+  }
+
   // drive prep phases: keys → shuffle ×k → holeshares → prepare → started
   async function dealHand(tick, stepAll) {
     expect(await tick()).to.match(/^keys:0/); // session opened
@@ -231,7 +244,7 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     stepBoth(); // next: pre-collect shares for the OTHERS' holes
     expect(await tick({ showdownMs: 60000 })).to.equal("showdown-wait"); // next → prepare; prepareDeal rides the pause
 
-    const nx = state.get(zkDealer.nextKey(0));
+    const nx = await awaitPrepared(state, zkDealer.nextKey(0));
     expect(nx.phase).to.equal("prepare");
     expect(nx.prepared, "prepareDeal sent during the winner-display pause").to.equal(true);
     // no early peek: my NEXT-hand cards are never relayed while speculative
@@ -269,7 +282,7 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     expect(await tick({ showdownMs: 60000 })).to.equal("showdown-wait");
     stepBoth();
     expect(await tick({ showdownMs: 60000 })).to.equal("showdown-wait");
-    expect(state.get(zkDealer.nextKey(0)).prepared).to.equal(true);
+    expect((await awaitPrepared(state, zkDealer.nextKey(0))).prepared).to.equal(true);
     expect(await tick()).to.equal("settled");
 
     // bob sits out between settle and the next hand — the prediction is stale
@@ -291,16 +304,23 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     stepAll(); // decrypt holes
     await room.connect(alice).act(0, CALL, 0);
     await room.connect(bob).act(0, CHECK, 0); // → flop
-    expect(await tick()).to.equal("board-wait"); // pre-deal session opens here
+    expect(await tick()).to.equal("board-wait");
+    // The NEXT hand's setup must never run on a tick that still owes THIS hand
+    // a card — speculative work for a hand nobody has been dealt does not get
+    // to sit in front of the flop everyone is staring at.
+    expect(state.get(zkDealer.nextKey(0))).to.equal(undefined);
+    clients.forEach((c) => c.step(state, 0)); // board shares
+    expect(await tick()).to.equal("board:3");
+    expect(await tick()).to.equal("wait"); // board settled → pre-deal opens now
     const nextDealId = String(state.get(zkDealer.nextKey(0)).dealId);
     const stepBoth = () => clients.forEach((c) => { c.step(state, 0); c.step(state, 0, nextDealId); });
-    stepBoth(); // board shares + next keys
-    expect(await tick()).to.equal("board:3");
+    stepBoth(); // next keys
+    expect(await tick()).to.equal("wait");
     stepBoth(); // next: both shuffles
     expect(await tick()).to.equal("wait");
     stepBoth(); // next: hole-share pre-collect
     expect(await tick()).to.equal("wait"); // next → prepare; prepareDeal fires (no reveal pending)
-    expect(state.get(zkDealer.nextKey(0)).prepared).to.equal(true);
+    expect((await awaitPrepared(state, zkDealer.nextKey(0))).prepared).to.equal(true);
 
     await room.connect(bob).act(0, FOLD, 0); // fold-win, no crypto needed
     expect((await room.getHand(0)).inProgress).to.equal(false);

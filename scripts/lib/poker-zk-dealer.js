@@ -159,10 +159,17 @@ function _sessFor(state, tableId, dealId) {
 
 // ---- eligibility (must MATCH PokerRoom._eligibleSeats exactly) ------------
 async function eligibleSeats(room, tableId, maxSeats) {
-  const nextHand = Number(await room.handCounter(tableId)) + 1;
+  // All reads at once. Sequentially this was 1 + maxSeats round trips on a path
+  // that runs every tick of every table — at a 9-max table that is ten RPC
+  // latencies stacked in front of everything else the tick has to do.
+  const [handCounter, ...seatsRaw] = await Promise.all([
+    room.handCounter(tableId),
+    ...Array.from({ length: maxSeats }, (_, s) => room.getSeat(tableId, s)),
+  ]);
+  const nextHand = Number(handCounter) + 1;
   const out = [];
   for (let s = 0; s < maxSeats; s++) {
-    const seat = await room.getSeat(tableId, s);
+    const seat = seatsRaw[s];
     if (seat.occupied && !seat.sittingOut && seat.stack > 0n && Number(seat.sitInHandId) <= nextHand) {
       out.push({ seat: s, addr: seat.player.toLowerCase() });
     }
@@ -344,6 +351,35 @@ function zkTask(state, tableId, addrLower, dealId) {
         };
       }
       if (complete) out.myHoles = mine;
+    }
+    // BOARD RELAY. Once every share for a slot is in, the card is knowable —
+    // but it only becomes VISIBLE when the reveal tx lands ~5 blocks later, and
+    // that is pure staring-at-the-felt time. Hand the shares over WITH their
+    // proofs (same shape and same client-side checks as myHoles) so each player
+    // opens the card locally, while the on-chain reveal continues in the
+    // background for settlement, observers and the audit trail.
+    //
+    // This leaks nothing: a full share set for a slot can only exist AFTER that
+    // slot's street opened, because that is the only moment honest clients
+    // release them (mayReleaseShare, mirrored on both sides and on-chain). Only
+    // slots the chain has NOT published yet are sent — past that the snapshot
+    // already carries the card, so this stays a few hundred bytes.
+    if (sess.deck && !sess.predeal && sess.prepared && sess.started) {
+      const bd = {};
+      for (let slot = sess.boardRevealed; slot < 5; slot++) {
+        const idx = boardIdx(sess.k, slot);
+        if (!haveAllShares(sess, idx)) break; // contiguous prefix only
+        const m = sess.shares.get(idx);
+        bd[slot] = {
+          idx,
+          ct: serCt(sess.deck[idx]),
+          shares: Array.from({ length: sess.k }, (_, i) => ({
+            i, d: serPt(m.get(i).d),
+            proof: { R1: serPt(m.get(i).R1), R2: serPt(m.get(i).R2), s: hex(m.get(i).s) },
+          })),
+        };
+      }
+      if (Object.keys(bd).length) out.board = bd;
     }
     return out;
   }
@@ -604,6 +640,10 @@ function _takeNext(state, tableId, now, opts) {
   if (!nx) return null;
   state.delete(nextKey(tableId));
   if (nx.phase !== "prepare" && nx.phase !== "holeshares") return null;
+  // prepareDeal still in flight: promoting now would make the main path send a
+  // SECOND prepareDeal for the same deal, which reverts and costs a full
+  // re-deal. Dropping it just means this hand takes the normal path.
+  if (nx.preparing) return null;
   if (nx.phase === "holeshares") nx.deadlineAt = now + (opts.holesharesMs ?? 15_000);
   nx.predeal = false; // myHoles relay unlocks once this becomes the live deal
   return nx;
@@ -654,20 +694,31 @@ async function _predealTick(room, zkd, state, tableId, maxSeats, liveSess, now, 
   // complete → commit the deal on-chain in the background; a revert (raced
   // duplicate, bad state) just drops the speculation — the normal path
   // re-prepares from scratch with a fresh session
-  if (nx.phase === "prepare" && !nx.prepared && !busy) {
+  if (nx.phase === "prepare" && !nx.prepared && !nx.preparing && !busy) {
     const inPlay = nx.deck.slice(0, inPlayCount(nx.k));
-    try {
-      await send(() => zkd.prepareDeal(
-        nx.dealId, tableId, nx.forHand, nx.seats,
-        nx.pubkeys.map((p) => cPt(p.X)), nx.pubkeys.map((p) => cPt(p.pok.R)), nx.pubkeys.map((p) => p.pok.s),
-        inPlay.map((c) => cPt(c.A)), inPlay.map((c) => cPt(c.B)),
-        nx.transcriptHash,
-      ));
-      nx.prepared = true;
-    } catch (_) {
-      state.delete(key);
-      state.set(`nextskip:${tableId}`, String(liveSess.dealId));
-    }
+    // NOT awaited. prepareDeal commits 2k+5 ciphertexts and is the heaviest tx
+    // we send; awaiting it here held the table's tick for its whole flight, and
+    // a street that opened in that window had to wait it out before its card
+    // was even looked at (the river was reliably the worst street for exactly
+    // this reason). This is speculative work for a hand nobody has been dealt —
+    // it gets the leftovers, never the front of the queue.
+    nx.preparing = true;
+    send(() => zkd.prepareDeal(
+      nx.dealId, tableId, nx.forHand, nx.seats,
+      nx.pubkeys.map((p) => cPt(p.X)), nx.pubkeys.map((p) => cPt(p.pok.R)), nx.pubkeys.map((p) => p.pok.s),
+      inPlay.map((c) => cPt(c.A)), inPlay.map((c) => cPt(c.B)),
+      nx.transcriptHash,
+    ))
+      .then(() => { nx.prepared = true; })
+      .catch(() => {
+        // a revert (raced duplicate, bad state) just drops the speculation —
+        // the normal path re-prepares from scratch with a fresh session
+        if (state.get(key) === nx) {
+          state.delete(key);
+          state.set(`nextskip:${tableId}`, String(liveSess.dealId));
+        }
+      })
+      .finally(() => { nx.preparing = false; });
     return;
   }
   if (nx.deadlineAt && now > nx.deadlineAt && nx.phase !== "prepare") {
@@ -875,14 +926,6 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
     }
   }
 
-  // 1.5 pre-deal the NEXT hand in parallel with this one (speculative — the
-  // promotion path re-validates the seat set before anything binds). `busy`
-  // defers its prepareDeal tx off ticks that owe the table a reveal.
-  if (opts.predeal !== false) {
-    const busyNow = boardCountForStreet(street) > sess.boardRevealed || (street === STREET.SHOWDOWN && !sess.markedReady);
-    try { await _predealTick(room, zkd, state, tableId, maxSeats, sess, now, opts, send, busyNow); } catch (_) {}
-  }
-
   // 2. board reveals in lockstep with the streets. Reveal EVERY due card that
   //    already has all shares in ONE tick (not one per poll cycle) — so the flop
   //    (3 cards) comes out as a unit instead of trickling one card at a time.
@@ -891,6 +934,11 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
     sess.boardNeeded = [];
     for (let sl = sess.boardRevealed; sl < want; sl++) sess.boardNeeded.push(boardIdx(sess.k, sl));
     if (!sess.boardDeadline) sess.boardDeadline = now + (opts.boardMs ?? 9_000);
+    // When we FIRST saw this street owed cards. The gap from here to the reveal
+    // is share-collection (players' browsers); the gap from the street actually
+    // opening to here is our own discovery. They are fixed in different places,
+    // so the log keeps them apart.
+    if (!sess.boardNeedAt) sess.boardNeedAt = now;
 
     // The flop is atomic for the UI: hold the first reveal until all 3 cards
     // have their shares, so watchers never see the flop trickle one card at a
@@ -912,6 +960,7 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
       }
     }
     if (readySlots.length) {
+      const sharesAt = now; // every share for the ready prefix is in hand
       try {
         const args = readySlots.map((slot) => {
           const idx = boardIdx(sess.k, slot);
@@ -946,6 +995,13 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
       }
       sess.boardRevealed = readySlots[readySlots.length - 1] + 1;
       sess.boardDeadline = 0;
+      // Timing goes to the log, NOT into the tag: the tag is a machine signal
+      // the runner matches on, and the two halves below are fixed in different
+      // places (share wait = players' browsers, tx = chain).
+      if (sess.boardNeedAt) {
+        console.log(`[poker-bot] t${tableId} board:${sess.boardRevealed} shares-wait ${sharesAt - sess.boardNeedAt}ms, reveal-tx ${Date.now() - sharesAt}ms`);
+      }
+      sess.boardNeedAt = 0;
       return `board:${sess.boardRevealed}`;
     }
     if (sess.accused && (await _tryIngestRescue(room, zkd, sess, now, opts))) return "rescued";
@@ -954,6 +1010,18 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
   }
   sess.boardNeeded = [];
   sess.boardDeadline = 0;
+
+  // 2.5 pre-deal the NEXT hand in parallel with this one (speculative — the
+  // promotion path re-validates the seat set before anything binds). Deliberately
+  // BELOW the board block: this is background work for a hand nobody has been
+  // dealt yet, and it used to run first, so its seat scan (and, on the tick it
+  // was ready, its prepareDeal) sat in front of the card the table was actually
+  // waiting on. Everything above returns early while a reveal is owed, so the
+  // pre-deal now runs in the gaps — pre-flop and during post-reveal betting —
+  // which is where there is time to spare anyway.
+  if (opts.predeal !== false) {
+    try { await _predealTick(room, zkd, state, tableId, maxSeats, sess, now, opts, send, street === STREET.SHOWDOWN && !sess.markedReady); } catch (_) {}
+  }
 
   // 3. showdown: collect own-hole shares from live seats, reveal, settle
   if (street === STREET.SHOWDOWN) {

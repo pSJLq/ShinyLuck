@@ -205,6 +205,16 @@ function LiveTable() {
   // it reveals a card, so 600ms here is the real reveal→pixels latency).
   useEffect(() => SP.sdk.watch(tableId, setSnap, 600), [tableId]);
 
+  // A community card opened locally by the zk agent arrives on its own event,
+  // not on a snapshot — without this the card would sit in memory until the
+  // next poll and the whole point (showing it before the chain does) is lost.
+  const [zkTick, setZkTick] = useState(0);
+  useEffect(() => {
+    const on = () => setZkTick((n) => n + 1);
+    window.addEventListener("shinypoker:zk-board", on);
+    return () => window.removeEventListener("shinypoker:zk-board", on);
+  }, []);
+
   // The controller decides the whole render mode (chip formatting, seats
   // managed by a tournament vs open sit-down). Resolve it BEFORE first paint -
   // tournament tables used to flash cash-table UI ("+ Sit" seats, wei-formatted
@@ -421,7 +431,14 @@ function LiveTable() {
     if (!snap) return;
     const prev = prevRef.current;
     const h = snap.hand;
-    const boardLen = snap.board.length;
+    // Count the cards actually ON SCREEN, which includes any this tab opened
+    // itself ahead of the chain — otherwise the flip animation would fire late,
+    // when the on-chain reveal caught up to a card the player already saw.
+    let boardLen = snap.board.length;
+    {
+      const e = window.__SPZK && window.__SPZK.board ? window.__SPZK.board[String(h.dealId)] : null;
+      if (e) while (e[boardLen] !== undefined) boardLen++;
+    }
     if (h.inProgress && h.handId !== prev.handId && h.handId > 0) {
       setAnim((a) => ({ ...a, dealing: !reducedMo, flipFrom: 99, winnerSeat: -1 }));
       clearTimeout(dealTimerRef.current);
@@ -490,7 +507,7 @@ function LiveTable() {
     const stacks = {}, sh = {};
     snap.seats.forEach((s) => { stacks[s.index] = s.stack; if (!s.empty) sh[s.index] = { cs: s.committedStreet, folded: s.folded, allIn: s.allIn }; });
     prevRef.current = { handId: h.handId, boardLen, inProgress: h.inProgress, street: h.street, curBet: h.currentBet, actingSeat: h.actingSeat, stacks, sh };
-  }, [snap]);
+  }, [snap, zkTick]); // zkTick: a locally-opened board card is a transition too
 
   // at showdown, fetch opponents' revealed hole cards (public once the seed is revealed)
   useEffect(() => {
@@ -591,7 +608,6 @@ function LiveTable() {
 
   const { cfg, hand, seats, mySeat } = snap;
   const maxSeats = cfg.maxSeats;
-  const board = snap.board.map(SP.intToCardStr);
   const dealKey = String(hand.dealId);
   // freeze the last non-empty board per deal: after settle the live board
   // empties while revealed cards + the winner banner are still on screen -
@@ -609,10 +625,33 @@ function LiveTable() {
   })();
   const myHoleObj = hand.inProgress ? holes[dealKey] : null;
   const myHole = myHoleObj ? myHoleObj.cardsStr : null;
+  // How many board cards this street owes, and whether any are still in flight.
+  // The cards are decrypted co-operatively by the players and proven on-chain,
+  // so there is a real (small) window where the street has opened and the card
+  // has not landed. Naming that window is the difference between "the site is
+  // broken" and "it is dealing".
+  const boardDue = hand.inProgress ? (hand.street === ST.FLOP ? 3 : hand.street === ST.TURN ? 4 : hand.street >= ST.RIVER ? 5 : 0) : 0;
+  // Cards this tab already opened itself from the relayed shares (zk-agent.js),
+  // ahead of the on-chain reveal. Each was checked against the on-chain
+  // ciphertext commitment and every share against its sender's key, so this is
+  // the same card the chain is about to publish — just ~5 blocks sooner. The
+  // chain's copy always wins once it lands.
+  const early = (hand.inProgress && window.__SPZK && window.__SPZK.board) ? (window.__SPZK.board[dealKey] || null) : null;
+  const shownBoard = snap.board.slice();
+  if (early) {
+    for (let i = shownBoard.length; i < boardDue; i++) {
+      if (early[i] === undefined) break; // contiguous only — never a gap in the row
+      shownBoard.push(early[i]);
+    }
+  }
+  const revealing = boardDue > shownBoard.length;
+  const board = shownBoard.map(SP.intToCardStr);
   // combo label only from the flop · preflop "High Card" is pure noise for a
   // beginner ("why does it say ten-high before any cards are open?")
-  const bestHand = myHoleObj && snap.board.length >= 3 ? SP.handName(myHoleObj.cards.concat(snap.board)) : "";
-  const heroEval = bestHand ? SP.handEval(myHoleObj.cards.concat(snap.board)) : null;
+  // reads shownBoard, so the combo label appears together with the cards
+  // instead of a beat later when the chain catches up
+  const bestHand = myHoleObj && shownBoard.length >= 3 ? SP.handName(myHoleObj.cards.concat(shownBoard)) : "";
+  const heroEval = bestHand ? SP.handEval(myHoleObj.cards.concat(shownBoard)) : null;
 
   // Blind-position markers (like the D button): HU → the button IS the small
   // blind; multiway → SB/BB are the next in-hand seats clockwise of the button.
@@ -765,8 +804,9 @@ function LiveTable() {
             <div className="felt">
               <div className="center">
                 {anim.dealing && <span className="zkbadge shuffling"><span className="chk">{ChromeIcons.shield}</span>{SPT("shuffling · commitment sealed on-chain")}</span>}
-                <Board cards={board} deckMode={deck} flipFrom={anim.flipFrom}
-                  dim={winUsed ? snap.board.map((c) => !winUsed.set.has(c)) : null} />
+                <Board cards={board} deckMode={deck} flipFrom={anim.flipFrom} due={boardDue}
+                  dim={winUsed ? shownBoard.map((c) => !winUsed.set.has(c)) : null} />
+                {revealing && <div className="revealnote">{SPT("Revealing")}</div>}
                 {hand.inProgress
                   ? <Pot pot={NV(hand.pot)} chips={CHIPS} />
                   : <div className="pot"><div className="potmain"><span className="k">
@@ -907,7 +947,11 @@ function LiveTable() {
           <LiveSideRail key={tableId} tableId={tableId} snap={snap} connected={connected} mySeat={mySeat} mobileOpen={railOpen} onClose={() => setRailOpen(false)} nameOf={nameOf} />
         </div>
 
-        {renderBar()}
+        {/* While a board card is still being turned over, the buttons are held
+            back visually — the action can be yours before you can see what you
+            are acting on. They stay CLICKABLE on purpose: the acting clock runs
+            on-chain, so a player who wants out must always be able to fold. */}
+        <div className={"barwrap" + (revealing ? " revealing" : "")}>{renderBar()}</div>
 
         {/* MTT rebalance: seat moved to another table → announce + auto-follow */}
         {movedTo != null && (

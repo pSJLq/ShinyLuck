@@ -254,6 +254,29 @@ body {
 .board .slot { width: 62px; height: 88px; border-radius: var(--r-md); }
 .board .slot.empty { border: 1px dashed rgba(255,255,255,0.10); background: rgba(255,255,255,0.012); }
 
+/* A card whose street has opened but which is still being decrypted by the
+   players and proven on-chain. Without this the felt just stays empty while the
+   action moves to you, which reads as a broken table rather than a card on its
+   way. Deliberately a real face-down card, not a spinner: it says "this is your
+   flop, arriving", and it occupies the exact slot the card will land in. */
+.board .card.revealing { position: relative; overflow: hidden;
+  animation: sp-revealpulse 1s ease-in-out infinite; }
+.board .card.revealing::before { content: ""; position: absolute; inset: 0;
+  background: linear-gradient(105deg, transparent 30%, rgba(217,171,74,0.34) 50%, transparent 70%);
+  transform: translateX(-100%); animation: sp-revealsweep 1.15s ease-in-out infinite; }
+@keyframes sp-revealpulse { 0%, 100% { opacity: 0.72; } 50% { opacity: 1; } }
+@keyframes sp-revealsweep { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+.revealnote { font-family: var(--label); font-size: 9.5px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--accent-soft); opacity: 0.85; margin-top: -2px; }
+/* Buttons are held back visually, never disabled: the acting clock runs
+   on-chain, so folding must stay possible even if a reveal drags. */
+.barwrap.revealing .actionbar { opacity: 0.55; filter: saturate(0.65); transition: opacity .16s ease; }
+.barwrap .actionbar { transition: opacity .16s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .board .card.revealing, .board .card.revealing::before { animation: none; }
+  .board .card.revealing { opacity: 0.8; }
+}
+
 /* second board for run-it-twice */
 .boards { display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .boardrow { display: flex; align-items: center; gap: 12px; }

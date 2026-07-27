@@ -114,13 +114,20 @@ function BetChips({ pos, amount, chips, slide, fromSeat }) {
   );
 }
 
-function Board({ cards = [], deckMode, dealing, flipFrom = 99, dim }) {
+/* `due` = how many board cards this street is entitled to. Slots between what
+   has arrived and what is due render as face-down cards being turned over,
+   because the alternative is what players actually complained about: the
+   action moves to you against an empty felt, and nothing on screen says a card
+   is on its way — so it reads as "my flop is missing", not "wait a moment". */
+function Board({ cards = [], deckMode, dealing, flipFrom = 99, dim, due = 0 }) {
   const slots = [];
   for (let i = 0; i < 5; i++) {
     if (cards[i]) {
       const isNew = i >= flipFrom;
       slots.push(<Card key={i} c={cards[i]} dim={!!(dim && dim[i])} className={isNew ? "flip" : ""}
         style={isNew ? { animationDelay: ((i - flipFrom) * 80) + "ms" } : undefined} />);
+    } else if (i < due) {
+      slots.push(<Card key={i} back className="revealing" style={{ animationDelay: ((i - cards.length) * 120) + "ms" }} />);
     } else {
       slots.push(<div key={i} className="slot empty" />);
     }
