@@ -32,14 +32,15 @@ class Bot {
     this.zk = zk; this.G1 = G1; this.signer = signer; this.room = room; this.zkd = zkd;
     this.addr = signer.address; this.t = null;
     this.byDeal = new Map(); this.holes = new Map(); this.pins = new Map(); this.chainOk = new Map(); this.sigs = new Map();
+    this.etags = new Map(); // dealId -> long-poll cursor (mirrors zk-agent.js)
   }
   async sign(dealId) {
     const k = `${this.t}:${dealId}`;
     if (!this.sigs.has(k)) this.sigs.set(k, await this.signer.signMessage(`ShinyPoker:zk:${this.t}:${dealId}`));
     return this.sigs.get(k);
   }
-  async post(p, body) {
-    const r = await fetch(`${BASE}${p}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(9000) });
+  async post(p, body, timeoutMs = 9000) {
+    const r = await fetch(`${BASE}${p}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(out.error || `${p} ${r.status}`);
     return out;
@@ -74,7 +75,19 @@ class Bot {
   async step(dealId) {
     if (!dealId) return;
     const sig = await this.sign(dealId);
-    let task; try { task = await this.post("/zk/task", { tableId: this.t, dealId, signature: sig }); } catch { return; }
+    // Long-poll exactly like the browser agent: park only while the last answer
+    // had nothing to do, so the rig measures the product's reaction time and
+    // not its own timer.
+    const key = String(dealId);
+    const parkOn = this.etags.get(key);
+    let task;
+    try {
+      task = await this.post("/zk/task",
+        parkOn ? { tableId: this.t, dealId, signature: sig, wait: 5000, etag: parkOn } : { tableId: this.t, dealId, signature: sig },
+        parkOn ? 12_000 : 9000);
+    } catch { return; }
+    if (task.etag !== undefined && !task.do && !task.myHoles) this.etags.set(key, task.etag);
+    else this.etags.delete(key);
     if (task.observer || task.phase === "none" || task.participant === undefined) return;
     if (task.do === "key") {
       const kg = this.zk.keygen(task.domain); this.byDeal.set(dealId, { x: kg.x, X: kg.X });
@@ -103,6 +116,25 @@ class Bot {
       }
       if (items.length) await this.post("/zk/shares", { tableId: this.t, dealId, signature: sig, items });
     }
+    // Board cards relayed with their shares: open them here, exactly as the
+    // browser agent does, and remember WHEN — the observer then checks each one
+    // against the card the chain publishes afterwards. A relay that ever hands
+    // over a card the chain disagrees with must fail loudly in this rig, not in
+    // front of players.
+    if (task.board) {
+      for (const key of Object.keys(task.board)) {
+        const slot = Number(key);
+        const mk = `${dealId}:${slot}`;
+        if (EARLY.has(mk)) continue;
+        try {
+          const b = task.board[key];
+          const ct = zkDrv.parseCt(b.ct);
+          const ds = b.shares.map((s) => zkDrv.parsePt(s.d));
+          const card = this.zk.pointToCard(this.zk.decryptWithShares(ct, ds, null), this.zk.deckPoints());
+          if (card >= 0) EARLY.set(mk, { card, at: Date.now() });
+        } catch (_) {}
+      }
+    }
     if (task.myHoles && !this.holes.has(dealId)) {
       const sec = this.secretFor(dealId); const cards = [];
       for (const idx of Object.keys(task.myHoles).map(Number).sort((a, b) => a - b)) {
@@ -116,9 +148,15 @@ class Bot {
   }
 }
 
+// Board cards opened from the relayed shares BEFORE the chain published them.
+// `${dealId}:${slot}` -> { card, at }. The observer verifies every one against
+// the on-chain board and reports how much earlier it was on screen.
+const EARLY = new Map();
+
 // ==== observer: log every table transition with the snapshot's build ts =====
 function startObserver(events) {
   let prev = null, stopped = false;
+  let checked = 0, matched = 0, aheadMs = [];
   (async () => {
     while (!stopped) {
       try {
@@ -132,6 +170,20 @@ function startObserver(events) {
             shuffleTurn: s.zk ? s.zk.shuffleTurn : 0, dealId: s.zk ? s.zk.dealId : null,
             next: s.zk && s.zk.next ? `${s.zk.next.phase}(k:${s.zk.next.keysIn},sh:${s.zk.next.shuffleTurn})` : "-",
           };
+          // Every card the chain publishes must equal the one the relay let us
+          // open early. A mismatch means the relay handed out a card the chain
+          // disagrees with — the one failure mode that would be unacceptable in
+          // front of players, so it is checked on every single card here.
+          if (cur.dealId && s.board) {
+            for (let slot = 0; slot < s.board.length; slot++) {
+              const e = EARLY.get(`${cur.dealId}:${slot}`);
+              if (!e || e.done) continue;
+              e.done = true;
+              checked++;
+              if (e.card === Number(s.board[slot])) { matched++; aheadMs.push(Date.now() - e.at); }
+              else console.error(`[early] MISMATCH deal ${cur.dealId} slot ${slot}: opened ${e.card}, chain says ${s.board[slot]}`);
+            }
+          }
           const key = JSON.stringify({ ...cur, ts: 0 });
           if (!prev || prev.key !== key) {
             events.push(cur);
@@ -144,7 +196,14 @@ function startObserver(events) {
       await sleep(150);
     }
   })();
-  return { stop() { stopped = true; } };
+  return {
+    stop() { stopped = true; },
+    earlyReport() {
+      if (!checked) return "board relay: no samples (relay off, or the chain always won the race)";
+      const avg = aheadMs.length ? Math.round(aheadMs.reduce((a, b) => a + b, 0) / aheadMs.length) : 0;
+      return `board relay: ${matched}/${checked} cards matched the chain, opened ${avg}ms before it published them`;
+    },
+  };
 }
 
 async function main() {
@@ -220,25 +279,55 @@ async function main() {
 
   const hand0 = Number((await room.getHand(TABLE)).handId);
   let done = false;
+  // FOUR INDEPENDENT LANES, mirroring the real client: in a browser the zk
+  // agent, the pre-deal work and the human pressing a button do not queue
+  // behind one another. The old single loop did, which made the rig itself the
+  // slowest part of the measurement — it reported seconds that no player was
+  // actually waiting on, and would have hidden the real fix.
   async function runBot(b) {
-    while (!done) {
-      try {
-        const r = await fetch(`${BASE}/snapshot?t=${TABLE}`, { signal: AbortSignal.timeout(4000) });
-        const s = r.ok ? await r.json() : null;
-        const dealId = s && s.zk && s.zk.dealId ? s.zk.dealId : (s && s.hand.inProgress ? s.hand.dealId : null);
-        if (dealId) await b.step(dealId);
-        // pre-deal of the next hand (runs during the current hand's showdown)
-        const nd = s && s.zk && s.zk.next && s.zk.next.dealId;
-        if (nd && nd !== dealId) await b.step(nd);
-        const h = await room.getHand(TABLE);
-        if (h.inProgress && Number(h.actingSeat) === b.seat && Number(h.street) <= 3) {
-          const sh = await room.getSeatHand(TABLE, b.seat);
-          const toCall = BigInt(h.currentBet) - BigInt(sh.committedStreet);
-          try { await (await room.connect(b.signer).act(TABLE, toCall > 0n ? CALL : CHECK, 0)).wait(); } catch (_) {}
+    let snap = null;
+    const dealOf = () => (snap && snap.zk && snap.zk.dealId ? snap.zk.dealId : (snap && snap.hand.inProgress ? snap.hand.dealId : null));
+    const lanes = [
+      (async () => { // snapshot poller
+        while (!done) {
+          try { const r = await fetch(`${BASE}/snapshot?t=${TABLE}`, { signal: AbortSignal.timeout(4000) }); if (r.ok) snap = await r.json(); } catch (_) {}
+          await sleep(250);
         }
-      } catch (_) {}
-      await sleep(350); // matches the browser agent's poll cadence
-    }
+      })(),
+      (async () => { // live deal — the lane the felt is waiting on
+        while (!done) {
+          try { const d = dealOf(); if (d) await b.step(d); } catch (_) {}
+          await sleep(100);
+        }
+      })(),
+      (async () => { // pre-deal of the NEXT hand (shuffle proofs live here)
+        while (!done) {
+          try {
+            const d = dealOf();
+            const nd = snap && snap.zk && snap.zk.next && snap.zk.next.dealId;
+            if (nd && nd !== d) await b.step(nd);
+          } catch (_) {}
+          await sleep(200);
+        }
+      })(),
+      (async () => { // acting
+        while (!done) {
+          try {
+            const h = await room.getHand(TABLE);
+            if (h.inProgress && Number(h.actingSeat) === b.seat && Number(h.street) <= 3) {
+              const sh = await room.getSeatHand(TABLE, b.seat);
+              const toCall = BigInt(h.currentBet) - BigInt(sh.committedStreet);
+              await (await room.connect(b.signer).act(TABLE, toCall > 0n ? CALL : CHECK, 0)).wait();
+              // tell the dealer the street may have moved — it cannot see an
+              // action until it polls, and that poll was pure dead time
+              fetch(`${BASE}/poke?t=${TABLE}`, { signal: AbortSignal.timeout(3000) }).catch(() => {});
+            }
+          } catch (_) {}
+          await sleep(200);
+        }
+      })(),
+    ];
+    await Promise.all(lanes);
   }
   const runners = bots.map(runBot);
 
@@ -260,6 +349,7 @@ async function main() {
     }
     if (!left) console.log(`[leave] ${b.addr.slice(0, 8)}: still seated after retries (in-hand race)`);
   }
+  console.log("\n" + obs.earlyReport());
   obs.stop();
 
   // ---- report: per-hand phase budget from observed transitions -------------
