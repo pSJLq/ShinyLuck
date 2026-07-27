@@ -14,8 +14,17 @@
 
 const TSTATUS = { REGISTERING: 0, RUNNING: 1, FINISHED: 2, CANCELLED: 3 };
 
+// FINISHED and CANCELLED are terminal on-chain: nothing can move them again.
+// Without this the pass re-read every tournament that ever existed on every
+// poll — 19 of them by the time the bot arenas were done, one RPC call each,
+// several times a second, forever growing. That pass is what the main sweep
+// waits on, so old history was quietly taxing every live table. Per-instance
+// (callers may pass their own set) so tests stay isolated from each other.
+const _doneDefault = new Set();
+
 /// Advance every tournament by at most one step. Returns log tags.
 async function tickTournaments(trn, room, opts = {}) {
+  const done = opts.doneSet || _doneDefault;
   const tags = [];
   let n = 0;
   try {
@@ -24,8 +33,10 @@ async function tickTournaments(trn, room, opts = {}) {
     return ["count failed: " + (e.shortMessage || e.message)];
   }
   for (let id = 0; id < n; id++) {
+    if (done.has(id)) continue;
     try {
       const tag = await tickTournament(trn, room, id, opts);
+      if (tag === "done") { done.add(id); continue; }
       if (tag && tag !== "idle") tags.push(`trn ${id}: ${tag}`);
     } catch (e) {
       tags.push(`trn ${id} error: ${e.shortMessage || e.message}`);
@@ -59,6 +70,9 @@ async function tickTournament(trn, room, id, opts = {}) {
     }
     return "idle";
   }
+  // Terminal: say so distinctly from "nothing to do right now", so the caller
+  // can stop reading this one for the rest of the process's life.
+  if (status === TSTATUS.FINISHED || status === TSTATUS.CANCELLED) return "done";
   if (status !== TSTATUS.RUNNING) return "idle";
 
   // MTT-aware: this tournament may span several controlled tables.

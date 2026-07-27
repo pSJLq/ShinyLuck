@@ -60,7 +60,10 @@ describe("Tournament driver — auto-start, bust reporting, level-ups", function
     expect(await tickTournament(opTrn, room.connect(operator), 0, opts)).to.equal("bust:0:1");
     expect((await trn.info(0)).status).to.equal(2); // FINISHED
     expect(await room.balance(alice.address)).to.equal(E(2)); // whole pool
-    expect(await tickTournament(opTrn, room.connect(operator), 0, opts)).to.equal("idle"); // no-op after finish
+    // Still a no-op, but reported as "done" rather than "idle": FINISHED is
+    // terminal, so tickTournaments takes this one off the poll for good instead
+    // of re-reading it forever.
+    expect(await tickTournament(opTrn, room.connect(operator), 0, opts)).to.equal("done");
   });
 
   it("auto-starts a scheduled tournament only once startTime is reached", async function () {
