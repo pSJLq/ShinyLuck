@@ -213,7 +213,7 @@ const SNAP_SIG = new Map(); // tableId -> content signature of the last publish
 // advances when a watcher would actually see a difference.
 function snapSig(s) {
   const zk = s.zk ? { ...s.zk, deadlineAt: 0 } : null;
-  return jsonBig({ h: s.hand, se: s.seats, b: s.board, z: zk });
+  return jsonBig({ h: s.hand, se: s.seats, b: s.board, z: zk, c: s.cfg });
 }
 function publishSnap(t, s) {
   const prev = SNAPS.get(t);
@@ -1069,7 +1069,11 @@ function startCardServer(room, state, zkCtx = {}) {
       // timer. Callers that send no rev keep the plain immediate answer.
       const wantRev = Number(u.searchParams.get("rev") || 0);
       let s = SNAPS.get(t);
-      if (wantRev && s && s.rev <= wantRev) {
+      // Park ONLY on an exact match. A client holding a HIGHER rev than ours
+      // has outlived a dealer restart (our counter began again at 1) — parking
+      // it would freeze an already-open table for the whole timeout, right when
+      // the bot just came back. Answer that one immediately and let it resync.
+      if (wantRev && s && s.rev === wantRev) {
         (async () => {
           let aborted = false;
           req.on("close", () => { aborted = true; });
