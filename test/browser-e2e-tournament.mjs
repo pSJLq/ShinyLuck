@@ -17,13 +17,17 @@
 // Needs Playwright once: npm i -D playwright && npx playwright install chromium
 import {
   bringUpStack, fundPlayers, openTable, felt, loadPlaywright, abiOf, snapshotOf,
-  ethers, sleep, ok, bad, step, finish, killAll, dealerTail, waitFor,
+  ethers, sleep, ok, bad, step, finish, killAll, dealerTail, waitFor, shippedStructures,
   HEADED, KEEP, WEB_PORT, RPC, FUNDER_KEY,
 } from "./_e2e-stack.mjs";
 
 const PLAYERS = 3;
-const LEVEL_SECS = 30;      // short on purpose: the level-up path is the point
-const START_STACK = 250n;   // ~12 big blinds — busts arrive without waiting all day
+// The REAL preset a host would pick, with only the clock compressed: same
+// ladder, same ante schedule, same starting depth, levels squeezed from minutes
+// to seconds so a structure that takes half an hour to bite can be watched in
+// one test run. STRUCT=regular|turbo|hyper to try another.
+const PRESET = process.env.STRUCT || "hyper";
+const LEVEL_SECS = Number(process.env.LEVEL_SECS || 25);
 const SIT_OUT_IDLE = "0x7d7c1738"; // PokerRoom.sitOutIdle — the DEALER striking a seat
 let tabs = [];
 
@@ -37,8 +41,28 @@ async function main() {
   const host = new ethers.NonceManager(new ethers.Wallet(FUNDER_KEY, provider));
   const trnHost = new ethers.Contract(man.addresses.pokerTournament, trnAbi, host);
   const buyIn = ethers.parseEther("0.01"), fee = ethers.parseEther("0.001");
-  const levels = [[10n, 20n], [20n, 40n], [40n, 80n], [80n, 160n], [160n, 320n]]
-    .map(([sb, bb]) => ({ sb, bb, ante: 0n, durationSecs: LEVEL_SECS }));
+  const preset = shippedStructures()[PRESET];
+  if (!preset) throw new Error(`no such preset: ${PRESET}`);
+  const START_STACK = BigInt(preset.stack);
+  const levels = preset.levels.map((l) => ({ sb: BigInt(l.sb), bb: BigInt(l.bb), ante: BigInt(l.ante), durationSecs: LEVEL_SECS }));
+
+  // What the host is actually choosing, asserted before a card is dealt.
+  const bb1 = preset.levels[0].bb, deep = preset.stack / bb1;
+  const anteFrom = preset.levels.findIndex((l) => l.ante > 0) + 1;
+  ok(`preset "${preset.label}": ${preset.levels.length} levels, ${preset.mins} min each, start ${preset.levels[0].sb}/${bb1}, ${deep} BB deep`);
+  if (deep >= 50) ok(`${deep} big blinds deep at level 1`);
+  else bad(`only ${deep} big blinds deep — a structure nobody can play`);
+  if (anteFrom === 5) ok("antes start at level 5, not level 1");
+  else bad(`antes start at level ${anteFrom}`);
+  // the ladder must climb, and never by more than ~1.6x a level
+  let worst = 0;
+  for (let i = 1; i < preset.levels.length; i++) {
+    const r = preset.levels[i].bb / preset.levels[i - 1].bb;
+    if (r <= 1) { bad(`level ${i + 1} does not raise the blinds`); break; }
+    worst = Math.max(worst, r);
+  }
+  if (worst && worst <= 1.6) ok(`blinds climb smoothly (worst step ${worst.toFixed(2)}x)`);
+  else if (worst) bad(`a level jumps ${worst.toFixed(2)}x — too steep for a real structure`);
   await (await trnHost.createTournament({
     buyIn, fee, maxPlayers: PLAYERS, seatsPerTable: PLAYERS, startStack: START_STACK,
     sbStart: 10n, bbStart: 20n, anteStart: 0n, levelDur: LEVEL_SECS, growthBps: 20000,
@@ -50,7 +74,7 @@ async function main() {
     const t = new ethers.Contract(man.addresses.pokerTournament, trnAbi, signers[i]);
     await (await t.register(id, { value: buyIn + fee })).wait();
   }
-  ok(`tournament #${id} · ${PLAYERS} registered · ${LEVEL_SECS}s levels · ${START_STACK} chips`);
+  ok(`tournament #${id} · ${PLAYERS} registered · ${START_STACK} chips · levels compressed to ${LEVEL_SECS}s`);
 
   step("6  browsers open BEFORE the start (as players do)");
   const startedAt = Date.now();

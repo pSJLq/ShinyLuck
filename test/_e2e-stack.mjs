@@ -291,6 +291,29 @@ export async function fundPlayers(n, eth = "10") {
   return { provider, wallets, signers: wallets.map((w) => new ethers.NonceManager(w)) };
 }
 
+/// The blind presets the lobby actually ships, read straight out of its source
+/// so a test cannot quietly drift from what a host will pick in the form. If
+/// the shape of that file changes this throws, which is the right failure: the
+/// structures would no longer be the thing under test.
+export function shippedStructures() {
+  const src = fs.readFileSync(path.join(FRONT, "poker", "poker-lobby-app.jsx"), "utf8");
+  const ladder = /const LADDER = \[([\s\S]*?)\n\];/.exec(src);
+  const presets = /const STRUCTURES = \{([\s\S]*?)\n\};/.exec(src);
+  if (!ladder || !presets) throw new Error("cannot find LADDER/STRUCTURES in poker-lobby-app.jsx");
+  const LADDER = JSON.parse("[" + ladder[1].replace(/\/\/.*$/gm, "").trim().replace(/,\s*$/, "") + "]");
+  const MK = (mins, fromBB) => {
+    const start = LADDER.findIndex(([, bb]) => bb === fromBB);
+    if (start < 0) throw new Error(`ladder has no ${fromBB} big blind`);
+    return LADDER.slice(start).map(([sb, bb, ante], i) => ({ sb, bb, ante: i < 4 ? 0 : ante, durationSecs: mins * 60 }));
+  };
+  const out = {};
+  for (const m of presets[1].matchAll(/(\w+):\s*\{\s*label:\s*"([^"]+)",\s*stack:\s*(\d+),\s*mins:\s*(\d+),\s*levels:\s*MK\((\d+),\s*(\d+)\)/g)) {
+    out[m[1]] = { label: m[2], stack: Number(m[3]), mins: Number(m[4]), levels: MK(Number(m[5]), Number(m[6])) };
+  }
+  if (!Object.keys(out).length) throw new Error("no presets parsed");
+  return out;
+}
+
 export const abiOf = (name) =>
   JSON.parse(fs.readFileSync(path.join(REPO, "artifacts", "contracts", "poker", `${name}.sol`, `${name}.json`), "utf8")).abi;
 
