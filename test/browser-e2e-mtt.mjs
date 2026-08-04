@@ -12,14 +12,15 @@
 // Needs Playwright once: npm i -D playwright && npx playwright install chromium
 import {
   bringUpStack, fundPlayers, openTable, felt, loadPlaywright, abiOf, snapshotOf,
-  ethers, sleep, ok, bad, step, finish, killAll, dealerTail, waitFor,
+  ethers, sleep, ok, bad, step, finish, killAll, dealerTail, waitFor, shippedStructures,
   HEADED, KEEP, WEB_PORT, RPC, FUNDER_KEY,
 } from "./_e2e-stack.mjs";
 
 const PLAYERS = 5;
 const SEATS_PER_TABLE = 3;   // 5 players → two tables (3 + 2), merging to one at 3
-const LEVEL_SECS = 25;
-const START_STACK = 200n;
+// The preset a host would pick, clock compressed (see browser-e2e-tournament).
+const PRESET = process.env.STRUCT || "hyper";
+const LEVEL_SECS = Number(process.env.LEVEL_SECS || 22);
 const SIT_OUT_IDLE = "0x7d7c1738"; // PokerRoom.sitOutIdle — the DEALER striking a seat
 const FOLLOW_GRACE_MS = 15_000;    // the app shows "you're moving" for 2.6s first
 let tabs = [];
@@ -46,8 +47,11 @@ async function main() {
   const host = new ethers.NonceManager(new ethers.Wallet(FUNDER_KEY, provider));
   const trn = new ethers.Contract(man.addresses.pokerTournament, trnAbi, host);
   const buyIn = ethers.parseEther("0.01"), fee = ethers.parseEther("0.001");
-  const levels = [[10n, 20n], [20n, 40n], [40n, 80n], [80n, 160n], [160n, 320n], [320n, 640n]]
-    .map(([sb, bb]) => ({ sb, bb, ante: 0n, durationSecs: LEVEL_SECS }));
+  const preset = shippedStructures()[PRESET];
+  if (!preset) throw new Error(`no such preset: ${PRESET}`);
+  const START_STACK = BigInt(preset.stack);
+  const levels = preset.levels.map((l) => ({ sb: BigInt(l.sb), bb: BigInt(l.bb), ante: BigInt(l.ante), durationSecs: LEVEL_SECS }));
+  ok(`preset "${preset.label}": ${preset.levels.length} levels, start ${preset.levels[0].sb}/${preset.levels[0].bb}, ${preset.stack / preset.levels[0].bb} BB deep`);
   await (await trn.createTournament({
     buyIn, fee, maxPlayers: PLAYERS, seatsPerTable: SEATS_PER_TABLE, startStack: START_STACK,
     sbStart: 10n, bbStart: 20n, anteStart: 0n, levelDur: LEVEL_SECS, growthBps: 20000,
