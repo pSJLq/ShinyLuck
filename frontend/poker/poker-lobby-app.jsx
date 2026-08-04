@@ -1,11 +1,16 @@
 /* ShinyPoker · LIVE lobby. Design look (lobby.css) driven by on-chain tables
    via window.SP. Cash tab is live; other tabs are flagged coming-soon. */
-const { useState: uS, useEffect: uE, useRef: uR } = React;
+// `var`, not `const`: the cashier and the page app both bind these and now
+// share one global script scope — a second `const` would kill the page.
+var { useState: uS, useEffect: uE, useRef: uR } = React;
 // Render modals to <body> so they escape the scaled/transformed .app (a CSS
 // transform makes position:fixed resolve against .app, not the viewport).
-const Portal = ({ children }) => (window.ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(children, document.body) : children);
+// `var`, not `const`: the lobby loads this file alongside another that
+// defines the same two helpers, and as plain scripts they share one global
+// scope — a duplicate `const` is a SyntaxError that blanks the page.
+var Portal = ({ children }) => (window.ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(children, document.body) : children);
 // Little circular "?" with a hover explanation (native title tooltip).
-const Hint = ({ text }) => <span title={text} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", border: "1px solid var(--muted)", color: "var(--muted)", fontSize: 9, cursor: "help", marginLeft: 5, verticalAlign: "middle" }}>?</span>;
+var Hint = ({ text }) => <span title={text} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", border: "1px solid var(--muted)", color: "var(--muted)", fontSize: 9, cursor: "help", marginLeft: 5, verticalAlign: "middle" }}>?</span>;
 const Ln = (wei) => Number(SP.fmt(wei, 6));
 const lshort = (a) => (a && a !== "0x0000000000000000000000000000000000000000" ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const stakeOf = (bb) => (bb <= 0.05 ? "micro" : bb <= 1 ? "low" : bb <= 5 ? "mid" : "high");
@@ -538,7 +543,7 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
   const [f, setF] = uS({
     mode: "buyin", buyIn: "0.5", fee: "0.05", sponsor: "1",
     maxPlayers: "6", seatsPerTable: "9", startStack: String(STRUCTURES.standard.stack),
-    struct: "standard", levels: STRUCTURES.standard.levels, actionSecs: "15",
+    struct: "standard", levels: STRUCTURES.standard.levels, actionSecs: "30",
     schedule: "open", startAt: "", priv: false, split: "65/35", hostReward: false,
   });
   const [showStruct, setShowStruct] = uS(false);
@@ -550,7 +555,11 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
   const startTime = f.schedule === "scheduled" && f.startAt ? Math.floor(new Date(f.startAt).getTime() / 1000) : 0;
   const scheduleOk = f.schedule === "open" || startTime > Math.floor(Date.now() / 1000) + 60;
   const sponsorOk = !sponsored || parseFloat(f.sponsor) > 0;
-  const ok = splitOk && scheduleOk && sponsorOk;
+  // The action clock is enforced here rather than in the contract (which only
+  // defaults a 0 to 30s): tournament #23 shipped with our own 15s default and
+  // spent 57% of its turns inside the last ten seconds.
+  const clockOk = (parseInt(f.actionSecs, 10) || 0) >= 20;
+  const ok = splitOk && scheduleOk && sponsorOk && clockOk;
   const stop = (e) => e.stopPropagation();
   const Seg = ({ k, opts }) => (
     <div className="chipset" style={{ marginTop: 6 }}>{opts.map(([v, l]) => <button key={v} type="button" className={f[k] === v ? "on" : ""} onClick={pick(k, v)}>{l}</button>)}</div>
@@ -580,10 +589,11 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
           <div><label>Players (2–45)</label><input value={f.maxPlayers} onChange={set("maxPlayers")} /></div>
           <div><label>Start stack (chips)</label><input value={f.startStack} onChange={set("startStack")} /></div>
-          <div><label>Action time (sec) <Hint text="Seconds each player has to act before they're auto-folded." /></label><input value={f.actionSecs} onChange={set("actionSecs")} /></div>
+          <div><label>Action time (sec) <Hint text="Seconds each player has to act before they're auto-folded. This clock starts ON-CHAIN, a moment before your browser can even show you it is your turn — 15s left players with about twelve, and a tournament's worth of rushed clicks and auto-folds. 30s or more is a real decision; below 20s is not offered." /></label><input value={f.actionSecs} onChange={set("actionSecs")} style={{ borderColor: clockOk ? undefined : "var(--danger,#ef5a6f)" }} /></div>
           <div><label>Payout split % <Hint text="How the prize pool is divided by finishing place. '65/35' → winner gets 65%, runner-up 35%. '50/30/20' → top-3 paid: 1st 50%, 2nd 30%, 3rd 20%. Any number of places (up to player count); must add up to 100." /></label><input value={f.split} onChange={set("split")} style={{ borderColor: splitOk ? undefined : "var(--danger,#ef5a6f)" }} /></div>
         </div>
         {!splitOk && <p className="note" style={{ color: "var(--danger,#ef5a6f)" }}>Percentages must add up to exactly 100 (e.g. 65/35 or 50/30/20).</p>}
+        {!clockOk && <p className="note" style={{ color: "var(--danger,#ef5a6f)" }}>Give players at least 20 seconds. The action clock runs on-chain and part of it is spent reaching the browser.</p>}
 
         <label style={{ marginTop: 10 }}>Table size <Hint text="Seats per table. With more players than this it becomes multi-table (MTT) · the number of tables is calculated automatically." /></label>
         <Seg k="seatsPerTable" opts={[["2", "Heads-up"], ["6", "6-max"], ["9", "9-max"]]} />
@@ -595,7 +605,7 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
           <button type="button" className={f.struct === "custom" ? "on" : ""} onClick={() => setF((s) => ({ ...s, struct: "custom" }))}>{SPT("Custom")}</button>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 6 }}>
-          <span className="note" style={{ flex: 1 }}>{f.levels.length} levels · start {f.levels[0] ? f.levels[0].sb + "/" + f.levels[0].bb : "-"} · {Math.round((f.levels[0]?.durationSecs || 0) / 60)} min/level</span>
+          <span className="note" style={{ flex: 1 }}>{f.levels.length} levels · start {f.levels[0] ? f.levels[0].sb + "/" + f.levels[0].bb : "-"} · {Math.round((f.levels[0]?.durationSecs || 0) / 60)} min/level · {(() => { const bb = f.levels[0] ? Number(f.levels[0].bb) : 0, st = parseInt(f.startStack || "0", 10); return bb > 0 && st > 0 ? Math.round(st / bb) + " BB deep" : ""; })()}</span>
           <button type="button" className="btn-sm" onClick={() => setShowStruct(true)}>{SPT("View / edit")}</button>
         </div>
 
@@ -622,7 +632,7 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
             await SP.sdk.createTournament({
               buyInEth: sponsored ? 0 : ((parseFloat(f.buyIn) || 0) * 0.9).toFixed(6), feeEth: sponsored ? 0 : ((parseFloat(f.buyIn) || 0) * 0.1).toFixed(6),
               maxPlayers: parseInt(f.maxPlayers, 10), seatsPerTable: parseInt(f.seatsPerTable || "0", 10), startStack: parseInt(f.startStack, 10),
-              actionSecs: parseInt(f.actionSecs || "15", 10), structure: f.levels,
+              actionSecs: Math.max(20, parseInt(f.actionSecs || "30", 10)), structure: f.levels,
               startTime, approvalRequired: f.priv, payoutBps: splitBps, sponsorEth: sponsored ? (f.sponsor || 0) : 0,
               hostBps: !sponsored && f.hostReward ? 500 : 0,
             });

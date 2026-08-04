@@ -2,13 +2,18 @@
    lobby AND the tournament page (babel scripts run in isolated scopes, so
    cross-page components must be exported through window · same pattern as
    poker-cards.jsx). Keep this file self-contained. */
-const { useState: uS, useEffect: uE } = React;
+// `var`, not `const`: the cashier and the page app both bind these and now
+// share one global script scope — a second `const` would kill the page.
+var { useState: uS, useEffect: uE } = React;
 
 // Render modals to <body> so they escape the scaled/transformed .app (a CSS
 // transform makes position:fixed resolve against .app, not the viewport).
-const Portal = ({ children }) => (window.ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(children, document.body) : children);
+// `var`, not `const`: the lobby loads this file alongside another that
+// defines the same two helpers, and as plain scripts they share one global
+// scope — a duplicate `const` is a SyntaxError that blanks the page.
+var Portal = ({ children }) => (window.ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(children, document.body) : children);
 // Little circular "?" with a hover explanation (native title tooltip).
-const Hint = ({ text }) => <span title={text} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", border: "1px solid var(--muted)", color: "var(--muted)", fontSize: 9, cursor: "help", marginLeft: 5, verticalAlign: "middle" }}>?</span>;
+var Hint = ({ text }) => <span title={text} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", border: "1px solid var(--muted)", color: "var(--muted)", fontSize: 9, cursor: "help", marginLeft: 5, verticalAlign: "middle" }}>?</span>;
 
 /* Cashier: wallet↔poker balance, nickname, cash-out, owner fee withdrawals. */
 function CashierModal({ close, addr, bal, refresh }) {

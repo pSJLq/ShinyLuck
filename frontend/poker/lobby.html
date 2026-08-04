@@ -106,13 +106,15 @@
 <script src="poker-grid.js"></script>
 <script src="poker-dust.js"></script>
   <script src="poker-press.js"></script>
-<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
-<script type="text/babel" src="poker-cards.jsx"></script>
+<!-- Vendored React + precompiled JSX · see the note in table.html: the CDN and
+     the in-browser Babel transpile were why some players only ever saw the
+     background. Regenerate with `node scripts/build-poker-jsx.js`. -->
+<script defer src="/vendor/react.production.min.js"></script>
+<script defer src="/vendor/react-dom.production.min.js"></script>
+<script defer src="poker-cards.compiled.js"></script>
 <script type="module" src="poker-bridge.js"></script>
-<script type="text/babel" src="poker-cashier.jsx"></script>
-<script type="text/babel" src="poker-lobby-app.jsx"></script>
+<script defer src="poker-cashier.compiled.js"></script>
+<script defer src="poker-lobby-app.compiled.js"></script>
 
 </body>
 </html>

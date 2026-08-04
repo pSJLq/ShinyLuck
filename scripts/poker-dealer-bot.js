@@ -34,7 +34,43 @@ process.on("unhandledRejection", (e) => console.error("[poker-bot] unhandledReje
 process.on("uncaughtException", (e) => console.error("[poker-bot] uncaughtException:", e?.shortMessage || e?.message || e));
 
 const NET = process.env.NETWORK_NAME || "somniaTestnet";
-const RPC_URL = process.env.RPC_URL || process.env.RPC_TESTNET || "https://api.infra.testnet.somnia.network";
+// ONE GATEWAY IS A SINGLE POINT OF FAILURE FOR THE WHOLE PRODUCT. The default
+// endpoint answered 502 to everything for hours on 2026-08-02 and the dealer,
+// having nowhere else to go, could not deal a card the entire time. The list is
+// tried in order at boot and whichever answers first is used; the watchdog
+// restarts the process if the chosen one later goes blind, which re-probes.
+// Same upstreams the browser proxy uses (deploy/env-templates).
+let RPC_URL = process.env.RPC_URL || process.env.RPC_TESTNET || "https://api.infra.testnet.somnia.network";
+const RPC_URLS = [...new Set([
+  RPC_URL,
+  ...String(process.env.RPC_UPSTREAMS || "").split(",").map((s) => s.trim()).filter(Boolean),
+  "https://api.infra.testnet.somnia.network",
+  "https://dream-rpc.somnia.network",
+])];
+const RPC_BLACKOUT_MS = parseInt(process.env.RPC_BLACKOUT_MS || "120000", 10);
+let rpcFailStreak = 0;
+
+/// First endpoint that answers a chainId read wins. Never throws: if every one
+/// of them is down the bot still comes up on the first and the watchdog keeps
+/// restarting it until the network is back — that beats exiting into a pm2
+/// restart loop with no log of what was tried.
+async function pickRpc() {
+  for (const url of RPC_URLS) {
+    try {
+      const req = new ethers.FetchRequest(url);
+      req.timeout = 8000;
+      const p = new ethers.JsonRpcProvider(req, undefined, { staticNetwork: true });
+      await p.getBlockNumber();
+      p.destroy();
+      if (url !== RPC_URLS[0]) console.log(`[poker-bot] RPC: ${RPC_URLS[0]} did not answer — using ${url}`);
+      return url;
+    } catch (e) {
+      console.error(`[poker-bot] RPC ${url} unusable: ${e.shortMessage || e.message}`);
+    }
+  }
+  console.error("[poker-bot] no RPC endpoint answered — starting on the first and letting the watchdog retry");
+  return RPC_URLS[0];
+}
 const KEY = process.env.DEALER_KEY || process.env.POKER_DEPLOYER_KEY || process.env.PRIVATE_KEY;
 const MASTER = process.env.POKER_SEED_MASTER_KEY || process.env.SEED_MASTER_KEY;
 // 600ms baseline (was 1500): the loop is how the bot NOTICES a street closing,
@@ -250,7 +286,7 @@ function waitForSnap(t, rev, ms) {
 }
 const LOBBY = { ts: 0, obj: null };
 const CTL = new Map(); // tableId -> controller address (immutable after creation)
-const STATUS = { startedAt: Date.now(), lastLoopEndAt: 0, gasWei: "0", tables: 0, spawned: 0, snapErrors: 0, workerGas: new Map() };
+const STATUS = { startedAt: Date.now(), lastLoopEndAt: 0, lastRpcOkAt: 0, gasWei: "0", tables: 0, spawned: 0, snapErrors: 0, workerGas: new Map() };
 const jsonBig = (v) => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x));
 // Short change-token for a /zk/task answer. The answer itself carries whole
 // ciphertexts, so echoing it back as the long-poll cursor would double the
@@ -463,6 +499,7 @@ async function main() {
   // ethers v6 defaults the HTTP timeout to 300s — LONGER than the 180s watchdog,
   // so one silently-hung RPC request used to take the whole process down. 15s
   // turns a hung request into a normal retryable error instead.
+  RPC_URL = await pickRpc();
   const fetchReq = new ethers.FetchRequest(RPC_URL);
   fetchReq.timeout = 15_000;
   const provider = new ethers.JsonRpcProvider(fetchReq);
@@ -718,8 +755,16 @@ async function main() {
     let tableCount;
     try {
       tableCount = Number(await room.tableCount());
+      STATUS.lastRpcOkAt = Date.now(); // the loop's own liveness probe of the chain
+      rpcFailStreak = 0;
     } catch (e) {
-      console.error("[poker-bot] tableCount failed:", e.shortMessage || e.message);
+      // Rate-limited: a gateway outage lasts hours and used to write one line
+      // per pass — 8954 of them in a single stretch, which buries everything
+      // else in the log and tells you nothing the first line didn't.
+      rpcFailStreak++;
+      if (rpcFailStreak === 1 || rpcFailStreak % 100 === 0) {
+        console.error(`[poker-bot] tableCount failed (×${rpcFailStreak}): ${e.shortMessage || e.message}`);
+      }
       return;
     }
     // Advance all due tables CONCURRENTLY — reads run in parallel, writes stay
@@ -818,7 +863,11 @@ async function main() {
         else if (tag === "timeout") pushChat(t, "dealer", "Player timed out — auto-folded.", true);
         else if (tag && tag.startsWith("cancelled:penalized")) pushChat(t, "dealer", "Hand cancelled — a player abandoned the deal; their chips in the pot were forfeited to the table.", true);
         else if (tag && tag.startsWith("cancelled")) pushChat(t, "dealer", "Hand cancelled — all contributions refunded.", true);
-        else if (tag && tag.startsWith("strike:")) pushChat(t, "dealer", "A seat didn't respond to the deal and was sat out.", true);
+        // Say WHICH seat and WHY. A player who is sat out mid-tournament with no
+        // explanation reads it as the site breaking (and it usually IS a slow
+        // connection, not an absent player), so name it and say what to do.
+        else if (tag && tag.startsWith("keys-retry:")) pushChat(t, "dealer", `Waiting on ${tag.split(":")[1]} to answer the deal — one more moment.`, true);
+        else if (tag && tag.startsWith("strike:")) pushChat(t, "dealer", `${tag.split(":").pop().replace("seat", "Seat ")} did not answer the deal twice and was sat out — press SIT IN to rejoin from the next hand.`, true);
       } catch (e) {
         console.error(`[poker-bot] table ${t} error:`, e.shortMessage || e.message);
         // Don't spam a failing table every tick — but a mid-HAND pause is a
@@ -911,6 +960,17 @@ async function main() {
       console.error(`[poker-bot] WATCHDOG: main loop silent for ${Math.round(age / 1000)}s — exiting for a clean pm2 restart`);
       process.exit(1);
     }
+    // RPC BLACKOUT. The loop watchdog above only catches a WEDGED loop; a loop
+    // that runs perfectly and fails every read slips straight past it. On
+    // 2026-08-02 that is exactly what happened: the gateway answered 502 to
+    // everything and the bot spun for hours writing 8954 identical error lines,
+    // healthy by its own reckoning and unable to deal a single card. A restart
+    // re-probes the endpoint list and comes up on whichever gateway is alive.
+    const blind = Date.now() - (STATUS.lastRpcOkAt || STATUS.startedAt);
+    if (blind > RPC_BLACKOUT_MS) {
+      console.error(`[poker-bot] WATCHDOG: no successful RPC read for ${Math.round(blind / 1000)}s (endpoint ${RPC_URL}) — exiting to re-pick a gateway`);
+      process.exit(1);
+    }
   }, 30_000);
 }
 
@@ -951,17 +1011,26 @@ function startCardServer(room, state, zkCtx = {}) {
     const ip = clientIp(req);
     const now = Date.now();
     let b = BUCKETS.get(ip);
-    if (!b) { b = { at: now }; BUCKETS.set(ip, b); }
+    if (!b) { b = { seen: now }; BUCKETS.set(ip, b); }
+    b.seen = now;
+    // ONE CLOCK PER BUCKET. This used to share a single `b.at` across all three
+    // kinds, so every GET reset the refill clock the zk bucket was measuring
+    // against (and the other way round). A real client polls both at once, so
+    // once its burst was spent the two kinds starved each other and it started
+    // taking 429s on the CARD PROTOCOL — which the dealer then reads as a
+    // player who stopped answering, and sits them out. Found by the browser
+    // E2E: two tabs, both throttled into silence within a minute.
     const lim = LIMITS[kind];
-    const cur = b[kind] === undefined ? lim.burst : Math.min(lim.burst, b[kind] + ((now - b.at) / 1000) * lim.rps);
-    b.at = now;
-    if (cur < 1) { b[kind] = cur; return false; }
-    b[kind] = cur - 1;
+    const st = b[kind] || (b[kind] = { tokens: lim.burst, at: now });
+    st.tokens = Math.min(lim.burst, st.tokens + ((now - st.at) / 1000) * lim.rps);
+    st.at = now;
+    if (st.tokens < 1) return false;
+    st.tokens -= 1;
     return true;
   }
   setInterval(() => { // prune idle buckets (full again after ~burst/rps seconds)
     const cut = Date.now() - 120_000;
-    for (const [ip, b] of BUCKETS) if (b.at < cut) BUCKETS.delete(ip);
+    for (const [ip, b] of BUCKETS) if ((b.seen || 0) < cut) BUCKETS.delete(ip);
   }, 60_000).unref();
   function tooMany(res) {
     res.writeHead(429, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Retry-After": "2" });
@@ -1054,6 +1123,11 @@ function startCardServer(room, state, zkCtx = {}) {
         tables: STATUS.tables,
         spawned: STATUS.spawned,
         snapErrors: STATUS.snapErrors,
+        // which gateway we ended up on, and how long since it last answered —
+        // a bot that is "up" while blind to the chain is the failure this makes
+        // visible from outside (see the RPC blackout watchdog)
+        rpc: RPC_URL,
+        rpcOkAgeMs: STATUS.lastRpcOkAt ? now - STATUS.lastRpcOkAt : null,
         snapshots: [...SNAPS.entries()].map(([t, s]) => ({ t, ageMs: now - s.ts, inHand: s.hand.inProgress })),
       };
       res.writeHead(body.ok ? 200 : 503, { "Content-Type": "application/json" });

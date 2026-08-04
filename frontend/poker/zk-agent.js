@@ -32,8 +32,9 @@ const cardStr = (c) => RANKS[Math.floor(c / 4)] + ["c", "d", "h", "s"][c % 4];
 // SDK reads decrypted cards from here (same shape the v1 /holes endpoint had).
 // `board` holds community cards this tab opened ITSELF from the relayed shares,
 // ahead of the on-chain reveal — see the board block in runDeal.
-window.__SPZK = window.__SPZK || { holes: {}, status: {}, board: {} };
+window.__SPZK = window.__SPZK || { holes: {}, status: {}, board: {}, theirs: {} };
 if (!window.__SPZK.board) window.__SPZK.board = {};
+if (!window.__SPZK.theirs) window.__SPZK.theirs = {}; // dealId -> seat -> opened showdown hand
 
 const ZKD_ABI = [
   "function ctHash(uint256 dealId, uint16 cardIdx) view returns (bytes32)",
@@ -415,7 +416,7 @@ export function startZkAgent(sdk, getTableId) {
       parkOn ? { tableId: t, dealId, signature, wait: TASK_WAIT_MS, etag: parkOn } : { tableId: t, dealId, signature },
       parkOn ? TASK_WAIT_MS + 6000 : 8000,
     );
-    if (task.etag !== undefined && !task.do && !task.myHoles) taskEtag.set(key, task.etag);
+    if (task.etag !== undefined && !task.do && !task.myHoles && !task.theirHoles) taskEtag.set(key, task.etag);
     else taskEtag.delete(key);
     if (task.observer || task.phase === "none" || task.participant === undefined) return;
 
@@ -660,6 +661,61 @@ export function startZkAgent(sdk, getTableId) {
       }
       window.__SPZK.holes[String(dealId)] = { seat: task.mySeat, cards, cardsStr: cards.map(cardStr) };
       try { window.dispatchEvent(new CustomEvent("shinypoker:zk-holes", { detail: { tableId: t, dealId } })); } catch (_) {}
+    }
+
+    // SHOWDOWN: open the other live hands locally, the same way the board opens.
+    // The relay only sends these once the hand is at showdown and only for seats
+    // still in it, and every part is checked here before anything is believed:
+    // the ciphertext against the on-chain commitment, and each share against its
+    // sender's key. The chain publishes the same cards a moment later and always
+    // wins; this just removes the wait that made a showdown look like nothing
+    // happened at all.
+    if (task.theirHoles && task.prepared !== false) {
+      const dkey = String(dealId);
+      const bag = (window.__SPZK.theirs[dkey] = window.__SPZK.theirs[dkey] || {});
+      const pubkeys = (task.pubkeys || []).map(parsePt);
+      let opened = false;
+      for (const seat of Object.keys(task.theirHoles)) {
+        if (bag[seat]) continue;
+        const cards = [];
+        for (const h of task.theirHoles[seat]) {
+          const ct = parseCt(h.ct);
+          const a = zk.aff(ct.A), b = zk.aff(ct.B);
+          const packed = ethers.concat([ethers.toBeHex(a.x, 32), ethers.toBeHex(a.y, 32), ethers.toBeHex(b.x, 32), ethers.toBeHex(b.y, 32)]);
+          let want;
+          try {
+            want = await zkd.ctHash(dealId, h.idx);
+          } catch (e) {
+            if (/Panic|ARRAY_RANGE|CALL_EXCEPTION|missing revert data/i.test(e.message || "")) { parkDeal(dealId, "on-chain deal data gone (re-deal)"); return; }
+            throw e;
+          }
+          if (ethers.keccak256(packed) !== want) throw new Error("showdown ct mismatch vs on-chain commitment");
+          const ds = [];
+          for (const s of h.shares) {
+            if (!s) continue;
+            const d = parsePt(s.d);
+            if (s.proof && pubkeys[s.i]) {
+              const share = { d, proof: { R1: parsePt(s.proof.R1), R2: parsePt(s.proof.R2), s: BigInt(s.proof.s) } };
+              if (!zk.verifyShare(ct, pubkeys[s.i], share, `SPZK:${dealId}:share:${h.idx}:${s.i}`)) {
+                throw new Error("relayed showdown share failed verification");
+              }
+            }
+            ds.push(d);
+          }
+          // no own secret here — a showdown hand is opened by its FULL share set
+          const card = zk.pointToCard(zk.decryptWithShares(ct, ds, null), zk.deckPoints());
+          if (card < 0) throw new Error("showdown decryption produced a non-card");
+          cards.push(card);
+        }
+        bag[seat] = { cards, cardsStr: cards.map(cardStr) };
+        opened = true;
+      }
+      if (opened) {
+        // keep this bag small — one entry per deal, a handful of deals
+        const keys = Object.keys(window.__SPZK.theirs);
+        if (keys.length > 8) for (const k of keys.slice(0, keys.length - 8)) delete window.__SPZK.theirs[k];
+        try { window.dispatchEvent(new CustomEvent("shinypoker:zk-showdown", { detail: { tableId: t, dealId } })); } catch (_) {}
+      }
     }
   }
 

@@ -153,8 +153,11 @@ deployments/zk-active/
 # Local pre-refactor backups (never for the repo)
 _zkshuffle-backup-*/
 
-# JSX syntax-check output (build-poker-jsx.js); the site loads raw .jsx via Babel
-frontend/poker/*.compiled.js
+# NOTE: frontend/poker/*.compiled.js used to be ignored, back when they were only
+# a syntax check and the site shipped raw .jsx to be transpiled in the browser.
+# The pages load the compiled files now, so they are the deployed artifact and
+# have to live in the repo — regenerate with `node scripts/build-poker-jsx.js`
+# after editing any poker .jsx.
 
 # Screenshots the user drops in for Claude to look at — local only
 /images for claude/
@@ -169,3 +172,7 @@ accounts*.txt
 # Raw samples written by scripts/_probe-latency.js — a measurement artefact,
 # regenerated on every run. The numbers that matter live in HANDOFF.md.
 scripts/probe-out.json
+
+# browser E2E run artifacts (screenshots + the throwaway local deployment)
+test/_e2e-shots/
+deployments/poker-localhost.json

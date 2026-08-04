@@ -191,6 +191,10 @@ function LiveTable() {
   const dealIdRef = useRef("0");
   const balSeqRef = useRef(0);
   const feltWrapRef = useRef(null);
+  // What the action bar MEANT when it last changed, and when that was. A click
+  // is only honoured once the player has had time to see the bar it landed on
+  // (see the guard in renderBar).
+  const barGuardRef = useRef({ turn: "", meaning: "", since: 0 });
   const [wrapBox, setWrapBox] = useState(null); // feltwrap layout box (offset px · immune to the stage scale transform)
   const reducedMo = prefs.reduced || !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
@@ -233,7 +237,11 @@ function LiveTable() {
   useEffect(() => {
     const on = () => setZkTick((n) => n + 1);
     window.addEventListener("shinypoker:zk-board", on);
-    return () => window.removeEventListener("shinypoker:zk-board", on);
+    window.addEventListener("shinypoker:zk-showdown", on); // opened hands, same deal
+    return () => {
+      window.removeEventListener("shinypoker:zk-board", on);
+      window.removeEventListener("shinypoker:zk-showdown", on);
+    };
   }, []);
 
   // The controller decides the whole render mode (chip formatting, seats
@@ -530,20 +538,43 @@ function LiveTable() {
     prevRef.current = { handId: h.handId, boardLen, inProgress: h.inProgress, street: h.street, curBet: h.currentBet, actingSeat: h.actingSeat, stacks, sh };
   }, [snap, zkTick]); // zkTick: a locally-opened board card is a transition too
 
-  // at showdown, fetch opponents' revealed hole cards (public once the seed is revealed)
+  // At showdown, fetch opponents' revealed hole cards (public once every share
+  // is in). Two things this has to survive, both of which cost us a whole
+  // tournament's worth of showdowns:
+  //   1. The cards only become readable when the dealer's markShowdownReady
+  //      lands — one of the LAST transactions before the settle — so the first
+  //      few attempts legitimately come back "not ready".
+  //   2. A slow client can still be fetching when the hand ends. Keying the
+  //      fetch off the LIVE hand meant that once the pot moved, the request was
+  //      abandoned and the seats never opened at all.
+  // So the target deal (and who was in it — `inHand` is cleared by the settle)
+  // is remembered and retried for a few seconds past the end of the hand.
+  const sdTargetRef = useRef(null);
+  const sdFetchRef = useRef(false);
   useEffect(() => {
     if (!snap || !SP.sdk.dealerRead) return;
     const h = snap.hand;
-    if (!h.inProgress || h.street !== ST.SHOWDOWN) return;
-    const key = String(h.dealId);
-    if (reveals[key]) return;
+    if (h.inProgress && h.street === ST.SHOWDOWN) {
+      const key = String(h.dealId);
+      if (!sdTargetRef.current || sdTargetRef.current.key !== key) {
+        sdTargetRef.current = {
+          key, dealId: h.dealId,
+          seats: snap.seats.filter((s) => !s.empty && s.inHand).map((s) => s.index),
+          until: Date.now() + 15000,
+        };
+      }
+    }
+    const tgt = sdTargetRef.current;
+    if (!tgt || sdFetchRef.current || reveals[tgt.key] || Date.now() > tgt.until) return;
+    sdFetchRef.current = true;
     (async () => {
       try {
-        if (!(await SP.sdk.dealerRead.isShowdownReady(h.dealId))) return;
+        if (!(await SP.sdk.dealerRead.isShowdownReady(tgt.dealId))) return;
         const out = {};
-        for (const s of snap.seats) { if (!s.empty && s.inHand) out[s.index] = await SP.sdk.revealedHole(h.dealId, s.index); }
-        setReveals((m) => ({ ...m, [key]: out }));
+        for (const i of tgt.seats) out[i] = await SP.sdk.revealedHole(tgt.dealId, i);
+        setReveals((m) => ({ ...m, [tgt.key]: out }));
       } catch {}
+      finally { sdFetchRef.current = false; }
     })();
   }, [snap]);
 
@@ -554,21 +585,32 @@ function LiveTable() {
   useEffect(() => {
     if (!snap) return;
     const h = snap.hand;
-    if (!h.inProgress || h.street !== ST.SHOWDOWN || snap.board.length < 5) return;
+    if (!h.inProgress || h.street !== ST.SHOWDOWN) return;
     const key = String(h.dealId);
-    const rv = reveals[key];
-    if (!rv || (sdWin && sdWin.dealId === key)) return;
+    // Same two sources as the felt: hands this tab opened from the relayed
+    // shares, and the chain's copy. Whichever is there first announces the
+    // winner — waiting for the chain is what left the table silent with the
+    // hand already decided.
+    const local = (window.__SPZK && window.__SPZK.theirs && window.__SPZK.theirs[key]) || null;
+    const rv = {};
+    if (local) for (const k of Object.keys(local)) rv[Number(k)] = local[k].cards;
+    if (reveals[key]) for (const k of Object.keys(reveals[key])) rv[Number(k)] = reveals[key][k];
+    // the board may also be ahead of the snapshot (locally opened cards)
+    const bd = snap.board.slice();
+    const eb = (window.__SPZK && window.__SPZK.board) ? window.__SPZK.board[key] : null;
+    if (eb) for (let i = bd.length; i < 5 && eb[i] !== undefined; i++) bd.push(eb[i]);
+    if (bd.length < 5 || !Object.keys(rv).length || (sdWin && sdWin.dealId === key)) return;
     let seat = -1, best = -1, tie = false;
     for (const k of Object.keys(rv)) {
-      const ev = SP.handEval(rv[k].concat(snap.board));
+      const ev = SP.handEval(rv[k].concat(bd));
       if (!ev) continue;
       if (ev.score > best) { best = ev.score; seat = Number(k); tie = false; }
       else if (ev.score === best) tie = true;
     }
     if (seat < 0) return;
-    setSdWin({ dealId: key, seat, tie, comboEn: SP.handName(rv[seat].concat(snap.board)) });
+    setSdWin({ dealId: key, seat, tie, comboEn: SP.handName(rv[seat].concat(bd)) });
     if (seat === snap.mySeat) sfx("win", prefs.sound);
-  }, [snap, reveals]);
+  }, [snap, reveals, zkTick]); // zkTick: a locally opened hand decides the winner too
 
   function flash(msg, ms = 3000) { setToast(msg); setTimeout(() => setToast(null), ms); }
   async function tx(label, fn) {
@@ -636,15 +678,40 @@ function LiveTable() {
   // ("High Card" right after "Two Pair" won)
   if (snap.board.length) boardsRef.current = { [dealKey]: snap.board };
   const sdBoard = snap.board.length ? snap.board : (boardsRef.current[dealKey] || snap.board);
+  // THE REVEAL HAS TO OUTLIVE THE SETTLE. `hand.inProgress` goes false the
+  // instant the pot is awarded, and every open card was gated on it — so the
+  // showdown was wiped at exactly the moment the winner banner appeared, and a
+  // hand ended with an empty felt and money moving for no visible reason. The
+  // banner itself is already held through the settle beat (sdWin, 6s / winner
+  // glow, 3.2s) and the board is frozen above for the same reason; the cards
+  // now ride that same beat. A new hand resets both, so nothing leaks forward.
+  const settleHold = anim.winnerSeat >= 0 || !!(sdWin && sdWin.dealId === dealKey);
+  // Opened hands, from whichever source got there first. This tab decrypts them
+  // from the relayed shares the moment the showdown starts (zk-agent), and the
+  // chain's own copy lands a beat later; both are checked against the same
+  // on-chain ciphertext commitments, so either is authoritative. Merging is what
+  // stops a showdown from depending on a per-seat chain read that can simply
+  // fail — which is how a hand used to end with no cards and no winner at all.
+  const sdCards = (() => {
+    const local = (window.__SPZK && window.__SPZK.theirs && window.__SPZK.theirs[dealKey]) || null;
+    const chain = reveals[dealKey] || null;
+    if (!local && !chain) return null;
+    const okc = (c) => Array.isArray(c) && c.length === 2 && c.every((n) => Number.isInteger(n) && n >= 0 && n < 52);
+    const out = {};
+    if (local) for (const k of Object.keys(local)) { if (okc(local[k].cards)) out[Number(k)] = local[k].cards; }
+    if (chain) for (const k of Object.keys(chain)) { if (okc(chain[k])) out[Number(k)] = chain[k]; }
+    return Object.keys(out).length ? out : null;
+  })();
+  const sdHold = settleHold && !!sdCards;
   // the winning combination's exact five cards · the UI highlights them and
   // dims everything else (board cards and winner holes that play no part)
   const winUsed = (() => {
     const wSeat = anim.winnerSeat >= 0 ? anim.winnerSeat : (sdWin && sdWin.dealId === dealKey ? sdWin.seat : -1);
-    if (wSeat < 0 || !reveals[dealKey] || !reveals[dealKey][wSeat]) return null;
-    const ev = SP.handEval(reveals[dealKey][wSeat].concat(sdBoard));
+    if (wSeat < 0 || !sdCards || !sdCards[wSeat]) return null;
+    const ev = SP.handEval(sdCards[wSeat].concat(sdBoard));
     return ev && ev.used ? { seat: wSeat, set: new Set(ev.used) } : null;
   })();
-  const myHoleObj = hand.inProgress ? holes[dealKey] : null;
+  const myHoleObj = hand.inProgress || settleHold ? holes[dealKey] : null;
   const myHole = myHoleObj ? myHoleObj.cardsStr : null;
   // How many board cards this street owes, and whether any are still in flight.
   // The cards are decrypted co-operatively by the players and proven on-chain,
@@ -665,6 +732,10 @@ function LiveTable() {
       shownBoard.push(early[i]);
     }
   }
+  // The LIVE board empties the instant the pot is awarded — so the winner used
+  // to be announced over a bare felt, with the hand that won it already gone.
+  // The frozen copy (sdBoard) rides the settle beat, like the open cards do.
+  if (!shownBoard.length && settleHold && sdBoard.length) shownBoard.push(...sdBoard);
   const revealing = boardDue > shownBoard.length;
   const board = shownBoard.map(SP.intToCardStr);
   // combo label only from the flop · preflop "High Card" is pure noise for a
@@ -704,6 +775,7 @@ function LiveTable() {
   const seatPos = (i) => positions[view(i)] || positions[0];
   const now = Math.floor(nowMs / 1000);
   const showdown = hand.inProgress && hand.street === ST.SHOWDOWN;
+  const showdownView = showdown || sdHold; // reveals stay up through the settle
 
   // live big blind: tournament levels raise it mid-game while the table cfg is
   // cached · bb-counts must follow the CURRENT level, not the opening one
@@ -839,14 +911,21 @@ function LiveTable() {
               {(anim.winnerSeat >= 0 || sdWin) && (() => {
                 const settled = anim.winnerSeat >= 0;
                 const wSeat = settled ? anim.winnerSeat : sdWin.seat;
-                const rvW = reveals[dealKey] && reveals[dealKey][wSeat];
+                const rvW = sdCards && sdCards[wSeat];
                 const comboEn = rvW ? SP.handName(rvW.concat(sdBoard)) : (sdWin && sdWin.seat === wSeat ? sdWin.comboEn : null);
-                const iWon = mySeat === wSeat;
+                // "You win" must mean YOU. `mySeat` is -1 for anyone not in a
+                // seat — a busted player watching the rest of the tournament, a
+                // spectator, someone who just walked up — and -1 === -1 made the
+                // banner congratulate every one of them on a pot they had no
+                // part in. The name is now always supplied when it wasn't us, so
+                // the banner can never fall through to "You win" by accident.
+                const iWon = mySeat >= 0 && mySeat === wSeat;
                 const played = mySeat >= 0 && !!holes[dealKey]; // I was dealt into this hand
+                const wName = seats[wSeat] && !seats[wSeat].empty ? nameOf(seats[wSeat].player) : `${SPT("Seat")} ${wSeat}`;
                 return <WinBanner
                   won={settled ? (CHIPS ? fmtChips(anim.won) : anim.won.toFixed(2)) : null}
                   lose={played && !iWon}
-                  name={!iWon && seats[wSeat] ? nameOf(seats[wSeat].player) : null}
+                  name={iWon ? null : wName}
                   pending={!settled}
                   unit={CHIPS ? SPT("chips") : "SOMI"}
                   hand={comboEn ? SPTHand(comboEn) : ""} />;
@@ -861,7 +940,7 @@ function LiveTable() {
                 load, and backs vanishing into nothing read as a glitch */}
             {hand.inProgress && seats.map((s) => {
               if (s.empty || s.index === mySeat) return null;
-              if (showdown && reveals[dealKey] && reveals[dealKey][s.index]) return null; // flipped up in the Seat
+              if (showdown && sdCards && sdCards[s.index]) return null; // flipped up in the Seat
               const fa = lastActs[s.index];
               const mucking = !s.inHand && fa && fa.kind === "fold" && nowMs - fa.ts < 1400;
               if (!s.inHand && !mucking) return null;
@@ -886,7 +965,7 @@ function LiveTable() {
               }
               const isMe = s.index === mySeat;
               const active = hand.inProgress && hand.actingSeat === s.index && hand.street <= ST.RIVER;
-              const rev = showdown && reveals[dealKey] && reveals[dealKey][s.index] ? reveals[dealKey][s.index].map(SP.intToCardStr) : null;
+              const rev = showdownView && sdCards && sdCards[s.index] ? sdCards[s.index].map(SP.intToCardStr) : null;
               return (
                 <Seat key={s.index}
                   player={{ hero: isMe, name: nameOf(s.player), avId: avOf(s.player).id, avImg: avOf(s.player).img }}
@@ -897,13 +976,13 @@ function LiveTable() {
                     status: s.allIn ? SPT("all-in") : s.folded ? SPT("folded") : s.sittingOut ? SPT("sitting out") : (hand.inProgress && s.inHand ? "" : SPT("waiting")),
                     folded: s.folded, allin: s.allIn, winner: s.index === anim.winnerSeat || (sdWin && sdWin.seat === s.index),
                     timer: Number(cfg.actionTimeout),
-                    combo: rev ? SPTHand(SP.handName(reveals[dealKey][s.index].concat(sdBoard))) : null,
-                    comboCat: rev ? (SP.handEval(reveals[dealKey][s.index].concat(sdBoard)) || {}).cat : null,
+                    combo: rev ? SPTHand(SP.handName(sdCards[s.index].concat(sdBoard))) : null,
+                    comboCat: rev ? (SP.handEval(sdCards[s.index].concat(sdBoard)) || {}).cat : null,
                     lastAct: actFor(s.index) ? { kind: lastActs[s.index].kind, text: actLabel(lastActs[s.index]) } : null,
                   }}
                   pos={pos} active={active} marker={markerFor(s.index)} deckMode={deck}
                   revealCards={rev} revealAnim={!reducedMo}
-                  revealDim={rev && winUsed && winUsed.seat === s.index ? reveals[dealKey][s.index].map((c) => !winUsed.set.has(c)) : null} />
+                  revealDim={rev && winUsed && winUsed.seat === s.index ? sdCards[s.index].map((c) => !winUsed.set.has(c)) : null} />
               );
             })}
 
@@ -919,7 +998,10 @@ function LiveTable() {
               <div className="herozone">
                 {/* after folding your cards stay on the table, grayed · vanishing
                     instantly read as a glitch */}
-                {hand.inProgress && (seats[mySeat].inHand || seats[mySeat].folded) && (
+                {/* …and they stay for the settle beat as well: the hand you just
+                    won or lost is exactly what you want to look at while the pot
+                    moves, and it vanishing there read as "the money just left". */}
+                {((hand.inProgress && (seats[mySeat].inHand || seats[mySeat].folded)) || (settleHold && myHole)) && (
                   <div className="hole peek">
                     {myHole
                       ? myHole.map((c, i) => <Card key={dealKey + i} c={c} folded={seats[mySeat].folded}
@@ -1109,9 +1191,14 @@ function LiveTable() {
           {showPre && (
             <div style={{ display: "flex", gap: 8 }}>
               {[["checkfold", SPT("Check") + " / " + SPT("Fold")], ["callany", SPT("Call") + " " + (window.__SPLANG === "ru" ? "всегда" : "Any")], ["check", SPT("Check")]].map(([k, l]) => (
-                <button key={k} className="pill" onClick={() => setPreAct(preAct === k ? null : k)}
+                // The armed state is the gold fill, NOT a "✓ " prefix: the prefix
+                // made the button wider, which slid its neighbours sideways — so
+                // the tap meant to CANCEL an armed pre-action landed on the next
+                // one and armed that instead. Same label, same width, always.
+                <button key={k} className="pill" aria-pressed={preAct === k}
+                  onClick={() => setPreAct(preAct === k ? null : k)}
                   style={preAct === k ? { background: "var(--accent)", borderColor: "var(--accent)", color: "#1b1407" } : undefined}>
-                  {preAct === k ? "✓ " : ""}{l}
+                  {l}
                 </button>
               ))}
             </div>
@@ -1154,9 +1241,33 @@ function LiveTable() {
     const callIsAllIn = !canCheck && toCallW >= me.stack;
     const canRaise = me.stack > toCallW && maxToW > cur && maxN > minN && raisableW > cur;
     const bv = Math.min(maxN, Math.max(minN, betValue || minN));
-    const onFold = () => act(A.FOLD);
-    const onCheckCall = () => act(canCheck ? A.CHECK : callIsAllIn ? A.ALLIN : A.CALL);
-    const onRaise = (v) => act(isBet ? A.BET : A.RAISE, Math.min(maxN, Math.max(minN, v)));
+
+    // A CLICK MUST SEND WHAT THE PLAYER SAW.
+    // One button carries both CHECK and CALL (its label swaps in place), and the
+    // bar itself swaps shape when a raise stops being possible. A snapshot that
+    // lands between the eye and the finger therefore used to turn a check into a
+    // call — silently, irreversibly, for real money. The same hole swallowed the
+    // second tap of an impatient double-click: it landed on the NEXT turn's bar,
+    // where that position meant something else entirely.
+    // So the bar's meaning is stamped with the moment it last changed, and a
+    // click that arrives before the player could have read it is refused and
+    // explained instead of being executed as a different action. Folding is
+    // guarded too — a mis-tap that folds a made hand costs just as much.
+    const turnKey = `${dealKey}:${hand.street}:${hand.actingDeadline}`;
+    const meaning = `${canCheck ? "check" : callIsAllIn ? "allin" : "call:" + call}|${canRaise ? "raise" : "-"}`;
+    const g = barGuardRef.current;
+    if (g.turn !== turnKey || g.meaning !== meaning) barGuardRef.current = { turn: turnKey, meaning, since: Date.now() };
+    const GUARD_MS = 600;
+    const settled = () => {
+      if (Date.now() - barGuardRef.current.since >= GUARD_MS) return true;
+      flash(window.__SPLANG === "ru"
+        ? "Стол только что изменился — посмотрите и нажмите ещё раз"
+        : "The table just changed — check it and press again", 2600);
+      return false;
+    };
+    const onFold = () => { if (settled()) act(A.FOLD); };
+    const onCheckCall = () => { if (settled()) act(canCheck ? A.CHECK : callIsAllIn ? A.ALLIN : A.CALL); };
+    const onRaise = (v) => { if (settled()) act(isBet ? A.BET : A.RAISE, Math.min(maxN, Math.max(minN, v))); };
     if (!canRaise) {
       return (
         <div className="actionbar" style={{ justifyContent: "center", gap: 10 }}>
@@ -1167,7 +1278,7 @@ function LiveTable() {
                 option · but only when an opponent has chips left to call it, and
                 the amount shown is what can actually be matched, not my whole stack */}
             {me.stack > 0n && !canCheck && !callIsAllIn && raisableW > cur && (
-              <button className="abtn raise" disabled={busy} onClick={() => act(A.ALLIN)}>
+              <button className="abtn raise" disabled={busy} onClick={() => { if (settled()) act(A.ALLIN); }}>
                 <span className="lbl">{SPT("All-in")}</span>
                 <span className="amt tnum">{NV(effCapW > 0n && effCapW < myMaxW ? effCapW : myMaxW).toFixed(2)}</span>
               </button>

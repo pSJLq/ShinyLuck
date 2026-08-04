@@ -352,6 +352,37 @@ function zkTask(state, tableId, addrLower, dealId) {
       }
       if (complete) out.myHoles = mine;
     }
+    // SHOWDOWN RELAY: the other live hands, the moment their shares are complete.
+    // Same argument as the board relay above, one street later. Until showdown a
+    // player's own share for their own cards is the one thing they never release
+    // (mayReleaseShare), so a full share set for someone else's hole card cannot
+    // exist before the hand is at showdown — and once it does, those exact cards
+    // are about to be published on-chain by revealHoleCards anyway. Handing them
+    // over here is the difference between a showdown that opens instantly and one
+    // that waits out markShowdownReady plus a per-seat chain read, which is what
+    // players saw as "the cards never opened, the money just moved".
+    // Only seats still IN the hand (sess.liveParts, set inside the showdown
+    // branch); a folded hand is never relayed, ever.
+    if (sess.deck && !sess.predeal && sess.prepared && sess.started && sess.liveParts) {
+      const theirs = {};
+      for (const j of sess.liveParts) {
+        if (j === part) continue;
+        const idxs = holeIdxsOf(j, sess.k);
+        if (!idxs.every((idx) => haveAllShares(sess, idx))) continue;
+        theirs[sess.seats[j]] = idxs.map((idx) => {
+          const m = sess.shares.get(idx);
+          return {
+            idx,
+            ct: serCt(sess.deck[idx]),
+            shares: Array.from({ length: sess.k }, (_, i) => ({
+              i, d: serPt(m.get(i).d),
+              proof: { R1: serPt(m.get(i).R1), R2: serPt(m.get(i).R2), s: hex(m.get(i).s) },
+            })),
+          };
+        });
+      }
+      if (Object.keys(theirs).length) out.theirHoles = theirs;
+    }
     // BOARD RELAY. Once every share for a slot is in, the card is knowable —
     // but it only becomes VISIBLE when the reveal tx lands ~5 blocks later, and
     // that is pure staring-at-the-felt time. Hand the shares over WITH their
@@ -763,7 +794,11 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
     const endedAt = state.get(`ended:${tableId}`);
     if (endedAt && now - endedAt < (opts.interHandMs ?? 400)) return "inter-hand";
     state.delete(`ended:${tableId}`);
-    if (opts.noNewHands) return "hold";
+    // Held for a tournament blind level. Remember WHEN, because the window the
+    // players get after the hold is not like any other: no pre-deal survives a
+    // freeze, so every client has to learn about a brand-new deal from its next
+    // snapshot before it can answer at all.
+    if (opts.noNewHands) { state.set(`held:${tableId}`, now); return "hold"; }
     // stray pre-deal left by a cancelled hand (cancel paths clear the main
     // session immediately) — adopt it as the candidate; validated just below
     if (!sess) {
@@ -778,6 +813,20 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
     const setChanged = sess && (sess.forHand !== nextHand || sess.seats.join() !== elig.map((e) => e.seat).join() || sess.addrs.join() !== elig.map((e) => e.addr).join());
     if (!sess || setChanged) {
       sess = newSession(tableId, elig, nextHand, opts);
+      // First session after a level-up freeze: the clients spent the freeze with
+      // nothing to answer and now have to discover this deal through a snapshot
+      // round trip before their key can even be computed. Spending the standard
+      // window on that round trip is what put the slowest player at the table on
+      // the wrong side of the deadline at nearly every blind level.
+      const heldAt = state.get(`held:${tableId}`);
+      if (heldAt && now - heldAt < 4000) sess.deadlineAt = now + (opts.keysMs ?? 12_000) * 2;
+      state.delete(`held:${tableId}`);
+      // FIRST HAND AT A TABLE: everyone is still arriving — page load, wallet,
+      // key material — and the standard window assumes a browser that has been
+      // sitting there all along. Tournament #23 opened by striking five of its
+      // eight players inside the first minute; one of them never got back and
+      // was forfeited in eighth place without playing a single hand.
+      if (nextHand <= 1) sess.deadlineAt = now + (opts.keysMs ?? 12_000) * 3;
       state.set(tableId, sess);
       return "keys:0/" + sess.k;
     }
@@ -818,6 +867,24 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
       }
       if (missing.length) {
         const seat = sess.seats[missing[0]];
+        // ONE SECOND CHANCE BEFORE A STRIKE, in the keys phase.
+        // A strike is not a small thing: it takes the player out of the hand,
+        // sits them out, and in a tournament starts their idle-forfeit clock.
+        // The keys deadline is the one that fires right after a blind-level
+        // freeze, when nobody has a pre-deal and the whole table is answering a
+        // deal it has only just been told about — so it punishes the slowest
+        // CONNECTION at the table rather than an absent player. In tournament
+        // #23 that was nine strikes on one player (who sat back in every time
+        // and finished third) and 25-45s of dead table time at every level
+        // where it fired; levels where it did not fire restarted in 1-2s.
+        // A rebuild costs one more window; a wrong strike costs a player their
+        // seat. Someone genuinely gone is still struck ~12s later.
+        const graceKey = `keysgrace:${tableId}`;
+        if (sess.phase === "keys" && state.get(graceKey) !== String(sess.forHand)) {
+          state.set(graceKey, String(sess.forHand));
+          state.delete(tableId);
+          return `keys-retry:seat${seat}`;
+        }
         try {
           await send(() => room.sitOutIdle(tableId, seat));
           state.delete(tableId);
@@ -1032,6 +1099,10 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
       if (sh.inHand) liveParts.push(i);
     }
     sess.ownNeeded = new Set(liveParts.filter((p) => !sess.holesRevealed.has(p)));
+    // Who is entitled to be SEEN. Set only here, inside the showdown branch, so
+    // the relay below can never hand out a hand that is still live — and never a
+    // folded one, which stays secret forever.
+    sess.liveParts = liveParts;
     if (!sess.showdownDeadline) sess.showdownDeadline = now + (opts.showdownSharesMs ?? 12_000);
 
     // Reveal EVERY share-ready hand in this one tick (the old one-seat-per-tick

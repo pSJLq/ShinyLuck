@@ -2,7 +2,9 @@
    (tournament?id=N): info + countdown + blind structure + prize/split, and the
    approval flow · applicants apply with their on-chain nickname, the host
    approves/rejects. Fully on-chain via window.SP. Mirrors the lobby chrome. */
-const { useState: uS, useEffect: uE } = React;
+// `var`, not `const`: the cashier and the page app both bind these and now
+// share one global script scope — a second `const` would kill the page.
+var { useState: uS, useEffect: uE } = React;
 const sym = () => SP.NETWORK.currency.symbol;
 const N4 = (w) => Number(SP.fmt(w, 4));
 const tshort = (a) => (a && a !== "0x0000000000000000000000000000000000000000" ? a.slice(0, 6) + "…" + a.slice(-4) : "");
