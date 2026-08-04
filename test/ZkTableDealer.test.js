@@ -283,4 +283,105 @@ describe("ZkTableDealer — live v2 card layer (IPokerDealer, cards from verifie
     await dealer.connect(other).revealBoardCard(dealId, 0, sh.trueCard, ctPair(sh.ct), sh.d, sh.R1, sh.R2, sh.s);
     expect(await dealer.boardRevealedCount(dealId)).to.equal(1);
   });
+
+  // =======================================================================
+  // The showdown ends in the transaction that completes it. Before this, the
+  // tail cost three confirmations: the last reveal, then markShowdownReady,
+  // then resolveShowdown. Readiness is now DERIVED from the room's own seat
+  // state instead of asserted by the coordinator, which is what makes closing
+  // the hand here safe — it is strictly less trusting than what it replaced.
+  // =======================================================================
+  describe("showdown closes itself", () => {
+    let mockRoom, tableId, dealId, seats, players, deck, k;
+
+    // Reveal the whole board, then hand back a per-seat reveal helper.
+    async function openBoardAndHoles(live) {
+      mockRoom = await (await ethers.getContractFactory("MockRoomSeats")).deploy();
+      dealer = await (await ethers.getContractFactory("ZkTableDealer")).deploy(await mockRoom.getAddress(), coord.address);
+      tableId = 7; dealId = 900 + live.length; seats = [0, 1];
+      ({ players, deck, k } = await setup(dealId, tableId, handId(), seats));
+      for (const s of seats) await mockRoom.setInHand(tableId, s, live.includes(s));
+      const revealBoard = async (upto) => {
+        for (let slot = Number(await dealer.boardRevealedCount(dealId)); slot < upto; slot++) {
+          const sh = sharesFor(deck, players, dealId, 2 * k + slot);
+          await dealer.connect(coord).revealBoardCard(dealId, slot, sh.trueCard, ctPair(sh.ct), sh.d, sh.R1, sh.R2, sh.s);
+        }
+      };
+      const revealSeat = async (p) => {
+        const a = sharesFor(deck, players, dealId, 2 * p);
+        const b = sharesFor(deck, players, dealId, 2 * p + 1);
+        await dealer.connect(coord).revealHoleCards(
+          dealId, p, seats[p], [a.trueCard, b.trueCard],
+          [...ctPair(a.ct), ...ctPair(b.ct)],
+          [...a.d, ...b.d], [...a.R1, ...b.R1], [...a.R2, ...b.R2], [...a.s, ...b.s],
+        );
+      };
+      return { revealBoard, revealSeat };
+    }
+    let _h = 900;
+    const handId = () => ++_h;
+
+    it("the LAST reveal flips readiness and pays the pot — earlier ones do neither", async () => {
+      const { revealBoard, revealSeat } = await openBoardAndHoles([0, 1]);
+      await revealBoard(5);
+      expect(await dealer.isShowdownReady(dealId), "board alone is not a showdown").to.equal(false);
+
+      await revealSeat(0);
+      expect(await dealer.isShowdownReady(dealId), "one seat still owed").to.equal(false);
+      expect(await mockRoom.settleCalls()).to.equal(0);
+
+      await revealSeat(1);
+      expect(await dealer.isShowdownReady(dealId)).to.equal(true);
+      expect(await mockRoom.settleCalls(), "pot moved in the reveal tx").to.equal(1);
+      expect(await mockRoom.lastSettledTable()).to.equal(tableId);
+    });
+
+    it("a folded seat never holds the showdown open, and its cards stay secret", async () => {
+      // seat 1 folded → the room no longer counts it, so seat 0's reveal is the
+      // last one owed. Its hole cards must never be revealed to close the hand.
+      const { revealBoard, revealSeat } = await openBoardAndHoles([0]);
+      await revealBoard(5);
+      await revealSeat(0);
+      expect(await dealer.isShowdownReady(dealId)).to.equal(true);
+      expect(await mockRoom.settleCalls()).to.equal(1);
+      const [f0, f1] = await dealer.holeCards(dealId, 1);
+      expect(Number(f0)).to.equal(255);
+      expect(Number(f1)).to.equal(255);
+    });
+
+    it("an incomplete board keeps the hand open, and the completing BOARD card closes it", async () => {
+      // The all-in runout order: the room is already at showdown and hole cards
+      // can land before the board finishes. The closing card is then a board
+      // card, so readiness must not be tied to the hole-reveal path.
+      const { revealBoard, revealSeat } = await openBoardAndHoles([0, 1]);
+      await revealBoard(4);
+      await revealSeat(0);
+      await revealSeat(1);
+      expect(await dealer.isShowdownReady(dealId), "board incomplete").to.equal(false);
+      expect(await mockRoom.settleCalls()).to.equal(0);
+
+      await revealBoard(5);
+      expect(await dealer.isShowdownReady(dealId)).to.equal(true);
+      expect(await mockRoom.settleCalls(), "the river closed the hand").to.equal(1);
+    });
+
+    it("a room that refuses to settle never undoes a proven reveal — the coordinator still closes it", async () => {
+      const { revealBoard, revealSeat } = await openBoardAndHoles([0, 1]);
+      await mockRoom.setSettleReverts(true);
+      await revealBoard(5);
+      await revealSeat(0);
+      await revealSeat(1); // must NOT revert, even though the settle inside does
+
+      const [a0, a1] = await dealer.holeCards(dealId, 1);
+      expect(Number(a0), "cards recorded despite the failed settle").to.be.lte(51);
+      expect(Number(a1)).to.be.lte(51);
+      expect(await dealer.isShowdownReady(dealId), "still ready for the fallback").to.equal(true);
+      expect(await mockRoom.settleCalls()).to.equal(0);
+
+      // …and the coordinator's own call then settles it, exactly as before
+      await mockRoom.setSettleReverts(false);
+      await mockRoom.resolveShowdown(tableId);
+      expect(await mockRoom.settleCalls()).to.equal(1);
+    });
+  });
 });

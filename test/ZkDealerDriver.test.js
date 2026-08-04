@@ -195,12 +195,13 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     await room.connect(alice).act(0, CHECK, 0);
     expect(Number((await room.getHand(0)).street)).to.equal(4); // SHOWDOWN
 
-    // showdown: own-hole shares released, then ONE tick reveals every ready
-    // seat and marks readiness (the old one-seat-per-tick flow made the
-    // showdown tail cost ~4 poll cycles)
+    // showdown: own-hole shares released, then ONE tick both reveals every
+    // ready seat AND settles. The reveal that completes the showdown flips
+    // readiness and pays the pot inside its own transaction, so the tail costs
+    // one confirmation instead of three (it was one tick per seat, then a
+    // markShowdownReady tx, then a resolveShowdown tx).
     expect(await tick()).to.equal("showdown-collect");
     stepAll();
-    expect(await tick()).to.equal("showdown-ready");
     expect(await tick()).to.equal("settled");
 
     // the on-chain revealed cards match what each client decrypted privately
@@ -225,12 +226,35 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
   });
 
   // check the current hand down to street 4 (SHOWDOWN), boards revealed
-  async function checkDownToShowdown(room, alice, bob, tick, stepAll) {
+  /// Drive the speculative next-hand session to a committed prepareDeal WHILE
+  /// the live hand is still being played. That is where the pre-deal belongs:
+  /// it is the heaviest tx we send, so it is kept off any tick that still owes
+  /// a card — and off the showdown entirely, which is why it can no longer ride
+  /// a "winner display" pause that the in-transaction settle removed.
+  async function predealDuringHand(state, clients, tick) {
+    expect(await tick()).to.equal("wait"); // nothing owed → the pre-deal opens
+    const nx0 = state.get(zkDealer.nextKey(0));
+    expect(nx0, "pre-deal session open").to.exist;
+    expect(nx0.phase).to.equal("keys");
+    const nextDealId = String(nx0.dealId);
+    // clients serve BOTH deals now, exactly like the browser agent
+    const stepBoth = () => clients.forEach((c) => { c.step(state, 0); c.step(state, 0, nextDealId); });
+    stepBoth(); expect(await tick()).to.equal("wait"); // next: both keys → shuffle
+    stepBoth(); expect(await tick()).to.equal("wait"); // next: shuffles + proofs
+    stepBoth(); expect(await tick()).to.equal("wait"); // next: pre-collect → prepare
+    const nx = await awaitPrepared(state, zkDealer.nextKey(0));
+    expect(nx.phase).to.equal("prepare");
+    expect(nx.prepared, "prepareDeal committed while the hand was still live").to.equal(true);
+    return nextDealId;
+  }
+
+  async function checkDownToShowdown(room, alice, bob, tick, stepAll, afterFlop) {
     await room.connect(alice).act(0, CALL, 0);
     await room.connect(bob).act(0, CHECK, 0);
     expect(await tick()).to.equal("board-wait");
     stepAll();
     expect(await tick()).to.equal("board:3");
+    if (afterFlop) await afterFlop();
     for (const street of [2, 3]) {
       await room.connect(bob).act(0, CHECK, 0);
       await room.connect(alice).act(0, CHECK, 0);
@@ -247,33 +271,18 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     const { alice, bob, room, zkd, state, clients, tick, stepAll } = await setup();
     await dealHand(tick, stepAll);
     stepAll(); // decrypt holes
-    await checkDownToShowdown(room, alice, bob, tick, stepAll);
+    let nextDealId;
+    await checkDownToShowdown(room, alice, bob, tick, stepAll, async () => {
+      nextDealId = await predealDuringHand(state, clients, tick);
+    });
 
-    // the speculative next-hand session opened on the first live tick and has
-    // been idling in `keys` (clients only fed the live deal so far)
-    expect(await tick()).to.equal("showdown-collect");
-    const nx0 = state.get(zkDealer.nextKey(0));
-    expect(nx0, "pre-deal session open").to.exist;
-    expect(nx0.phase).to.equal("keys");
-    const nextDealId = String(nx0.dealId);
-    // clients serve BOTH deals now, exactly like the browser agent
-    const stepBoth = () => clients.forEach((c) => { c.step(state, 0); c.step(state, 0, nextDealId); });
-
-    stepBoth(); // main: own-hole shares; next: both keys
-    expect(await tick({ showdownMs: 60000 })).to.equal("showdown-ready"); // reveals; next: keys→shuffle
-    stepBoth(); // next: both shuffles + Wikström proofs → holeshares
-    expect(await tick({ showdownMs: 60000 })).to.equal("showdown-wait");
-    stepBoth(); // next: pre-collect shares for the OTHERS' holes
-    expect(await tick({ showdownMs: 60000 })).to.equal("showdown-wait"); // next → prepare; prepareDeal rides the pause
-
-    const nx = await awaitPrepared(state, zkDealer.nextKey(0));
-    expect(nx.phase).to.equal("prepare");
-    expect(nx.prepared, "prepareDeal sent during the winner-display pause").to.equal(true);
     // no early peek: my NEXT-hand cards are never relayed while speculative
     const t0 = zkDealer.zkTask(state, 0, clients[0].addr, nextDealId);
     expect(t0.myHoles, "myHoles withheld for a speculative deal").to.equal(undefined);
 
-    expect(await tick()).to.equal("settled"); // showdownMs 0 → pot moves
+    expect(await tick()).to.equal("showdown-collect");
+    stepAll(); // own-hole shares
+    expect(await tick()).to.equal("settled"); // reveal + readiness + pot, one tx
     expect(await tick()).to.equal("hand-ended:next-ready"); // pre-deal promoted
     expect(await tick({ interHandMs: 0 })).to.equal("started"); // ONLY startHand left
 
@@ -293,18 +302,13 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     const { alice, bob, room, zkd, state, clients, tick, stepAll } = await setup();
     await dealHand(tick, stepAll);
     stepAll();
-    await checkDownToShowdown(room, alice, bob, tick, stepAll);
+    let nextDealId;
+    await checkDownToShowdown(room, alice, bob, tick, stepAll, async () => {
+      nextDealId = await predealDuringHand(state, clients, tick);
+    });
 
     expect(await tick()).to.equal("showdown-collect");
-    const nextDealId = String(state.get(zkDealer.nextKey(0)).dealId);
-    const stepBoth = () => clients.forEach((c) => { c.step(state, 0); c.step(state, 0, nextDealId); });
-    stepBoth();
-    expect(await tick({ showdownMs: 60000 })).to.equal("showdown-ready");
-    stepBoth();
-    expect(await tick({ showdownMs: 60000 })).to.equal("showdown-wait");
-    stepBoth();
-    expect(await tick({ showdownMs: 60000 })).to.equal("showdown-wait");
-    expect((await awaitPrepared(state, zkDealer.nextKey(0))).prepared).to.equal(true);
+    stepAll();
     expect(await tick()).to.equal("settled");
 
     // bob sits out between settle and the next hand — the prediction is stale

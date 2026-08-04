@@ -23,4 +23,20 @@ contract MockRoomSeats {
     function getSeatHand(uint256 tableId, uint8 seat) external view returns (SeatHand memory) {
         return _sh[tableId][seat];
     }
+
+    // ---- stand-in for PokerRoom.resolveShowdown ----------------------------
+    // Lets the dealer's in-transaction settle be observed, and — with
+    // `settleReverts` — lets the fallback be proven: a room that refuses must
+    // never undo a valid, proven reveal.
+    uint256 public settleCalls;
+    uint256 public lastSettledTable;
+    bool public settleReverts;
+
+    function setSettleReverts(bool v) external { settleReverts = v; }
+
+    function resolveShowdown(uint256 tableId) external {
+        require(!settleReverts, "settle refused");
+        settleCalls++;
+        lastSettledTable = tableId;
+    }
 }
