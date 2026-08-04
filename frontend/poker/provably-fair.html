@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ShinyPoker · Provably Fair · commit-reveal</title>
+<title>ShinyPoker · Provably Fair · zkShuffle v2</title>
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="stylesheet" href="styles.css" />
 <link rel="stylesheet" href="marketing.css" />
@@ -15,18 +15,24 @@
     <div class="legal">
       <div class="lhead">
         <span class="eyebrow">Trust model</span>
-        <h1>Provably fair · commit-reveal</h1>
+        <h1>Provably fair · zkShuffle v2</h1>
         <div class="lupd">How ShinyPoker makes the deal impossible to rig · and independently verifiable by anyone. Written straight, including what we don’t yet do.</div>
       </div>
 
-      <div class="callout" style="border-color:rgba(217,171,74,0.45)"><b>Update · live tables now run zkShuffle v2.</b> Cash tables and tournaments have moved to full mental poker: the deck is shuffled and encrypted by the players’ own browsers, every shuffle is zk-proven, and your hole cards are decrypted only on your machine · no dealer service ever sees a card. Watch the protocol run in real time in the <a href="zk-lab">zk Lab</a>. The commit-reveal scheme below powered v1 and is kept documented here.</div>
+      <div class="callout" style="border-color:rgba(217,171,74,0.45)"><b>The short version.</b> Every cash table and every tournament runs full mental poker. The deck is ElGamal-encrypted under the table’s aggregate key and shuffled by the players’ own browsers; each shuffle carries a <b>Wikström zero-knowledge proof</b> that every other client verifies before it will release a decryption share; each card the room reads is decrypted from proven Chaum–Pedersen shares and checked <b>by the contract</b> to be exactly the card claimed. Your hole cards are decrypted on your machine only · no dealer service ever holds one. Watch the protocol run in real time in the <a href="zk-lab">zk Lab</a>.</div>
 
-      <div class="callout"><b>The short version (v1).</b> Before every hand a sealed commitment to the deck is posted on-chain, and the shuffle is locked to a future block hash that no one can predict. After the hand the seed is revealed and the entire 52-card deck is re-derived and verified on-chain. No one can stack the deck or change a card, and anyone can re-check any hand. Card secrecy during play is handled by a dealer service in this v1 · see §4 for exactly what it can and cannot do.</div>
+      <div class="callout"><b>Archived: the v1 commit-reveal scheme (§2–§4).</b> Before zkShuffle, the deck came from a sealed seed committed on-chain and bound to a future block hash, and an off-chain dealer derived it to serve hole cards. That version is retired · its contracts remain on-chain for withdrawals only. The sections below are kept as a record of what it did and where its trust boundary was, so the change is auditable rather than quietly rewritten.</div>
 
       <h2>1. What "maximally on-chain" means here</h2>
-      <p>On ShinyPoker, the things that decide who wins money live on-chain (Somnia testnet today): your escrow balance, buy-ins, blinds and antes, every betting action (fold / check / call / bet / raise / all-in), the main pot and side-pots, rake, payouts, tournament registration and prize pools. Somnia's high throughput and sub-second finality let all of this happen without the table feeling slow.</p>
+      <p>On ShinyPoker, the things that decide who wins money live on-chain (Somnia testnet today): your escrow balance, buy-ins, blinds and antes, every betting action (fold / check / call / bet / raise / all-in), the main pot and side-pots, rake, payouts, tournament registration and prize pools. Somnia's high throughput and sub-second finality let all of this happen without the table feeling slow. Live addresses: PokerRoom <code>0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24</code>, card layer <code>ZkTableDealer</code> <code>0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8</code>, tournaments <code>0xf2d3785645985618b866594cE6e924Ae35608948</code>.</p>
 
-      <h2>2. How the deck is sealed · commit-reveal + block-hash entropy</h2>
+      <h2 id="v2">1½. How the deal works today · zkShuffle v2</h2>
+      <p>Nobody derives the deck, because nobody can. Each seated client generates a fresh per-hand keypair (the secret never leaves the tab) and proves knowledge of it with a Schnorr proof the <b>contract verifies</b>; the table key is the aggregate of those pubkeys, so a rogue key cannot join. The 52-card deck is then passed player to player: each one permutes and re-encrypts it and publishes a Wikström zero-knowledge argument that the output really is a permutation plus re-encryption of the input. Every other client fetches the full transcript, verifies <i>all</i> of it and pins its own stage inside it before it hands over a single decryption share. The deal commits the keccak of that whole transcript on-chain, so it stays re-verifiable forever.</p>
+      <p>From there, a card only becomes visible when the shares exist for it. Hole cards: everyone gives shares for <i>other</i> players' cards, so each player can finish their own decryption locally and nobody else can · the coordinator is one share short, by construction. Board cards: all shares are collected as each street closes, and <code>revealBoardCard</code> makes the contract check every Chaum–Pedersen proof and that the shares decrypt to exactly the claimed card. A forged share or a lied-about card reverts. A per-deal bitmask also rejects the same card value showing up twice.</p>
+      <p><b>If a tab dies mid-hand,</b> the missing share becomes an on-chain accusation naming the exact card. The accused client watches the chain, not the bot, and can answer within a rescue window · which also delivers the withheld share, so stalling just walks a griefer through handing over every share one at a time. Only an accusation nobody answered lets the hand finalize with that player's committed chips forfeited, distributed pro-rata to the other players in the hand and never to the operator. Closing your tab in a lost pot costs you what folding would have.</p>
+      <p><b>What is still not proven inside a contract:</b> the shuffle argument itself. It is verified by the coordinator and independently by every client, and the chain holds its commitment · not its verification. There is no third-party audit of the implementation yet. Both of those are stated here rather than in a footnote on purpose.</p>
+
+      <h2>2. Archived · how the v1 deck was sealed (commit-reveal + block-hash entropy)</h2>
       <p>The deck for each hand is derived from <b>two independent inputs, controlled by different parties</b>, so neither the dealer nor anyone else can grind it into a favourable order:</p>
       <ul>
         <li><b>A server seed, committed first.</b> Before the hand, the hash <code>keccak256(seed)</code> is published on-chain. The hash reveals nothing about the seed, but locks it in · the seed can never be swapped later without the hash failing to match.</li>
@@ -34,7 +40,7 @@
       </ul>
       <p>The 52-card deck is then a <b>deterministic Fisher-Yates shuffle</b> of <code>seed + block-hash + hand id + table id</code>. It's a pure function · the contract exposes <code>recomputeDeck(...)</code> so anyone can reproduce it bit-for-bit. Because no single party controls both inputs, no one can predict or steer the deck.</p>
 
-      <h2>3. Reveal → verify: the deal can’t be rigged</h2>
+      <h2>3. Archived · v1 reveal and verify</h2>
       <ul>
         <li><b>Commit (pre-deal).</b> The seed hash is on-chain before any card exists. It can't change mid-hand.</li>
         <li><b>Play.</b> The board is posted street by street. Each posted board card is checked against the derived deck at reveal · a mismatch reverts the transaction.</li>
@@ -42,8 +48,8 @@
       </ul>
       <div class="callout">Every deal ID, seed commitment, revealed seed and block-hash entropy is on-chain via the dealer contract's <code>dealInfo</code>. Anyone can call <code>recomputeDeck</code> and confirm the cards they were shown match the committed shuffle · no trust required, and no permission needed.</div>
 
-      <h2 id="verify">3½. Verify a hand yourself · right now, in this tab</h2>
-      <p>Don't take the section above on faith. This tool runs <b>in your browser</b>: it reads the deal from the chain, re-derives the whole deck locally from the revealed seed, cross-checks it against the contract's own <code>recomputeDeck()</code>, and diffs the board that was posted street by street. We can't fake any of it · the only thing it talks to is the public RPC.</p>
+      <h2 id="verify">3½. Verify a v1 hand yourself · right now, in this tab</h2>
+      <p>This tool runs <b>in your browser</b>: it reads the deal from the chain, re-derives the whole deck locally from the revealed seed, cross-checks it against the contract's own <code>recomputeDeck()</code>, and diffs the board that was posted street by street. The only thing it talks to is the public RPC. It works against the <b>v1</b> commit-reveal dealer only · v2 deals have no seed to reveal, which is the whole point, and are verified live instead in the <a href="zk-lab" style="color:#f2d78a">zk Lab</a>.</p>
       <div class="fairtool">
         <div class="frow">
           <label>Deal ID</label>
@@ -61,13 +67,9 @@
         <div id="fair-result" style="display:none"></div>
       </div>
 
-      <h2>4. What the dealer can and cannot do (v1 · read this)</h2>
-      <p>We’d rather you hear the exact trust boundary from us than find it in the contract. In this first version, an off-chain dealer service derives the deck (once the seed and block hash are known) to deliver each player their two hole cards. That means:</p>
-      <ul>
-        <li><b>It cannot cheat the result.</b> Cards, board and outcome are bound by the on-chain commitment and verified when the seed is revealed. The dealer physically cannot swap a card, change the board, or pick a winner.</li>
-        <li><b>Opponents and the public never see your cards</b> until showdown, when the deck becomes public and verifiable.</li>
-        <li><b>The honest caveat:</b> because the dealer derives the deck to serve cards, it technically holds every hand’s cards while the hand is live. It is cryptographically prevented from cheating the outcome, but this is a trust point we’re not going to hide. The fully trustless version · <b>mental poker / zkShuffle</b>, where the deck is shuffled collaboratively and no one, including us, ever holds a plaintext card · is the v2 on our roadmap, <b>and its protocol core already runs with on-chain verification</b>: a deployed BN254 contract verifies every key and decryption-share proof. <a href="zk-lab" style="color:#f2d78a">Try the v2 lab</a> · you can watch the chain accept each proof (experimental, not yet on live tables).</li>
-      </ul>
+      <h2>4. Archived · the trust boundary v1 had, and v2 closed</h2>
+      <p>In v1 an off-chain dealer service derived the deck (once the seed and block hash were known) to deliver each player their two hole cards. It could not cheat the result · cards, board and outcome were bound by the on-chain commitment · but because it derived the deck to serve it, it technically held every hand’s cards while the hand was live. That was a real trust point and we said so at the time.</p>
+      <p><b>That trust point is gone.</b> On zkShuffle v2 there is no seed and no derivation: the coordinator relays ciphertexts and proofs it cannot decrypt, and it is always exactly one decryption share short of any player’s hole cards. It is not that we ask you to trust the dealer less · it holds nothing to be trusted with. See §1½, or watch it in the <a href="zk-lab" style="color:#f2d78a">zk Lab</a>.</p>
 
       <h2>5. Session keys (convenience without custody)</h2>
       <p>Signing a wallet transaction for every fold would be unusable. Instead, when you sit down you authorize a <b>session key</b> once, scoped to acting on your behalf at the table. Your actions are then signed locally and settle on-chain in the background · no popup per hand. You can revoke the session key at any time from Settings.</p>
@@ -80,7 +82,7 @@
         <li>Expose opponents' hidden cards to other players, or show fake "win % vs unknown hands".</li>
         <li>Hold your funds in a custodial wallet · your balance is in escrow only <b>you</b> can withdraw. The contract has no path for the house to move a player's balance.</li>
         <li>Hide rake or fees. Cash rake (with cap) and tournament fee splits are always shown up front.</li>
-        <li>Claim cryptography we haven't shipped. When zkShuffle v2 is live, this page will say so · and not a day before.</li>
+        <li>Claim cryptography we haven't shipped. zkShuffle v2 is live · and until it was, this page said so, which is why §2 to §4 are still here instead of deleted.</li>
       </ul>
 
       <div style="margin-top:36px"><a class="btn primary" href="lobby">Connect Wallet &amp; Play</a> <a class="btn ghost" href="index" style="margin-left:8px">Back to home</a></div>

@@ -188,6 +188,13 @@
       pokerTournament: "0xf2d3785645985618b866594cE6e924Ae35608948",
       playerProfile: "0x7364E1ED8a07b4659c059fa66D346c42907C3F14",
     };
+    // The live casino is the v15 CasinoVault. `cfg.casino` is the FROZEN v14
+    // monolith (kept for historical event aggregation), so linking it here
+    // pointed the footer at a dead contract on every page. Authoritative value
+    // comes from lib/config-v15.js when that module is loaded; the literal is
+    // the fallback for pages that don't load it (same pattern as `poker`).
+    const vault = (window.SL_V15 && window.SL_V15.addresses && window.SL_V15.addresses.vault)
+      || "0x6497D80cCd713F0BD4d8B22CE96Eae0F92EC7Cca";
     // `hook` marks a row whose address may still be loading · it renders hidden
     // and paintContractLink() fills it the moment the real config lands.
     const addrLink = (label, addr, hook) => {
@@ -216,14 +223,13 @@
           <div class="col">
             <a href="/docs" data-link>Docs</a>
             <a href="/fair" data-link>Provably Fair</a>
-            <a href="/leaderboard" data-link>Leaderboard</a>
             <a href="/zk-lab" data-link>ZK Lab</a>
           </div>
         </div>
         <div>
           <h4>Contracts</h4>
           <div class="col">
-            ${addrLink("Casino", cfg.casino, "casino")}
+            ${addrLink("Casino Vault", vault)}
             ${addrLink("PokerRoom", poker.pokerRoom)}
             ${addrLink("Tournaments", poker.pokerTournament)}
             ${addrLink("Profiles", poker.playerProfile)}
@@ -438,6 +444,10 @@
     document.body.appendChild(d);
   }
 
+  // Late-paint hook for footer contract rows whose address arrives with the
+  // config. Every footer address is now a literal (see footerHTMLFor), so
+  // nothing declares `data-contract-link` today · kept because a future row
+  // read from config would otherwise silently render hidden.
   function paintContractLink(cfg) {
     const addr = cfg && cfg.casino;
     if (!addr || addr === "-") return;

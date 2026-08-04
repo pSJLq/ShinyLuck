@@ -61,13 +61,14 @@
       <div class="lhead">
         <span class="eyebrow">Research lab · v2</span>
         <h1>zkShuffle v2 · mental poker, live in your browser</h1>
-        <div class="lupd">The next trust model: nobody · not our dealer, not the host, not other players · can see your cards during a hand. This page runs the REAL cryptography (not a mock) right here, and lets you try to cheat it.</div>
+        <div class="lupd">The trust model our tables actually run: nobody · not our dealer, not the host, not other players · can see your cards during a hand. This page runs the REAL cryptography (not a mock) right here, and lets you try to cheat it.</div>
       </div>
 
-      <div class="expbanner">⚗️ <b>Really on-chain · and really live.</b> This page runs the v2 protocol core client-side on <b>BN254</b> (the curve the EVM has native precompiles for), and every Schnorr key proof and Chaum–Pedersen decryption-share proof below is <b>verified by a deployed contract</b> (<code>ZkDealerV2</code> on Somnia testnet) via a zero-gas <code>eth_call</code> · you're watching the actual chain accept or reject each proof. <b>This same protocol deals every live table</b> (the room's card layer is <code>ZkTableDealer</code>, wired to the on-chain verifier) · what you test here is what shuffles your hand. Not externally audited yet.</div>
+      <div class="expbanner">⚗️ <b>Really on-chain · and really live.</b> This page runs the v2 protocol core client-side on <b>BN254</b> (the curve the EVM has native precompiles for), and every Schnorr key proof and Chaum–Pedersen decryption-share proof below is <b>verified by a deployed contract</b> · <code>ZkDealerV2</code> at <a href="https://shannon-explorer.somnia.network/address/0x292Ef0e15fC62613B00c55b0eEAC38279Efdb67D" target="_blank" rel="noopener">0x292E…b67D</a> · through a zero-gas <code>eth_call</code>. You are watching the actual chain accept or reject each proof. Live cash tables and tournaments run the <b>same</b> protocol, same curve, same Fiat–Shamir domains and the same verifier library; there the on-chain checks live in the room's card layer, <code>ZkTableDealer</code> at <a href="https://shannon-explorer.somnia.network/address/0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8" target="_blank" rel="noopener">0x3fD6…3fe8</a>. Not audited by a third party yet.</div>
 
       <h2>How it works, in one hand</h2>
-      <p>Three players (simulated below, each with its own secret key your browser never shares between them): they aggregate a table key, each one <b>shuffles and re-encrypts the deck themselves</b>, then each hole card is decrypted <b>only by its owner</b> using the other players' decryption shares · and each of those shares is proven correct and <b>checked by the contract on-chain</b>. After the hand, everyone opens their shuffle · any tampering is caught, attributed, and provable on-chain (<code>ZkDealerV2.checkStage</code>). Watch the log: no party other than the owner ever holds a readable card.</p>
+      <p>Three players (simulated below, each with its own secret key your browser never shares between them): they aggregate a table key, each one <b>shuffles and re-encrypts the deck themselves</b>, then each hole card is decrypted <b>only by its owner</b> using the other players' decryption shares · and each of those shares is proven correct and <b>checked by the contract on-chain</b>. Watch the log: no party other than the owner ever holds a readable card.</p>
+      <p>The last step of the lab is the <b>post-hoc audit</b>: every player opens their permutation and randomness, the whole chain is recomputed and any tampering is attributed to the exact stage that did it. Press the cheat button and watch it happen. At a live table that audit is the belt, not the braces · see the next section for what actually guards a real hand.</p>
 
       <div class="lab">
         <div class="btns">
@@ -79,17 +80,19 @@
         <div class="lablog" id="log">Press “Play an honest hand”.</div>
       </div>
 
-      <h2>What this stage does and doesn't prove</h2>
+      <h2>What a real hand proves, and where</h2>
       <ul>
-        <li><b>Does, on-chain:</b> the aggregate table key (each player's Schnorr proof is verified by the contract), and every decryption share (Chaum–Pedersen, verified by the contract · a forged share is rejected by the chain). In-hand secrecy: your cards are ElGamal-encrypted under everyone's keys, so only you can complete the decryption. Cheat detection is deterministic and attributable, and the shuffle audit is re-derivable on-chain (<code>checkStage</code>).</li>
-        <li><b>Doesn't yet:</b> zero-knowledge shuffle arguments (verifying each shuffle DURING the hand with nothing opened after) · stage R2 of the spec, replacing the optimistic audit; escrow slashing wired to the room; and an external audit. Deck storage on-chain is also currently heavy (~0.26 STT/hand) and will move to a hash-commit + calldata-verify model.</li>
+        <li><b>Verified by the contract, during the hand:</b> every player's Schnorr key proof (a rogue key cannot join and the aggregate table key is formed on-chain); every Chaum–Pedersen decryption share, checked against the committed ciphertext and that seat's per-hand key; and that the shares decrypt to <i>exactly</i> the card being claimed · <code>B − Σd == (card+1)·G</code>. A forged share or a lied-about card reverts, so the coordinator cannot put a card on the felt that the cryptography did not produce. A per-deal bitmask also rejects the same card value appearing twice.</li>
+        <li><b>Verified by every client, during the hand:</b> the shuffles. Each player's shuffle carries a <b>Wikström zero-knowledge proof</b> that the output deck is a permutation plus re-encryption of the input, with nothing opened afterwards. Every other client fetches the whole transcript and checks all of it (and pins its own stage inside it) <i>before</i> it will hand over a single decryption share, and the deal commits the keccak of that transcript on-chain, so anyone holding it can re-verify the shuffle forever. That is stage R2 of the spec, and it is live · the "at least one honest shuffler" assumption is no longer load-bearing.</li>
+        <li><b>Enforced on-chain when someone vanishes:</b> a missing decryption share becomes an on-chain accusation naming the exact card. The accused client can answer it within a rescue window, which also delivers the withheld share; only an unanswered accusation forfeits that player's committed chips, pro-rata to the other players in the hand and never to the operator.</li>
+        <li><b>Not done:</b> the shuffle argument itself is verified by clients and by the coordinator, not inside a contract · the chain holds its commitment, not its verification. There is no third-party audit yet. And undealt cards are never decrypted at all: only the 2k + 5 ciphertexts actually in play are committed, as hashes with the points passed in calldata, which is what keeps the coordinator's gas at roughly <b>0.086 STT</b> per completed heads-up hand and <b>0.14–0.16 STT</b> at four players (measured on Somnia at its fixed 6 gwei base fee; a player's own action costs about 0.001 STT).</li>
       </ul>
 
       <div style="margin-top:36px;display:flex;gap:10px;flex-wrap:wrap">
         <a class="btn2 btn2-gold" href="/poker" data-link style="height:42px;padding:0 20px;text-decoration:none">Play poker</a>
         <a class="btn2 btn2-line" href="/docs#poker" data-link style="height:42px;padding:0 18px;text-decoration:none">Read the docs</a>
+        <a class="btn2 btn2-line" href="https://github.com/pSJLq/ShinyLuck" target="_blank" rel="noopener" style="height:42px;padding:0 18px;text-decoration:none">Source ↗</a>
       </div>
-    </div>
     </div>
     <div data-mount="footer"></div>
   </main>

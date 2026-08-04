@@ -476,7 +476,9 @@ table.t2 td { padding: 12px 20px; border-bottom: 1px solid #0F0F13; font: 500 12
 table.t2 tr:last-child td { border-bottom: none; }
 
 /* ---------------------------------------------------------------------------
-   Leaderboard rows (lib/leaderboard.js renders .lb-row into [data-sl-lb-table])
+   Leaderboard rows. UNUSED since the /leaderboard page was removed (2026-07-30)
+   along with lib/leaderboard.js; kept because the lobby's Top players table may
+   want this row shape again. Nothing renders .lb-row today.
    ------------------------------------------------------------------------- */
 .lb-row { display: grid; grid-template-columns: 64px 1.6fr 1.1fr 1fr 1fr 64px; gap: 10px; align-items: center; padding: 12px 20px; border-bottom: 1px solid #0F0F13; font: 500 12px var(--mono); color: var(--fg-dim); }
 .lb-row:last-child { border-bottom: none; }

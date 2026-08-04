@@ -133,11 +133,18 @@ async function playHand(withCheat) {
   const audit = zk.auditShuffles(pts, X, stages);
   if (audit.ok) {
     log("every shuffle recomputes exactly · the hand was clean ✓", "ok");
-    log("(on a live table this same check runs on-chain via ZkDealerV2.checkStage)", "");
+    // The lab demonstrates the POST-HOC audit (open everything, recompute). A
+    // live table does not rely on it: each shuffle carries a Wikström zk proof
+    // that every client verifies before giving up a share, and the deal commits
+    // the transcript hash on-chain. Saying "checkStage runs on a live table"
+    // was simply untrue - ZkTableDealer has no such function.
+    log("(a live table proves each shuffle DURING the hand instead: a Wikström zk", "");
+    log(" argument every client verifies, with the transcript hash committed on-chain)", "");
   } else {
     log(`AUDIT FAILED at player ${audit.cheater + 1}, ciphertext #${audit.card} · tampering attributed with certainty.`, "bad");
-    log(`on a live table ZkDealerV2.checkStage proves this on-chain → the cheat is slashed.`, "bad");
-    states[audit.cheater].know = "CAUGHT by the audit · escrow slashed";
+    log(`on a live table this deck never even reaches the felt: the Wikström proof for that`, "bad");
+    log(`stage fails, every client rejects it, and the hand is redealt without that seat.`, "bad");
+    states[audit.cheater].know = "CAUGHT by the audit · shuffle rejected";
     renderPlayers(states);
   }
   log("\ndone.", "head");

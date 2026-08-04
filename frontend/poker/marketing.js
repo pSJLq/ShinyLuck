@@ -35,21 +35,25 @@
       '</nav>' +
       '<div class="spacer"></div>' +
       '<div class="mkt-switcher">' +
-        '<a class="casino" href="https://shiny-luck.vercel.app/"><span class="dot"></span>ShinyLuck</a>' +
+        '<a class="casino" href="/"><span class="dot"></span>ShinyLuck</a>' +
         '<a class="on" href="/poker/"><span class="dot"></span>Poker</a>' +
       '</div>' +
       '<a class="btn primary" href="lobby">Connect Wallet &amp; Play</a>' +
     '</div></header>';
 
   // Real community links · used by BOTH footers.
+  // `casino` used to point at an old Vercel preview that is STILL online and
+  // serving a stale build with dead contract addresses · it must be the live
+  // domain. `escrow` used to name the v1 PokerRoom (0x7E13…36e3); the live room
+  // has been 0xFeF7…6A24 since 2026-07-11.
   var LINKS = {
     telegram: "https://t.me/ShinyLuck1",
     x: "https://x.com/ShinyLuck_",
     discord: "https://discord.gg/DxRzqnXmeq",
-    github: "https://github.com/pSJLq",
+    github: "https://github.com/pSJLq/ShinyLuck",
     somnia: "https://somnia.network/",
-    casino: "https://shiny-luck.vercel.app/",
-    escrow: "https://shannon-explorer.somnia.network/address/0x7E1387FCE14522B981C07bca921e857CfeD636e3",
+    casino: "https://shinyluck.win/",
+    escrow: "https://shannon-explorer.somnia.network/address/0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24",
   };
 
   var SOCIAL = {
@@ -90,8 +94,8 @@
       '</div>' +
       '<div class="fchain">' +
         '<span class="ci"><span class="dot"></span>Somnia Testnet</span>' +
-        '<span class="ci">Escrow: <a href="' + LINKS.escrow + '" target="_blank" rel="noopener">0x7E13…36e3 ↗</a></span>' +
-        '<span class="ci">Build v1.5</span>' +
+        '<span class="ci">Escrow: <a href="' + LINKS.escrow + '" target="_blank" rel="noopener">0xFeF7…6A24 ↗</a></span>' +
+        '<span class="ci">Cards: zkShuffle v2</span>' +
         '<span class="ci">RPC: api.infra.testnet.somnia.network</span>' +
       '</div>' +
       '<div class="fbot">' +

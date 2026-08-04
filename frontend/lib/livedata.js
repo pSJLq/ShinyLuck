@@ -893,8 +893,21 @@ async function boot() {
   // splash holds at 90% until this event arrives, so the user never sees
   // the splash fade into a "loading…" placeholder.
   fetchDeploymentBlock().then((b) => { _deploymentBlock = b; }).catch(() => {});
-  refreshAgentStats().catch(() => {});
-  refreshQuorum().catch(() => {});
+
+  // The agent subsystem was removed from the product, and its two readers paint
+  // nothing on any page still in the nav (only trailer.html declares the target
+  // attributes). They were still running on all ten pages that load this module:
+  // refreshQuorum every 12s and refreshAgentStats every 60s, the latter a
+  // 100k-block getLogs against the DEAD v14 monolith - which, at Somnia's
+  // 1000-block getLogs cap, is a hundred chunked requests a minute per open tab
+  // for a number nobody sees. Run them only where something consumes them.
+  const wantsAgentPanels = !!document.querySelector(
+    "[data-sl-quorum], [data-sl-quorum-latest], [data-sl-agent-stats]",
+  );
+  if (wantsAgentPanels) {
+    refreshAgentStats().catch(() => {});
+    refreshQuorum().catch(() => {});
+  }
 
   Promise.allSettled([
     refreshLiveStats(),
@@ -904,8 +917,10 @@ async function boot() {
   });
 
   setInterval(() => { refreshLiveStats().catch(() => {}); refreshAgentIds(); }, 12_000);
-  setInterval(() => refreshAgentStats().catch(() => {}), 60_000);
-  setInterval(() => refreshQuorum().catch(() => {}), 12_000);
+  if (wantsAgentPanels) {
+    setInterval(() => refreshAgentStats().catch(() => {}), 60_000);
+    setInterval(() => refreshQuorum().catch(() => {}), 12_000);
+  }
 }
 
 document.addEventListener("DOMContentLoaded", () => { boot().catch((e) => console.warn(e)); });

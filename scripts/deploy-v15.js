@@ -198,6 +198,10 @@ export const CONFIG_V15 = ${JSON.stringify({
     games: out.games.map(({ id, name, kind, module }) => ({ id, name, kind, module })),
     deploymentBlock,
   }, null, 2)};
+// partials.js is a classic script and cannot import this module, but it needs
+// the Vault address for the footer's Contracts column. Publish it so the shell
+// uses the deployed value instead of its hard-coded fallback.
+if (typeof window !== "undefined") window.SL_V15 = CONFIG_V15;
 export default CONFIG_V15;
 `;
   fs.writeFileSync(path.join(__dirname, "..", "frontend", "lib", "config-v15.js"), cfg);

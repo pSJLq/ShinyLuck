@@ -60,10 +60,15 @@ shinyluck.win {
 		}
 	}
 
+	# The leaderboard page was removed on 2026-07-30 (nav entry, route, page and
+	# lib/leaderboard.js). Old bookmarks and shared links land on the lobby,
+	# which carries the Top players table, instead of a dead 404.
+	redir /leaderboard / permanent
+
 	# SPA shell routes. index.html owns them and iframes the real page with
 	# ?embed=1, so a hard refresh on /dice must still land on the shell.
 	# Exact paths only — /poker/table.html keeps serving the real file.
-	@spa path /poker /dice /mines /plinko /crash /roulette /vault7 /sugar /docs /fair /leaderboard /predictions /infofi
+	@spa path /poker /dice /mines /plinko /crash /roulette /vault7 /sugar /docs /fair /zk-lab /predictions /infofi
 	rewrite @spa /index.html
 
 	root * /root/poker-web/frontend

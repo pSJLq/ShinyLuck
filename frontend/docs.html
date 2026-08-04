@@ -20,7 +20,9 @@
   .doc .mono { font-family: var(--mono); font-size: 12px; color: #E8E2D6; }
   .doc .chip-row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border: 1px solid var(--line); border-radius: 10px; background: #08080A; }
   .doc .chip-row .l { font: 600 10px var(--mono); letter-spacing: .14em; color: var(--fg-faint); width: 130px; flex: none; }
-  .doc .chip-row .a { font: 400 11px var(--mono); color: var(--gold); word-break: break-all; }
+  .doc .chip-row .a { font: 400 11px var(--mono); color: var(--gold); word-break: break-all; text-decoration: none; }
+  .doc .chip-row .a:hover { color: var(--gold-hi); text-decoration: underline; }
+  .doc .grp { margin: 18px 0 8px; font: 600 9px var(--mono); letter-spacing: .22em; color: var(--fg-ghost); text-transform: uppercase; }
   .toc a { display: block; font: 400 12.5px var(--sans); color: var(--fg-mute); padding: 8px 10px; border-left: 2px solid transparent; text-decoration: none; }
   .toc a:hover { color: var(--gold-hi); }
 </style>
@@ -43,6 +45,7 @@
           <a href="#wallet">Wallet &amp; STT</a>
           <a href="#casino">Casino games</a>
           <a href="#rng">RNG &amp; settlement</a>
+          <a href="#vault">Vault &amp; modules</a>
           <a href="#poker">Poker</a>
           <a href="#tournaments">Tournaments</a>
           <a href="#profile">Profile</a>
@@ -52,54 +55,79 @@
         <article class="doc" style="min-width:0;animation:sl-up .55s .05s both;padding-bottom:20px">
           <span class="spark-eyebrow"><svg width="14" height="14" viewBox="0 0 24 24" style="flex:none;color:var(--gold)"><path d="M12 1.7c.72 5.85 3.58 8.7 9.4 9.4-5.82.7-8.68 3.55-9.4 9.4-.72-5.85-3.58-8.7-9.4-9.4 5.82-.7 8.68-3.55 9.4-9.4Z" fill="currentColor"></path></svg><span class="k-eyebrow">Documentation</span></span>
           <h1 style="margin:12px 0 0;font:600 42px var(--sans);color:var(--fg-strong)">Docs</h1>
-          <p>ShinyLuck is a provably-fair casino and poker room on the Somnia testnet. Casino outcomes are drawn by a commit-reveal scheme enforced by the Casino contract; poker cards are dealt by mental poker (zkShuffle) so no server ever sees your hand. This page covers how it all works and where the contracts live.</p>
+          <p>ShinyLuck is a provably-fair casino and poker room on the Somnia testnet. Casino outcomes are drawn by a commit-reveal scheme the CasinoVault contract computes itself; poker cards are dealt by mental poker (zkShuffle v2), so no server ever sees your hand. This page covers how it works, what it costs, and where the contracts live.</p>
 
           <h2 id="overview">Overview</h2>
           <p>Two products share one site, one wallet and one on-chain profile:</p>
-          <p><b style="color:var(--fg)">Casino</b> · seven games (Dice, Mines, Plinko, Roulette, Crash, VAULT.7, SUGAR.LAB). Every bet is a transaction against the Casino contract; every outcome derives from randomness the contract computes itself. A settlement bot reveals pre-committed seeds and keeps shared rounds (Crash, Roulette) cycling · it holds no power over results.</p>
-          <p><b style="color:var(--fg)">Poker</b> · full no-limit hold'em, cash tables and tournaments, all chips and actions on-chain in the PokerRoom contract. The deck is shuffled by the players themselves in-browser with zero-knowledge proofs at every step (zkShuffle v2).</p>
+          <p><b style="color:var(--fg)">Casino</b> · seven games (Dice, Mines, Plinko, Roulette, Crash, VAULT.7, SUGAR.LAB), all live. One permanent <span class="mono">CasinoVault</span> holds the bankroll and derives the randomness; each game is its own module contract registered with it. A settlement bot reveals the pre-committed seeds · it has no power over any result. Crash and Roulette run on demand: the first player to bet opens the round, and the bot only settles it, so nothing spins or burns gas on an empty table.</p>
+          <p><b style="color:var(--fg)">Poker</b> · full no-limit hold'em, cash tables and tournaments, all chips and actions on-chain in the <span class="mono">PokerRoom</span> contract. The deck is shuffled by the players themselves in-browser, and every shuffle carries a zero-knowledge proof (zkShuffle v2).</p>
 
           <h2 id="wallet">Wallet &amp; STT</h2>
-          <p>Sign in with email · Privy issues you a Somnia Global Wallet (no extension needed), the same wallet across every Somnia partner app. Transactions are signed headlessly: no per-bet popups.</p>
-          <p>The currency is <span class="mono">STT</span>, Somnia's testnet token · it carries no monetary value. You need STT in your wallet to cover gas on every on-chain action, so keep a small balance there and play straight from it. Poker uses a separate in-contract bankroll: top it up (and cash out) instantly from the profile drawer.</p>
+          <p>Sign in with email · Privy creates an embedded wallet for you inside ShinyLuck, with no extension to install. Transactions are signed headlessly: no per-bet popups. The address is scoped to this app, so it is not the same address you would get in other Somnia apps.</p>
+          <p>The currency is <span class="mono">STT</span>, Somnia's testnet token · it carries no monetary value. You need STT in your wallet to cover gas on every on-chain action, so keep a small balance there and play straight from it. Somnia's base fee is a fixed <span class="mono">6 gwei</span>, which makes the numbers small and predictable: a poker action costs about <span class="mono">0.001</span> STT, a slot spin about <span class="mono">0.006</span> STT, a Dice or Plinko bet about <span class="mono">0.01</span> STT. Poker uses a separate in-contract bankroll: top it up (and cash out) from the profile drawer.</p>
 
           <h2 id="casino">Casino games</h2>
-          <p>Bets are placed directly from your wallet; wins are paid by the contract. The bet panel shows your live limits · max bet adapts to the house bankroll in real time, and the expected value of every bet is printed next to the payout (the house edge is public per game, read from the contract).</p>
-          <p><b style="color:var(--fg)">Dice</b> · pick a target, roll over or under. <b style="color:var(--fg)">Mines</b> · open safe tiles, each compounds the multiplier; cash out any time. <b style="color:var(--fg)">Plinko</b> · a ball drops through the pin field; the path replays the on-chain randomness bits exactly. <b style="color:var(--fg)">Roulette</b> · an American wheel with shared rounds: every player is on the same spin. <b style="color:var(--fg)">Crash</b> · shared rounds too; cash out before the bust point. <b style="color:var(--fg)">VAULT.7</b> · a 5×3, 20-line slot. <b style="color:var(--fg)">SUGAR.LAB</b> · a 7×7 cluster slot with cascades.</p>
-          <p>Games marked <span class="mono" style="color:var(--gold)">BETA</span> are playable but still rough around the edges.</p>
+          <p>Bets are placed directly from your wallet; wins are credited by the Vault and paid out on <span class="mono">claim()</span> (the site claims for you once you stop betting, and the profile drawer has the button). The bet panel shows your live limits, both read from the contract in real time: a single stake may not exceed <b style="color:var(--fg)">1%</b> of the free bankroll, and no bet may be able to win more than <b style="color:var(--fg)">20%</b> of it.</p>
+          <p><b style="color:var(--fg)">Dice</b> · pick a win chance anywhere from 0.01% to 99.99% and roll over or under; payouts scale up to 9900×, and the house edge is a flat <span class="mono">1.00%</span> at every chance. <b style="color:var(--fg)">Mines</b> · open safe tiles, each compounds the multiplier; cash out any time. Edge <span class="mono">1.20%</span>. <b style="color:var(--fg)">Plinko</b> · a ball drops through 16 rows of pins and the path replays the on-chain randomness bits exactly; three risk tables, each carrying about <span class="mono">1.0%</span>. <b style="color:var(--fg)">Roulette</b> · an American wheel (0 and 00) with shared rounds, so every player is on the same spin. Edge <span class="mono">5.26%</span>. <b style="color:var(--fg)">Crash</b> · shared rounds too; cash out before the bust point. Edge <span class="mono">1.00%</span>. <b style="color:var(--fg)">VAULT.7</b> · a 5×3, 20-line slot. <b style="color:var(--fg)">SUGAR.LAB</b> · a 7×7 cluster slot with cascades and a Charge Meter that pays out on a hidden, per-cycle threshold.</p>
+          <p>Every edge above is a constant in that game's module contract (Plinko's lives in its pay tables). The two slots publish their measured return-to-player on their own pages, because a pay table with free spins and a bonus meter has no closed-form edge.</p>
 
           <h2 id="rng">RNG &amp; settlement</h2>
-          <p>For every bet the contract derives randomness as <span class="mono">keccak256(serverSeed ‖ clientSeed ‖ blockhash ‖ nonce)</span>:</p>
-          <p>1 · The house commits <span class="mono">keccak256(serverSeed)</span> on-chain before any bet can bind to it.<br>
-             2 · Your browser contributes a fresh 32-byte client seed with each bet.<br>
-             3 · After your bet mines, the settlement bot reveals the seed; the contract checks it against the commitment and pays out.<br>
-             4 · If a reveal is ever missed, the bet auto-refunds after the 256-block window via <span class="mono">refundExpired(betId)</span> · callable by anyone.</p>
-          <p>You can re-derive any outcome in the browser on the <a href="/fair" data-link>Provably Fair</a> page, or from raw chain data.</p>
+          <p>For every bet the contract derives randomness as <span class="mono">keccak256(serverSeed ‖ clientSeed ‖ blockhash(commitBlock + 1) ‖ nonce)</span>:</p>
+          <p>1 · The house pre-commits batches of <span class="mono">keccak256(serverSeed)</span> on-chain before any bet can bind to one. The pool tops itself up automatically, so a game never stalls for want of a seed.<br>
+             2 · Your browser contributes a fresh 32-byte client seed with each bet, and you can supply your own.<br>
+             3 · The hash of the block after yours is mixed in. At the moment you bet, the outcome is unknown to everybody, including the house.<br>
+             4 · The settlement bot reveals the seed; the contract checks it against the commitment, recomputes the outcome and credits the payout.</p>
+          <p>The blockhash window on the EVM is 256 blocks. If a reveal is ever missed, the stake comes back and anyone (including you) can trigger it: <span class="mono">refundExpired(betId)</span> on the Vault for Dice and Plinko or on the slot module for VAULT.7 and SUGAR.LAB, <span class="mono">refundRound(roundId)</span> on Crash and Roulette, <span class="mono">cancelPick(betId)</span> on Mines.</p>
+          <p>You can re-derive a Dice or Plinko outcome in the browser on the <a href="/fair" data-link>Provably Fair</a> page. Slots, Mines and the round games settle inside their own module contracts; their receipts are all on the explorer, but re-deriving them in the browser is not wired into that page yet.</p>
+
+          <h2 id="vault">Vault &amp; modules</h2>
+          <p>The casino is deliberately split in two. <span class="mono">CasinoVault</span> is the permanent part: it holds the entire bankroll, owns the seed pool and the risk limits, keeps the registry of games and pays every claim. Each game is a separate contract registered in that registry, so adding or fixing a game means deploying a module · never migrating the bankroll or changing the address players trust.</p>
+          <p><b style="color:var(--fg)">What a game can and cannot do.</b> Modules hold no money and cannot move any: they compute results, and the Vault decides what gets paid. Every payout is clamped three times · by the game's own budget (currently 5 STT per game), by the per-bet exposure cap, and by what the pool can actually pay, so a broken or hostile module can never cost the house more than that game's budget. Only the owner can register a module; an unregistered contract asking the Vault for money reverts.</p>
+          <p><b style="color:var(--fg)">Stop button.</b> Any single game can be switched off instantly, and the whole casino can be paused, at every entry point. Bets already placed are never frozen by it · they still settle or refund.</p>
+          <p>This is not a diagram: six of the seven modules were replaced on the running chain in July 2026 without touching the Vault, the bankroll or the addresses above.</p>
 
           <h2 id="poker">Poker</h2>
-          <p>Cash tables run 2–9 handed no-limit hold'em. Your table buy-in comes from your PokerRoom balance; every action (bet, call, raise, fold) is an on-chain transaction, and pots settle in the contract.</p>
-          <p><b style="color:var(--fg)">Cards you can trust:</b> the deck is encrypted and shuffled by the players themselves (mental poker). Each shuffle and each card reveal carries a zero-knowledge proof verified against BN254 · neither other players, nor the coordinator bot, nor the house can see your hole cards before showdown.</p>
-          <p><b style="color:var(--fg)">Rake</b> is configured per table (hard ceiling 10% of the pot) and capped per hand; the exact rake of each table is shown in the lobby. No flop · no drop.</p>
+          <p>Cash tables run 2, 6 and 9 handed no-limit hold'em, with blinds from 0.01/0.02 up to 1/2 STT. Your table buy-in comes from your PokerRoom balance; every action (bet, call, raise, fold) is an on-chain transaction of roughly 0.001 STT in gas, and pots settle in the contract.</p>
+          <p><b style="color:var(--fg)">Cards you can trust:</b> the deck is ElGamal-encrypted under the table's aggregate key and shuffled by the players themselves (mental poker on BN254). Each shuffle carries a Wikström zero-knowledge proof that every other client verifies before it will hand over a decryption share, and the contract itself verifies each player's key proof, each Chaum–Pedersen decryption share and that those shares decrypt to exactly the card shown. Neither other players, nor the coordinator bot, nor the house can see your hole cards before showdown. The full protocol runs live in the <a href="/poker/zk-lab">ZK Lab</a>.</p>
+          <p><b style="color:var(--fg)">Rake</b> · 10% of the pot on the live cash tables, with a per-hand cap set per table; the contract's own ceiling is 10% and the exact figure for each table is shown in the lobby. No flop, no drop, and zero rake on tournament tables.</p>
+          <p><b style="color:var(--fg)">If a tab dies mid-hand</b> the protocol settles it on-chain rather than stalling: the coordinator files an accusation naming the missing decryption share, the player's own client can answer it within a rescue window (and doing so also delivers the share), and only an accusation nobody answered forfeits that player's committed chips · pro-rata to the other players in the hand, never to the house.</p>
 
           <h2 id="tournaments">Tournaments</h2>
-          <p>Anyone can host a tournament. Set the buy-in, blind schedule and seats; players register (with host approval if you want a curated field). Prizes pay out from the pool automatically at the final table.</p>
-          <p><b style="color:var(--fg)">Host reward</b> · the creator can take a cut of the pool, capped at 10% (set at creation, visible to everyone before registering).<br>
-             <b style="color:var(--fg)">Sponsored prizes</b> · anyone can add STT to a tournament's prize pool; sponsored deposits carry a 10% platform fee.</p>
+          <p>Anyone can host a tournament: up to 45 players, 2 to 9 per table. You set the buy-in, the entry fee, the blind schedule (or a custom level structure) and the payout split, which must add up to 100%. Registration can require host approval if you want a curated field, and a pending entry is escrowed and withdrawable until it is approved.</p>
+          <p><b style="color:var(--fg)">Host reward</b> · the creator can take a cut of the pool, capped at 10% and only on buy-in events. It is set at creation and visible to everyone before they register; prizes are computed from the pool net of it, so the payout split always describes 100% of what the players compete for.<br>
+             <b style="color:var(--fg)">Sponsored prizes</b> · anyone can add STT to a tournament's pool. 90% seeds the prizes and 10% is the platform fee; if the event never runs, a cancel refunds the sponsorship in full and reverses the fee.</p>
+          <p>Prizes are paid into PokerRoom balances automatically as players bust, so there is nothing to collect at the end.</p>
 
           <h2 id="profile">Profile</h2>
-          <p>One profile for casino and poker, stored on-chain: your nickname lives in the PlayerProfile contract and your avatar image in AvatarStore (yes, the actual image bytes are on-chain). Set both from the profile drawer · they show up at poker tables, in the lobby and on the leaderboard.</p>
+          <p>One profile for casino and poker, stored on-chain: your nickname lives in the PlayerProfile contract and your avatar image in AvatarStore (yes, the actual image bytes are on-chain). Set both from the profile drawer · they show up at poker tables and in the lobby's win feeds.</p>
 
           <h2 id="contracts">Contracts</h2>
-          <p>Somnia testnet (chain id 50312). All addresses are public and verified:</p>
-          <div style="display:flex;flex-direction:column;gap:8px;margin:14px 0 0;max-width:680px">
-            <div class="chip-row" data-r-wrap-m><span class="l">CASINO</span><span class="a" data-sl-contract="casino">0x01D31a1aD1D82F0409dD1d5a7680065F71a3dbB3</span></div>
-            <div class="chip-row" data-r-wrap-m><span class="l">POKERROOM</span><span class="a">0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24</span></div>
-            <div class="chip-row" data-r-wrap-m><span class="l">ZK TABLE DEALER</span><span class="a">0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8</span></div>
-            <div class="chip-row" data-r-wrap-m><span class="l">TOURNAMENTS</span><span class="a">0xf2d3785645985618b866594cE6e924Ae35608948</span></div>
-            <div class="chip-row" data-r-wrap-m><span class="l">PLAYER PROFILE</span><span class="a">0x7364E1ED8a07b4659c059fa66D346c42907C3F14</span></div>
-            <div class="chip-row" data-r-wrap-m><span class="l">AVATAR STORE</span><span class="a">0x20c39988b480485aD2a9715c32Ff1866Ea890Ec4</span></div>
+          <p>Somnia testnet (chain id 50312). Every address below is public and links to the explorer. The Solidity is public too, in the <a href="https://github.com/pSJLq/ShinyLuck" target="_blank" rel="noopener">GitHub repository</a> · we have not submitted the sources to Shannon Explorer yet, so the explorer shows bytecode rather than code.</p>
+          <div class="grp">Casino · core</div>
+          <div style="display:flex;flex-direction:column;gap:8px;max-width:680px">
+            <div class="chip-row" data-r-wrap-m><span class="l">CASINO VAULT</span><a class="a" href="https://shannon-explorer.somnia.network/address/0x6497D80cCd713F0BD4d8B22CE96Eae0F92EC7Cca" target="_blank" rel="noopener">0x6497D80cCd713F0BD4d8B22CE96Eae0F92EC7Cca</a></div>
+            <div class="chip-row" data-r-wrap-m><span class="l">SLOT LOYALTY</span><a class="a" href="https://shannon-explorer.somnia.network/address/0xDc75211541dF47D5023ae74A873194ad5296c22a" target="_blank" rel="noopener">0xDc75211541dF47D5023ae74A873194ad5296c22a</a></div>
           </div>
-          <p style="margin:16px 0 0;font:400 11.5px var(--sans);color:var(--fg-ghost)">Testnet deployment · STT carries no monetary value. 18+ · play responsibly.</p>
+          <div class="grp">Casino · game modules</div>
+          <div style="display:flex;flex-direction:column;gap:8px;max-width:680px">
+            <div class="chip-row" data-r-wrap-m><span class="l">DICE</span><a class="a" href="https://shannon-explorer.somnia.network/address/0x531b7BB7076Bb7181f374A5D4E0CEc7a57CBa66B" target="_blank" rel="noopener">0x531b7BB7076Bb7181f374A5D4E0CEc7a57CBa66B</a></div>
+            <div class="chip-row" data-r-wrap-m><span class="l">CRASH</span><a class="a" href="https://shannon-explorer.somnia.network/address/0xb96Fb6e3C6fb82acB448e53a3cb59e09f2B0ABD3" target="_blank" rel="noopener">0xb96Fb6e3C6fb82acB448e53a3cb59e09f2B0ABD3</a></div>
+            <div class="chip-row" data-r-wrap-m><span class="l">VAULT.7</span><a class="a" href="https://shannon-explorer.somnia.network/address/0xEB0221E338ba0b054571a00282f875f729E69A6A" target="_blank" rel="noopener">0xEB0221E338ba0b054571a00282f875f729E69A6A</a></div>
+            <div class="chip-row" data-r-wrap-m><span class="l">MINES</span><a class="a" href="https://shannon-explorer.somnia.network/address/0x3B958cFfe3b282908BdD85E2f8cEAf94CBcc87E8" target="_blank" rel="noopener">0x3B958cFfe3b282908BdD85E2f8cEAf94CBcc87E8</a></div>
+            <div class="chip-row" data-r-wrap-m><span class="l">PLINKO</span><a class="a" href="https://shannon-explorer.somnia.network/address/0x47026C7FF5393BB962f26179FA89E5498F2b29A6" target="_blank" rel="noopener">0x47026C7FF5393BB962f26179FA89E5498F2b29A6</a></div>
+            <div class="chip-row" data-r-wrap-m><span class="l">ROULETTE</span><a class="a" href="https://shannon-explorer.somnia.network/address/0xEA30b4c708A780A600D8dE792ae0D1F0D1ab37DF" target="_blank" rel="noopener">0xEA30b4c708A780A600D8dE792ae0D1F0D1ab37DF</a></div>
+            <div class="chip-row" data-r-wrap-m><span class="l">SUGAR.LAB</span><a class="a" href="https://shannon-explorer.somnia.network/address/0x37d984410718BA70066aE9A897C6DfeC57049dC4" target="_blank" rel="noopener">0x37d984410718BA70066aE9A897C6DfeC57049dC4</a></div>
+          </div>
+          <div class="grp">Poker</div>
+          <div style="display:flex;flex-direction:column;gap:8px;max-width:680px">
+            <div class="chip-row" data-r-wrap-m><span class="l">POKER ROOM</span><a class="a" href="https://shannon-explorer.somnia.network/address/0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24" target="_blank" rel="noopener">0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24</a></div>
+            <div class="chip-row" data-r-wrap-m><span class="l">ZK TABLE DEALER</span><a class="a" href="https://shannon-explorer.somnia.network/address/0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8" target="_blank" rel="noopener">0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8</a></div>
+            <div class="chip-row" data-r-wrap-m><span class="l">TOURNAMENTS</span><a class="a" href="https://shannon-explorer.somnia.network/address/0xf2d3785645985618b866594cE6e924Ae35608948" target="_blank" rel="noopener">0xf2d3785645985618b866594cE6e924Ae35608948</a></div>
+            <div class="chip-row" data-r-wrap-m><span class="l">PLAYER PROFILE</span><a class="a" href="https://shannon-explorer.somnia.network/address/0x7364E1ED8a07b4659c059fa66D346c42907C3F14" target="_blank" rel="noopener">0x7364E1ED8a07b4659c059fa66D346c42907C3F14</a></div>
+            <div class="chip-row" data-r-wrap-m><span class="l">AVATAR STORE</span><a class="a" href="https://shannon-explorer.somnia.network/address/0x20c39988b480485aD2a9715c32Ff1866Ea890Ec4" target="_blank" rel="noopener">0x20c39988b480485aD2a9715c32Ff1866Ea890Ec4</a></div>
+            <div class="chip-row" data-r-wrap-m><span class="l">ZK VERIFIER · LAB</span><a class="a" href="https://shannon-explorer.somnia.network/address/0x292Ef0e15fC62613B00c55b0eEAC38279Efdb67D" target="_blank" rel="noopener">0x292Ef0e15fC62613B00c55b0eEAC38279Efdb67D</a></div>
+          </div>
+          <p style="margin:16px 0 0;font:400 11.5px var(--sans);color:var(--fg-ghost)">Earlier casino deployments stay on-chain and keep paying out anything they still owe; the profile drawer sweeps them for you. Not audited by a third party yet. Testnet deployment · STT carries no monetary value. 18+ · play responsibly.</p>
         </article>
       </div>
     </section>

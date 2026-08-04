@@ -31,7 +31,6 @@ const RU = {
   "Profile": "Профиль",
   "Settings": "Настройки",
   "Docs": "Документация",
-  "Leaderboard": "Лидеры",
   "Provably Fair": "Честная игра",
   "Provably fair": "Честная игра",
   "Contracts": "Контракты",

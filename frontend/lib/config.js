@@ -23,9 +23,11 @@ export const CONFIG = {
     parse: "12875401142070969085",
     hm:    "11928475610394857261",
   },
-  // All historical casino deployments (oldest → newest). Aggregated by
-  // livedata.js / account.js / leaderboard.js so "lifetime" stats survive
-  // every redeploy. Auto-rotated here on each deploy - don't edit by hand.
+  // All historical casino deployments (oldest → newest), INCLUDING `casino`
+  // above: that is the frozen v14 monolith, not the live casino (which is the
+  // v15 CasinoVault in config-v15.js). Aggregated by livedata.js / wins.js /
+  // profile.js so "lifetime" stats and unclaimed balances survive every
+  // redeploy. Auto-rotated here on each deploy - don't edit by hand.
   historicalCasinos: [
     { address: "0x0d397E36215Fb534F0dE4E279f505dEC3F63E4B6", deploymentBlock: 385550223 },
     { address: "0x46d37cd00F1eB308eb8a7eE864BC73774A029311", deploymentBlock: 388292876 },

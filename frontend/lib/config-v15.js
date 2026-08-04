@@ -85,4 +85,8 @@ export const CONFIG_V15 = {
     }
   ]
 };
+// partials.js is a classic script and cannot import this module, but it needs
+// the Vault address for the footer's Contracts column. Publish it so the shell
+// uses the deployed value instead of its hard-coded fallback.
+if (typeof window !== "undefined") window.SL_V15 = CONFIG_V15;
 export default CONFIG_V15;
