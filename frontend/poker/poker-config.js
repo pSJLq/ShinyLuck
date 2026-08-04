@@ -9,7 +9,7 @@ export const POKER_CONFIG = {
   playerProfile: "0x7364E1ED8a07b4659c059fa66D346c42907C3F14", // on-chain nicknames (PlayerProfile.sol) · filled on deploy
   avatarStore: "0x20c39988b480485aD2a9715c32Ff1866Ea890Ec4", // on-chain uploaded avatars (AvatarStore.sol)
   zkDealerV2: "0x292Ef0e15fC62613B00c55b0eEAC38279Efdb67D", // zkShuffle v2 on-chain verifier (ZkDealerV2.sol) · powers the zk-lab page
-  zkTableDealer: "0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8", // v2 live card layer implementing IPokerDealer (ZkTableDealer.sol)
+  zkTableDealer: "0xD3a0c2A052D72A26342AA14cf0Fd2cB70B7ceA63", // v2 live card layer implementing IPokerDealer (ZkTableDealer.sol)
   // "zk" = the room's dealer is ZkTableDealer (mental poker; cards decrypted in
   // the player's browser). "v1" = commit-reveal. Written by the deploy script.
   cardLayer: "zk",

@@ -13,11 +13,12 @@
   "cardLayer": "zk",
   "addresses": {
     "pokerRoom": "0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24",
-    "zkTableDealer": "0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8",
+    "zkTableDealer": "0xD3a0c2A052D72A26342AA14cf0Fd2cB70B7ceA63",
     "pokerTournament": "0xf2d3785645985618b866594cE6e924Ae35608948",
     "playerProfile": "0x7364E1ED8a07b4659c059fa66D346c42907C3F14",
     "avatarStore": "0x20c39988b480485aD2a9715c32Ff1866Ea890Ec4",
-    "pokerTournamentOld": "0x9809515F13D493a67CffEF72738601e037b8ce6E"
+    "pokerTournamentOld": "0x9809515F13D493a67CffEF72738601e037b8ce6E",
+    "zkTableDealerPrevious": "0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8"
   },
   "v1": {
     "pokerRoom": "0x7E1387FCE14522B981C07bca921e857CfeD636e3",

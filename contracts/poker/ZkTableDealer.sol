@@ -21,6 +21,15 @@ interface IPokerRoomSeatView {
     function getSeatHand(uint256 tableId, uint8 seat) external view returns (SeatHand memory);
 }
 
+/// @dev PokerRoom's permissionless settle entry point. The dealer calls it at
+///      the end of the reveal that completes a showdown, so the pot moves in
+///      that same transaction instead of two more blocks later. Being
+///      permissionless is the whole reason this is safe: the call grants this
+///      contract nothing that any address could not do already.
+interface IPokerRoomSettle {
+    function resolveShowdown(uint256 tableId) external;
+}
+
 /// @title ZkTableDealer — the LIVE zkShuffle v2 card layer (IPokerDealer).
 /// @notice A drop-in dealer for PokerRoom where cards are NOT derived from a
 ///         seed a dealer knows (v1) but decrypted from a mentally-shuffled,
@@ -287,6 +296,9 @@ contract ZkTableDealer is IPokerDealer {
         deal.board[boardSlot] = claimedCard;
         deal.boardCount = boardSlot + 1;
         emit BoardRevealed(dealId, deal.boardCount);
+        // An all-in runout can reveal hole cards before the board finishes, so
+        // the completing card may be a BOARD card. Never assume the order.
+        _finishShowdown(dealId, deal);
     }
 
     /// Reveal a seat's two hole cards at showdown (now that seat's own share is
@@ -315,13 +327,51 @@ contract ZkTableDealer is IPokerDealer {
         _hole[dealId][seatIndex] = cards;
         _holeSet[dealId][seatIndex] = true;
         emit HoleRevealed(dealId, seatIndex);
+        _finishShowdown(dealId, deal);
     }
 
     /// Mark the hand ready to settle once the board is complete and every seat
     /// the room needs has been revealed (coordinator asserts after posting all;
     /// the room independently re-checks every card it reads is 0..51).
+    /// @dev Kept as the fallback for {_finishShowdown}: if the auto-settle below
+    ///      ever declines (out of gas, a room that reverted), the coordinator
+    ///      still drives the hand home exactly as it did before.
     function markShowdownReady(uint256 dealId) external onlyCoordinator {
         _deal[dealId].showdownReady = true;
+    }
+
+    /// @dev Gas kept back so the reveal that triggered the settle can always
+    ///      finish and record its cards, even if the settle itself runs out.
+    uint256 private constant SETTLE_GAS_KEEP = 150_000;
+    /// @dev Below this there is no point trying — leave it to the coordinator.
+    uint256 private constant SETTLE_GAS_MIN = 700_000;
+
+    /// @dev A showdown is complete the moment the board is out and every seat
+    ///      the room STILL counts as in-hand has its cards on chain. Deciding
+    ///      that here, from the room's own seat state, is what lets the last
+    ///      reveal end the hand by itself: the coordinator asserts nothing, so
+    ///      nothing new has to be trusted — this is strictly less trusting than
+    ///      the coordinator-driven `markShowdownReady` it replaces. Folded seats
+    ///      are skipped (`inHand` is false), so their cards stay secret forever,
+    ///      and all-in seats keep `inHand`, so a runout showdown is unaffected.
+    ///      The pot then moves in this same transaction, which is what removes
+    ///      two block confirmations from the tail of every showdown.
+    function _finishShowdown(uint256 dealId, Deal storage deal) private {
+        if (deal.showdownReady || deal.boardCount != 5) return;
+        uint8[] storage seats = _seats[dealId];
+        for (uint256 i = 0; i < seats.length; i++) {
+            uint8 seat = seats[i];
+            if (_holeSet[dealId][seat]) continue;
+            if (IPokerRoomSeatView(room).getSeatHand(deal.tableId, seat).inHand) return; // still owed
+        }
+        deal.showdownReady = true;
+        // Settling is best-effort by design. A revert here must never undo a
+        // valid, proven reveal, so it is swallowed and bounded by an explicit
+        // gas budget; the coordinator's own resolveShowdown remains the path
+        // that guarantees the hand ends.
+        uint256 g = gasleft();
+        if (g < SETTLE_GAS_MIN) return;
+        try IPokerRoomSettle(room).resolveShowdown{gas: g - SETTLE_GAS_KEEP}(deal.tableId) {} catch {}
     }
 
     // ---- IPokerDealer views -------------------------------------------------

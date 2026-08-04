@@ -1119,16 +1119,34 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
     let revealedNow = 0;
     if (readyParts.length) {
       try {
-        await sendAll(readyParts.map((p) => () => {
+        const holeArgs = readyParts.map((p) => {
           const [i0, i1] = holeIdxsOf(p, sess.k);
           const c0 = decryptCard(sess, i0), c1 = decryptCard(sess, i1);
           const s0 = contractShares(sess, i0), s1 = contractShares(sess, i1);
           const ct0 = sess.deck[i0], ct1 = sess.deck[i1];
-          return send(() => zkd.revealHoleCards(
+          return [
             sess.dealId, p, sess.seats[p], [c0, c1],
             [cPt(ct0.A), cPt(ct0.B), cPt(ct1.A), cPt(ct1.B)],
             [...s0.d, ...s1.d], [...s0.R1, ...s1.R1], [...s0.R2, ...s1.R2], [...s0.s, ...s1.s],
-          )).then(() => { sess.holesRevealed.add(p); revealedNow++; });
+          ];
+        });
+        // Headroom for the settle the LAST reveal now performs in-transaction.
+        // In a multiway showdown the reveals go out together, so none of them
+        // can be estimated against a state where it is the last one — the
+        // estimate would miss the settle entirely, the dealer's gas check would
+        // decline it, and the tail would quietly fall back to the slow path on
+        // exactly the hands that have the most players waiting.
+        let holeOverrides = {};
+        if (opts.concurrentTx && holeArgs.length > 1) {
+          try {
+            const est = await zkd.revealHoleCards.estimateGas(...holeArgs[0]);
+            holeOverrides = { gasLimit: (est * 12n) / 10n + BigInt(opts.settleGasHeadroom ?? 1_500_000) };
+          } catch (_) { /* fall back to the node's own estimate */ }
+        }
+        await sendAll(holeArgs.map((a, i) => () => {
+          const p = readyParts[i];
+          return send(() => zkd.revealHoleCards(...a, holeOverrides))
+            .then(() => { sess.holesRevealed.add(p); revealedNow++; });
         }));
       } catch (e) {
         // same resync as the board path: a reveal that LANDED but whose
@@ -1152,12 +1170,24 @@ async function tickZkTable(room, zkd, state, tableId, opts = {}) {
 
     const allRevealed = liveParts.every((p) => sess.holesRevealed.has(p));
     if (allRevealed) {
+      // The reveal that COMPLETES a showdown now flips readiness and pays the
+      // pot inside its own transaction (ZkTableDealer._finishShowdown), which
+      // is what took two block confirmations off the tail. So the two calls
+      // below are the FALLBACK, not the normal path: ask the chain rather than
+      // assume, because a settle that declined (gas, a reverting room) — or an
+      // older dealer contract entirely — must still be driven home exactly as
+      // it was before.
+      if (!sess.markedReady && (await zkd.isShowdownReady(sess.dealId))) {
+        sess.markedReady = true;
+        sess.showdownAt = 0; // the pot is already moving; no display beat owed
+      }
       if (!sess.markedReady) {
         await send(() => zkd.markShowdownReady(sess.dealId));
         sess.markedReady = true;
         sess.showdownAt = now;
         return "showdown-ready";
       }
+      if (!(await room.getHand(tableId)).inProgress) return "settled";
       // Short beat only: the UI announces the winner CLIENT-side the moment the
       // reveals land and holds its own banner through settle, so a long
       // "display pause" here just kept everyone staring at a finished hand
