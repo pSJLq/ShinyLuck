@@ -997,36 +997,63 @@ function SngTab({
   }, msg));
 }
 
-// LePoker-style blind schedules. Each preset = start stack + per-level rows
-// [smallBlind, bigBlind, ante] at a common per-level duration.
-const MK = (mins, rows) => rows.map(([sb, bb, ante]) => ({
-  sb,
-  bb,
-  ante,
-  durationSecs: mins * 60
-}));
-// Deep enough that no allowed field (up to 45 players) can outlast the final
-// level: the last blinds dwarf the total chips in play. Contract caps custom
-// structures at 40 levels.
+// ONE LADDER, THREE WAYS IN.
+// This is the standard tournament progression — blinds up about 1.5x a level,
+// doubling every second or third — the same shape the WSOP structure sheets,
+// live card rooms and online MTTs all use. A fast structure is NOT a different
+// ladder: it is a shorter level and a shallower entry point. That is exactly
+// how a turbo differs from a regular event everywhere else, and getting it
+// wrong is what made our "Standard" a hyper-turbo by every other name: three
+// minutes a level is about three hands here, against the ten-plus a regular
+// event gives you, and event #23 reached five big blinds in forty-two minutes.
+const LADDER = [[10, 20, 0], [15, 30, 0], [20, 40, 0], [25, 50, 0], [30, 60, 8], [40, 80, 10], [50, 100, 12], [60, 120, 15], [75, 150, 20], [100, 200, 25], [125, 250, 30], [150, 300, 40], [200, 400, 50], [250, 500, 60], [300, 600, 75], [400, 800, 100], [500, 1000, 125], [600, 1200, 150], [800, 1600, 200], [1000, 2000, 250], [1200, 2400, 300], [1500, 3000, 400], [2000, 4000, 500], [2500, 5000, 600], [3000, 6000, 750], [4000, 8000, 1000], [5000, 10000, 1250], [6000, 12000, 1500], [8000, 16000, 2000], [10000, 20000, 2500]];
+/// A preset is a slice of the ladder from `fromBB` onward at a fixed level
+/// length. Antes wait for the first four levels, as they do everywhere else —
+/// they exist to force action once the blinds are worth stealing, not before.
+const MK = (mins, fromBB) => {
+  const start = LADDER.findIndex(([, bb]) => bb === fromBB);
+  return LADDER.slice(start).map(([sb, bb, ante], i) => ({
+    sb,
+    bb,
+    ante: i < 4 ? 0 : ante,
+    durationSecs: mins * 60
+  }));
+};
+/// Minutes until a starting stack is worth ten big blinds — the point where an
+/// event stops being poker and becomes a shoving contest. The single most
+/// useful number a host can see BEFORE creating one.
+const shoveAt = (levels, stack) => {
+  let t = 0;
+  for (const l of levels) {
+    t += l.durationSecs;
+    if (stack / l.bb <= 10) break;
+  }
+  return Math.round(t / 60);
+};
+// Same 10,000 chips in every preset; the speed comes from the level length and
+// how deep you start, never from a steeper ladder. Contract caps custom
+// structures at 40 levels, and its own blind cap stops anything running away.
 const STRUCTURES = {
-  slow: {
-    label: "Slow",
-    stack: 2000,
-    mins: 5,
-    levels: MK(5, [[10, 20, 2], [20, 40, 4], [30, 60, 7], [40, 80, 9], [50, 100, 12], [60, 120, 14], [80, 160, 19], [100, 200, 24], [125, 250, 30], [150, 300, 36], [175, 350, 42], [200, 400, 48], [250, 500, 60], [300, 600, 72], [400, 800, 96], [500, 1000, 120], [600, 1200, 144], [800, 1600, 192], [1000, 2000, 240], [1250, 2500, 300], [1500, 3000, 360], [2000, 4000, 480], [2500, 5000, 600], [3000, 6000, 720]])
+  regular: {
+    label: "Regular",
+    stack: 10000,
+    mins: 8,
+    levels: MK(8, 50)
   },
-  standard: {
-    label: "Standard",
-    stack: 5000,
-    mins: 3,
-    levels: MK(3, [[25, 50, 6], [30, 60, 7], [40, 80, 9], [50, 100, 12], [60, 120, 14], [80, 160, 19], [90, 180, 21], [100, 200, 24], [125, 250, 30], [150, 300, 36], [200, 400, 48], [250, 500, 60], [300, 600, 72], [400, 800, 96], [500, 1000, 120], [600, 1200, 144], [800, 1600, 192], [1000, 2000, 240], [1250, 2500, 300], [1500, 3000, 360], [2000, 4000, 480], [2500, 5000, 600], [3000, 6000, 720], [4000, 8000, 960]])
-  },
+  // 200 BB
   turbo: {
     label: "Turbo",
     stack: 10000,
-    mins: 2,
-    levels: MK(2, [[50, 100, 12], [60, 120, 14], [80, 160, 19], [100, 200, 24], [125, 250, 30], [150, 300, 36], [200, 400, 48], [250, 500, 60], [300, 600, 72], [400, 800, 96], [500, 1000, 120], [600, 1200, 144], [800, 1600, 192], [1000, 2000, 240], [1250, 2500, 300], [1500, 3000, 360], [2000, 4000, 480], [2500, 5000, 600], [3000, 6000, 720], [4000, 8000, 960], [5000, 10000, 1200], [6000, 12000, 1440]])
-  }
+    mins: 5,
+    levels: MK(5, 100)
+  },
+  // 100 BB
+  hyper: {
+    label: "Hyper",
+    stack: 10000,
+    mins: 3,
+    levels: MK(3, 200)
+  } //  50 BB
 };
 
 // Blind-structure viewer + editor (LePoker-style level table).
@@ -1190,9 +1217,9 @@ function CreateTournamentModal({
     sponsor: "1",
     maxPlayers: "6",
     seatsPerTable: "9",
-    startStack: String(STRUCTURES.standard.stack),
-    struct: "standard",
-    levels: STRUCTURES.standard.levels,
+    startStack: String(STRUCTURES.regular.stack),
+    struct: "regular",
+    levels: STRUCTURES.regular.levels,
     actionSecs: "30",
     schedule: "open",
     startAt: "",
@@ -1354,7 +1381,7 @@ function CreateTournamentModal({
     style: {
       marginTop: 6
     }
-  }, ["slow", "standard", "turbo"].map(k => /*#__PURE__*/React.createElement("button", {
+  }, ["regular", "turbo", "hyper"].map(k => /*#__PURE__*/React.createElement("button", {
     key: k,
     type: "button",
     className: f.struct === k ? "on" : "",
@@ -1386,7 +1413,7 @@ function CreateTournamentModal({
   }, f.levels.length, " levels \xB7 start ", f.levels[0] ? f.levels[0].sb + "/" + f.levels[0].bb : "-", " \xB7 ", Math.round((f.levels[0]?.durationSecs || 0) / 60), " min/level \xB7 ", (() => {
     const bb = f.levels[0] ? Number(f.levels[0].bb) : 0,
       st = parseInt(f.startStack || "0", 10);
-    return bb > 0 && st > 0 ? Math.round(st / bb) + " BB deep" : "";
+    return bb > 0 && st > 0 ? `${Math.round(st / bb)} BB deep · ~${shoveAt(f.levels, st)} min to 10 BB` : "";
   })()), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "btn-sm",
