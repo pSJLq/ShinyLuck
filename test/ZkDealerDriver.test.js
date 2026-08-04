@@ -83,8 +83,8 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     zkDealer.init({ zkModule: zk, bn254 });
   });
 
-  async function setup() {
-    const [owner, coordinator, alice, bob] = await ethers.getSigners();
+  async function setup(nSeats = 2) {
+    const [owner, coordinator, alice, bob, carol] = await ethers.getSigners();
     const Room = await ethers.getContractFactory("PokerRoom");
     const room = await Room.deploy(owner.address);
     const Zkd = await ethers.getContractFactory("ZkTableDealer");
@@ -92,20 +92,21 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     await room.connect(owner).setDealer(await zkd.getAddress());
     await room.connect(owner).setDealerOperator(coordinator.address);
     await room.connect(owner).createTable({
-      maxSeats: 2, smallBlind: E(1), bigBlind: E(2), ante: 0,
+      maxSeats: nSeats, smallBlind: E(1), bigBlind: E(2), ante: 0,
       minBuyIn: E(40), maxBuyIn: E(200), rakeBps: 0, rakeCap: 0, actionTimeout: 300, active: true,
     });
-    for (const [p, seat] of [[alice, 0], [bob, 1]]) {
-      await room.connect(p).deposit({ value: E(100) });
-      await room.connect(p).sitDown(0, seat, E(100));
+    const players = [alice, bob, carol].slice(0, nSeats);
+    for (let i = 0; i < players.length; i++) {
+      await room.connect(players[i]).deposit({ value: E(100) });
+      await room.connect(players[i]).sitDown(0, i, E(100));
     }
     const state = zkDealer.newZkState();
     const roomC = room.connect(coordinator);
     const zkdC = zkd.connect(coordinator);
-    const clients = [new SimClient(zk, alice.address), new SimClient(zk, bob.address)];
+    const clients = players.map((p) => new SimClient(zk, p.address));
     const tick = (opts = {}) => zkDealer.tickZkTable(roomC, zkdC, state, 0, { showdownMs: 0, ...opts });
     const stepAll = () => clients.forEach((c) => c.step(state, 0));
-    return { owner, coordinator, alice, bob, room, zkd, roomC, zkdC, state, clients, tick, stepAll };
+    return { owner, coordinator, alice, bob, carol, players, room, zkd, roomC, zkdC, state, clients, tick, stepAll };
   }
 
   /// The NEXT hand's prepareDeal is fired WITHOUT being awaited — it is the
@@ -122,15 +123,36 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
   }
 
   // drive prep phases: keys → shuffle ×k → holeshares → prepare → started
-  async function dealHand(tick, stepAll) {
+  async function dealHand(tick, stepAll, k = 2) {
     expect(await tick()).to.match(/^keys:0/); // session opened
-    stepAll(); // both post keys
+    stepAll(); // everyone posts keys
     expect(await tick()).to.match(/^shuffle:0/);
-    stepAll(); // participant 0 shuffles (only the one whose turn it is acts)
-    stepAll(); // participant 1 shuffles
+    for (let i = 0; i < k; i++) stepAll(); // one shuffle per participant, in turn
     stepAll(); // everyone posts shares for the OTHERS' hole cards
     const started = await tick();
     expect(started).to.equal("started");
+  }
+
+  /// Play the hand out with nobody betting: whoever is to act calls or checks
+  /// (and `foldSeat`, if given, folds the first time it owes anything), while
+  /// the bot's board ticks are serviced as they come up. Returns true if the
+  /// hand reached SHOWDOWN.
+  async function toShowdown(room, players, tick, stepAll, foldSeat = -1) {
+    for (let guard = 0; guard < 60; guard++) {
+      const h = await room.getHand(0);
+      if (!h.inProgress) return false;
+      if (Number(h.street) === 4) return true;
+      const seat = Number(h.actingSeat);
+      const sh = await room.getSeatHand(0, seat);
+      if (sh.inHand && !sh.folded && !sh.allIn) {
+        const owe = h.currentBet > sh.committedStreet;
+        if (seat === foldSeat && owe) await room.connect(players[seat]).act(0, FOLD, 0);
+        else await room.connect(players[seat]).act(0, owe ? CALL : CHECK, 0);
+      }
+      const tag = await tick();
+      if (tag === "board-wait") { stepAll(); await tick(); }
+    }
+    return false;
   }
 
   it("plays a complete checked-down hand: deal → streets → showdown → correct payout", async function () {
@@ -491,16 +513,90 @@ describe("zk coordinator driver — full mental-poker hands through the bot modu
     expect((await room.getSeat(0, 1)).stack).to.equal(E(100));
   });
 
-  it("pre-hand no-show: strike + sit-out, no money moves", async function () {
+  it("pre-hand no-show: one retry first, THEN strike + sit-out, no money moves", async function () {
     const { room, state, clients, tick } = await setup();
     expect(await tick({ keysMs: -1 })).to.match(/^keys:0/); // session opened, deadline already past
     clients[1].step(state, 0); // only bob sends a key; alice never shows
+
+    // A missed keys deadline is NOT immediately a strike. It fires hardest right
+    // after a tournament blind freeze, where no pre-deal exists and every client
+    // is answering a deal it has only just been shown — so the first miss buys
+    // the table one more full window instead of costing a player their seat.
+    expect(await tick({ keysMs: -1 })).to.equal("keys-retry:seat0");
+    expect((await room.getSeat(0, 0)).sittingOut).to.equal(false); // still in
+    expect(state.get(0)).to.equal(undefined); // session dropped, rebuilt next tick
+
+    expect(await tick({ keysMs: -1 })).to.match(/^keys:0/); // fresh window
+    clients[1].step(state, 0);
+    // Still nothing from alice on the second window — now she goes.
     expect(await tick({ keysMs: -1 })).to.equal("strike:keys:seat0");
     expect((await room.getSeat(0, 0)).sittingOut).to.equal(true);
     expect(Number(await room.timeoutStreak(0, 0))).to.equal(1);
     expect((await room.getSeat(0, 0)).stack).to.equal(E(100)); // untouched
     // with one player sat out the table has <2 eligible → idle
     expect(await tick()).to.equal("idle");
+  });
+
+  it("showdown relay: opens the LIVE hands, never early and never a folded one", async function () {
+    const { room, zkd, players, state, clients, tick, stepAll } = await setup(3);
+    await dealHand(tick, stepAll, 3);
+
+    // NOTHING before showdown. A player's own share for their own card is the
+    // one thing they never release until the hand is at showdown, so no full
+    // share set can exist yet — assert the relay agrees.
+    for (const c of clients) {
+      expect(zkDealer.zkTask(state, 0, c.addr).theirHoles, "leaked before showdown").to.equal(undefined);
+    }
+
+    const foldSeat = 0;
+    expect(await toShowdown(room, players, tick, stepAll, foldSeat)).to.equal(true);
+    expect(await tick()).to.equal("showdown-collect");
+    stepAll(); // live seats release their own-hole shares
+
+    const dealId = (await room.getHand(0)).dealId;
+    const live = [1, 2].filter((s) => s !== foldSeat);
+
+    // Every live player can now open every OTHER live hand — and only those.
+    for (const c of clients) {
+      const task = zkDealer.zkTask(state, 0, c.addr);
+      const mySeat = task.mySeat;
+      if (mySeat === foldSeat) continue; // folded: not owed anyone's cards
+      const seen = Object.keys(task.theirHoles || {}).map(Number).sort();
+      expect(seen, `seat ${mySeat} should see the other live hands`).to.deep.equal(live.filter((s) => s !== mySeat));
+      expect(seen, "a folded hand must never be relayed").to.not.include(foldSeat);
+
+      // and what it hands over decrypts to exactly what the chain publishes
+      const pubkeys = (task.pubkeys || []).map(zkDealer.parsePt);
+      for (const seat of seen) {
+        const cards = task.theirHoles[seat].map((h) => {
+          const ct = zkDealer.parseCt(h.ct);
+          const ds = h.shares.map((s) => {
+            const d = zkDealer.parsePt(s.d);
+            const share = { d, proof: { R1: zkDealer.parsePt(s.proof.R1), R2: zkDealer.parsePt(s.proof.R2), s: BigInt(s.proof.s) } };
+            expect(zk.verifyShare(ct, pubkeys[s.i], share, `SPZK:${dealId}:share:${h.idx}:${s.i}`), "relayed share proof").to.equal(true);
+            return d;
+          });
+          return zk.pointToCard(zk.decryptWithShares(ct, ds, null), zk.deckPoints());
+        });
+        await tick(); // let the on-chain reveal land
+        const onchain = await zkd.holeCards(dealId, seat);
+        expect(cards).to.deep.equal([Number(onchain[0]), Number(onchain[1])]);
+      }
+    }
+  });
+
+  it("a client that answers on the second window keeps its seat", async function () {
+    const { room, state, clients, tick, stepAll } = await setup();
+    expect(await tick({ keysMs: -1 })).to.match(/^keys:0/);
+    clients[1].step(state, 0);
+    expect(await tick({ keysMs: -1 })).to.equal("keys-retry:seat0");
+    // the slow client turns up during the rebuilt window — nobody is struck and
+    // the deal proceeds exactly as if it had never been late
+    expect(await tick()).to.match(/^keys:0/);
+    stepAll();
+    expect(await tick()).to.match(/^shuffle:0/);
+    expect((await room.getSeat(0, 0)).sittingOut).to.equal(false);
+    expect(Number(await room.timeoutStreak(0, 0))).to.equal(0);
   });
 
   it("bot restart mid-hand: session recovers from persisted cts verified against on-chain hashes", async function () {

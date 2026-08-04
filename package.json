@@ -22,7 +22,11 @@
     "dev:hm-cron": "node agent-service/hm-cron.js",
     "dev:all": "concurrently -n FRONTEND,REVEAL,AGENT,HMCRON,DEMO -c blue,green,magenta,red,yellow -k --kill-others-on-fail \"npm:dev:frontend\" \"npm:dev:reveal-bot\" \"npm:dev:agent-service\" \"npm:dev:hm-cron\" \"npm:dev:demo-bot\"",
     "dev:play": "concurrently -n FRONTEND,REVEAL,AGENT,HMCRON -c blue,green,magenta,red -k --kill-others-on-fail \"npm:dev:frontend\" \"npm:dev:reveal-bot\" \"npm:dev:agent-service\" \"npm:dev:hm-cron\"",
-    "play": "node scripts/_supervise.js"
+    "play": "node scripts/_supervise.js",
+    "test:browser": "node test/browser-e2e.mjs",
+    "test:pages": "node test/poker-page-load.smoke.test.mjs",
+    "test:tournament": "node test/browser-e2e-tournament.mjs",
+    "test:mtt": "node test/browser-e2e-mtt.mjs"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
