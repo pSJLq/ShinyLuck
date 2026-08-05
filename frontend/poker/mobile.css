@@ -122,6 +122,22 @@
   .abtn .key { display: none; }
   .lt-toast { bottom: 150px; max-width: 94vw; font-size: 12px; }
 
+  /* ---- cash cards: a list, not a gallery ---------------------------------
+     Each table drew a 132px plan-view felt, so ONE table filled a third of the
+     screen and finding a stake meant scrolling past pictures of tables that
+     all look the same. The felt shrinks to a glance (its job is "how full is
+     it", which the seat dots say), and the numbers that decide where you sit —
+     blinds, seats, pot — come first. */
+  .tcard { margin-bottom: 10px; }
+  .tc-felt { height: 74px; margin: 2px 10px; }
+  .tcard .seatdots { transform: scale(.86); }
+
+  /* ---- the hero panel must not be clipped by the action bar ---- */
+  .herozone .heroinfo { padding-bottom: 7px; }
+
+  /* the house mark bled out from under the pot on a narrow felt */
+  .feltmark { opacity: .5; transform: translate(-50%, -50%) scale(.7); }
+
   /* ---- lobby: rows become wrapped cards ---- */
   /* the .lobby grid's implicit column sizes to the widest item's MIN-CONTENT
      (the tab strip ≈ 530px) and every section stretches to it · clamp the
