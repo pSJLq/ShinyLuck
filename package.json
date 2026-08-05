@@ -26,7 +26,8 @@
     "test:browser": "node test/browser-e2e.mjs",
     "test:pages": "node test/poker-page-load.smoke.test.mjs",
     "test:tournament": "node test/browser-e2e-tournament.mjs",
-    "test:mtt": "node test/browser-e2e-mtt.mjs"
+    "test:mtt": "node test/browser-e2e-mtt.mjs",
+    "test:hostile": "node test/poker-hostile-browser.mjs"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",

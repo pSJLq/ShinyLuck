@@ -122,7 +122,12 @@ export function startWeb(man, idx = 0) {
     const u = new URL(req.url, "http://x");
     if (u.pathname.startsWith("/dealer")) return proxy(req, res, DEALER_PORT, u.pathname.replace(/^\/dealer/, "") + u.search);
     if (u.pathname === "/rpc") return proxy(req, res, CHAIN_PORT, "/");
-    const f = path.join(FRONT, u.pathname === "/" ? "index.html" : u.pathname.slice(1));
+    // SPA routes, as Caddy serves them in production: /poker is the shell page
+    // (index.html) with the poker frame inside it, not a file on disk. Without
+    // this, a test can only ever open the frame's own URL and never the thing
+    // players actually visit.
+    const SPA = ["/poker", "/dice", "/mines", "/plinko", "/crash", "/roulette", "/vault7", "/sugar", "/docs", "/fair", "/zk-lab"];
+    const f = path.join(FRONT, u.pathname === "/" || SPA.includes(u.pathname) ? "index.html" : u.pathname.slice(1));
     if (!f.startsWith(FRONT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end("nf"); }
     let body = fs.readFileSync(f);
     if (u.pathname === "/poker/poker-config.js") {
@@ -228,6 +233,13 @@ export async function felt(p) {
       board: document.querySelectorAll(".board .card").length,
       revealed: document.querySelectorAll(".seatreveal .card").length,
       banner: txt(document.querySelector(".winbanner, .win-banner")),
+      // Who the table SAYS won, on its own — separate from the hand name and
+      // the amount, because that is the part that must never change once said.
+      verdict: txt(document.querySelector(".winbanner .won")),
+      // …and who it POINTS at: the crown/green seat. A player should not have
+      // to read a sentence to find the winner, so the test does not either.
+      crowned: [...document.querySelectorAll(".seat.winner, .heroinfo.winner")]
+        .map((e) => (e.className.includes("heroinfo") ? "hero" : (txt(e.querySelector(".nm")) || "?"))),
       actionbar: [...document.querySelectorAll(".actionbar .abtn")].map((b) => b.textContent.replace(/\s+/g, " ").trim()),
       strip: txt(document.querySelector(".actionbar")),
       pills: [...document.querySelectorAll(".topbar .pill, .topbar .group")].map((e) => e.textContent.replace(/\s+/g, " ").trim()),

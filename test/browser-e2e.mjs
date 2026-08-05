@@ -94,6 +94,21 @@ async function main() {
     if (sd) ok(`showdown on ${sd.t.tag}: ${sd.f.board} board cards + ${sd.f.revealed} opponent cards open`);
     else bad("showdown never put the board and the opponent's cards on screen");
 
+    // THE VERDICT MUST NOT CHANGE ITS MIND.
+    // The table announces a winner the moment the hands open, from the cards it
+    // has already decrypted — seconds before the chain's own settle lands. That
+    // optimistic verdict was computed over the OPPONENTS only (the hero's cards
+    // never travel through the relay), so a player holding a straight was told
+    // the pair across the table had won, and only the chain's reveal corrected
+    // it a couple of seconds later. Announcing the wrong winner of a real pot
+    // is the worst thing this screen can do, so: whatever it says first, it
+    // must still say after the money moves.
+    const firstVerdicts = {};
+    for (const t of tabs) {
+      const f = await felt(t);
+      if (f.verdict) firstVerdicts[t.tag] = f.verdict;
+    }
+
     // …and it must SURVIVE the settle. The bug was that the felt went blank the
     // instant the pot moved: board, opponent's hand and your own cards all gone,
     // leaving a winner banner hanging over nothing.
@@ -101,12 +116,13 @@ async function main() {
     // starts one or two behind the settle, so this watches the dealer's snapshot
     // directly and photographs the felt the moment the pot moves — which is
     // exactly the moment a player is looking at it.
-    let shot = null;
+    let shot = null, after = {};
     const t0 = Date.now();
     while (Date.now() - t0 < 60_000) {
       const s = await snapshotOf(TABLE);
       if (s && s.hand && (!s.hand.inProgress || String(s.hand.handId) !== sdHand)) {
         const [a, b] = await Promise.all([felt(tabs[0]), felt(tabs[1])]);
+        after = { [tabs[0].tag]: a, [tabs[1].tag]: b };
         shot = a.board >= b.board ? a : b;
         break;
       }
@@ -118,6 +134,23 @@ async function main() {
       if (shot.hero >= 2) ok("own cards still on screen after the pot moved"); else bad("own cards vanished at settle");
       if (shot.revealed >= 2) ok("opponent's hand still open after the pot moved"); else bad(`reveals vanished at settle (${shot.revealed})`);
       if (shot.banner) ok(`winner announced: "${shot.banner.slice(0, 60)}"`); else bad("no winner banner");
+
+      // the same verdict, before and after the chain settled it
+      let checked = 0;
+      for (const tag of Object.keys(firstVerdicts)) {
+        const later = after[tag] && after[tag].verdict;
+        if (!later) continue;
+        checked++;
+        if (later === firstVerdicts[tag]) ok(`${tag}: verdict held from reveal to settle ("${later}")`);
+        else bad(`${tag}: the winner CHANGED after settle — said "${firstVerdicts[tag]}", then "${later}"`);
+      }
+      if (!checked) bad("never captured a verdict to compare (the banner names nobody)");
+
+      // …and exactly one seat is pointed at, so the winner is visible without
+      // reading the sentence in the middle of the felt.
+      const crowned = shot.crowned || [];
+      if (crowned.length === 1) ok(`exactly one seat is marked as the winner (${crowned[0]})`);
+      else bad(`${crowned.length} seats marked as winner — the felt does not say who won`);
     }
   }
 
