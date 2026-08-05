@@ -89,7 +89,9 @@
   .hole .card .center-suit svg { width: 22px; height: 22px; }
   /* the hero sits just above the action bar (≈112px tall now), not behind it */
   /* bar = 7+32+6+20+6+48+7 ≈ 126px, plus the safe area — the hero clears it */
-  .herozone { bottom: calc(166px + env(safe-area-inset-bottom)); gap: 4px; }
+  /* the bar measures itself (poker-live-table.jsx) — 166px is only the
+     fallback for the beat before the first measurement lands */
+  .herozone { bottom: calc(var(--sp-barh, 158px) + 8px + env(safe-area-inset-bottom)); gap: 4px; }
   /* …and its own bet sat exactly where its cards are on a narrow felt, so
      the amount you just put in was hidden behind them. Lift the bottom
      seat's chips clear; the other seats have room and keep their place. */

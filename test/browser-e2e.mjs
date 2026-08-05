@@ -37,7 +37,10 @@ async function main() {
 
   step("6  browsers");
   const browser = await loadPlaywright().chromium.launch({ headless: !HEADED });
-  for (let i = 0; i < wallets.length; i++) tabs.push(await openTable(browser, wallets[i], "p" + i, i, TABLE));
+  // MOBILE=1 plays the very same hand on an iPhone profile — same driver,
+  // same assertions, portrait screen.
+  const dev = process.env.MOBILE === "1" ? loadPlaywright().devices["iPhone 13"] : null;
+  for (let i = 0; i < wallets.length; i++) tabs.push(await openTable(browser, wallets[i], "p" + i, i, TABLE, { device: dev }));
   ok("two tabs connected with injected wallets");
 
   step("7  play a hand through the UI");
@@ -108,6 +111,19 @@ async function main() {
       const f = await felt(t);
       if (f.verdict) firstVerdicts[t.tag] = f.verdict;
     }
+    // The reveal is the screen worth photographing on a phone — both hands face
+    // up, the board out, the verdict on screen. It goes AFTER both reads and
+    // never between them: a screenshot costs a few hundred ms per tab, the hold
+    // lasts a couple of seconds, and interleaving them pushed the second tab's
+    // read past the banner and reported it missing twice.
+    // NOT awaited. Every version of this that blocked — before the read, after
+    // the read, after both reads — pushed the settle-watch that follows past the
+    // few seconds the winner banner holds, and the test reported a missing
+    // banner that was on screen the whole time. The picture can be a beat late;
+    // the assertions may not be.
+    if (process.env.MOBILE === "1") {
+      for (const t of tabs) t.page.screenshot({ path: `test/_e2e-shots/mobile-showdown-${t.tag}.png` }).catch(() => {});
+    }
 
     // …and it must SURVIVE the settle. The bug was that the felt went blank the
     // instant the pot moved: board, opponent's hand and your own cards all gone,
@@ -158,7 +174,8 @@ async function main() {
     const fs = await import("node:fs");
     const dir = "test/_e2e-shots";
     fs.mkdirSync(dir, { recursive: true });
-    for (const t of tabs) await t.page.screenshot({ path: `${dir}/cash-${t.tag}.png` });
+    const tag = process.env.MOBILE === "1" ? "mobile" : "cash";
+    for (const t of tabs) await t.page.screenshot({ path: `${dir}/${tag}-${t.tag}.png` });
     console.log(`\nscreenshots → ${dir}/`);
   }
   if (!KEEP) { await browser.close(); webs.forEach((w) => w.close()); }

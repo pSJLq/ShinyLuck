@@ -223,6 +223,40 @@ function LiveTable() {
 
   useEffect(() => { try { localStorage.setItem("sp_theme", theme); } catch (e) {} }, [theme]);
 
+  // WHERE THE ACTION BAR ENDS, THE HERO BEGINS.
+  // On a phone the bar is a different height depending on what it is asking:
+  // taller when it is your turn (slider + four buttons + the clock row),
+  // shorter while you are only pre-selecting. The hero zone used to clear it
+  // with a magic number, so one state clipped the player's own stack and the
+  // other floated the cards up over the pot. Publish the measured height and
+  // let CSS position against the truth.
+  //
+  // Deps are EMPTY on purpose. Keying this on the hand state read `snap` from
+  // the line above its own declaration — a temporal-dead-zone ReferenceError
+  // in the component body, which does not throw a red console line, it just
+  // stops the table from mounting at all (caught by the phone rig: a blank
+  // frame and the boot panel). The bar is found by polling and re-observed if
+  // React swaps it, so nothing has to be listed here.
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    let el = null, ro = null;
+    const write = () => { if (el) root.style.setProperty("--sp-barh", Math.round(el.getBoundingClientRect().height) + "px"); };
+    const attach = () => {
+      const found = document.querySelector(".actionbar");
+      if (found === el) return write();
+      el = found;
+      if (ro) ro.disconnect();
+      if (!el) { root.style.removeProperty("--sp-barh"); ro = null; return; }
+      ro = new ResizeObserver(write);
+      ro.observe(el);
+      write();
+    };
+    attach();
+    const iv = setInterval(attach, 600);
+    return () => { clearInterval(iv); if (ro) ro.disconnect(); root.style.removeProperty("--sp-barh"); };
+  }, []);
+
   // live snapshot poll · the table you're AT polls fast (served from the
   // dealer's HTTP cache, cheap — the bot also rebuilds that cache the moment
   // it reveals a card, so 600ms here is the real reveal→pixels latency).

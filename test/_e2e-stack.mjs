@@ -197,8 +197,11 @@ export async function injectWallet(page, wallet) {
   });
 }
 
-export async function openTable(browser, wallet, tag, idx, tableId) {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+/// `opts.device` opens the same table on a phone profile instead of a desktop
+/// viewport — the portrait layout is a different screen and deserves the same
+/// hand played through it, not a separate half-working driver.
+export async function openTable(browser, wallet, tag, idx, tableId, opts = {}) {
+  const ctx = await browser.newContext(opts.device || { viewport: { width: 1280, height: 900 } });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => console.error(`  [${tag}] page error: ${e.message}`));
   // The zk client reports its own refusals through console.warn, so warnings are

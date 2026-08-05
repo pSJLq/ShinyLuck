@@ -15,6 +15,9 @@ import {
 const TABLE = 3;                       // the 2-seat tier
 const OUT = path.join(REPO, "test", "_shots-mobile");
 fs.mkdirSync(OUT, { recursive: true });
+// Wipe first. A stale frame from a previous run is worse than no frame:
+// this cost a round of chasing a bug that had already been fixed.
+for (const f of fs.readdirSync(OUT)) if (f.endsWith(".png")) fs.unlinkSync(path.join(OUT, f));
 
 async function main() {
   const { man } = await bringUpStack({ origins: 2 });
@@ -42,6 +45,16 @@ async function main() {
   }
   ok("two phones at the table");
 
+  // Whatever the bar offers that is neither a fold nor an all-in — "Call" on
+  // one street is "Check" on the next, and picking only `.call` let a hand die
+  // by timeout before it ever reached a board.
+  const act = async (t) => {
+    const b = t.page.locator(".actionbar .abtn:not(.fold):not(.allin)").first();
+    if (!(await b.count())) return false;
+    await b.click({ timeout: 4000 }).catch(() => {});
+    return true;
+  };
+
   const shot = async (name) => {
     for (const t of tabs) await t.page.screenshot({ path: path.join(OUT, `${name}-${t.tag}.png`) });
     console.log("  ▸ " + name);
@@ -64,22 +77,20 @@ async function main() {
     const t = tabs[Number(s.hand.actingSeat)];
     if (t) {
       await sleep(900);
-      const btn = t.page.locator(".actionbar .abtn.call").first();
-      if (await btn.count()) await btn.click({ timeout: 4000 }).catch(() => {});
+      await act(t);
     }
     await sleep(1200);
   }
   // keep acting until the hand reaches a showdown — the screen with the most
   // going on at once (two hands face up, the board, the pot, the verdict)
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 90; i++) {
     const s2 = await snapshotOf(TABLE);
     if (!s2 || !s2.hand) break;
     if (Number(s2.hand.street) === 4) { await sleep(4000); await shot("showdown"); break; }
     const t = tabs[Number(s2.hand.actingSeat)];
     if (t) {
       await sleep(700);
-      const btn = t.page.locator(".actionbar .abtn.call").first();
-      if (await btn.count()) await btn.click({ timeout: 4000 }).catch(() => {});
+      await act(t);
     }
     await sleep(900);
   }

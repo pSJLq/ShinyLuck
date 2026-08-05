@@ -81,7 +81,7 @@
       sp: typeof window.SP,                       // set by poker-bridge.js (module chain)
       app: [
         typeof window.LobbyApp !== "undefined" ? "lobby" : "",
-        typeof window.TableApp !== "undefined" ? "table" : "",
+        typeof window.LiveTable !== "undefined" ? "table" : "",
         typeof window.TournamentApp !== "undefined" ? "trn" : ""
       ].join("").replace(/^$/, "none"),
       esm: ("noModule" in document.createElement("script")) ? 1 : 0,
