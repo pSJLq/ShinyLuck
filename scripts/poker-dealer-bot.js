@@ -993,6 +993,8 @@ function startCardServer(room, state, zkCtx = {}) {
   // starter-gas faucet bookkeeping: once per address, survives restarts
   const FAUCET = { file: path.join(__dirname, "..", "deployments", "faucet-given.json"), given: new Set(), busy: new Set() };
   try { for (const a of JSON.parse(fs.readFileSync(FAUCET.file, "utf8"))) FAUCET.given.add(a); } catch (_) {}
+  // last 300 browser failure reports (POST /clientlog), newest last
+  const CLIENTLOG = [];
   const LIMITS = {
     // sized for ~10-15 players sharing one NAT IP (a real client ≈ 4 zk rps,
     // ~8 during pre-deal overlap, + ~8 get rps); a flood is 100-1000× that and
@@ -1000,6 +1002,7 @@ function startCardServer(room, state, zkCtx = {}) {
     zk: { burst: 250, rps: 100 }, // POST /zk/* + /holes (protocol traffic)
     chat: { burst: 10, rps: 2 },  // POST /chat (human messages)
     get: { burst: 300, rps: 120 }, // GET snapshot/lobby/history/chat polls
+    log: { burst: 15, rps: 0.2 },  // POST /clientlog (browser failure beacon)
   };
   function clientIp(req) {
     const ra = req.socket.remoteAddress || "";
@@ -1201,6 +1204,57 @@ function startCardServer(room, state, zkCtx = {}) {
       const list = (CHATS.get(t) || []).filter((m) => m.id > since);
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ messages: list }));
+    }
+    // ---- browser failure beacon ------------------------------------------
+    // Players whose poker frame comes up EMPTY have no console we can read and
+    // cannot be asked to retry on demand, so the page reports its own failure
+    // here (see frontend/poker/poker-boot.js). One visit from a broken device
+    // is then enough to name the cause. Kept in memory only — no addresses, no
+    // identifiers, and it never touches game state.
+    if (req.method === "GET" && req.url.startsWith("/clientlog")) {
+      const u = new URL(req.url, "http://x");
+      // Reading the log back is for us, not for the public: the entries carry
+      // other players' user-agents and error text. Set CLIENTLOG_KEY on the box
+      // and the URL needs ?key=… ; unset (dev, tests) it stays open.
+      if (process.env.CLIENTLOG_KEY && u.searchParams.get("key") !== process.env.CLIENTLOG_KEY) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: "forbidden" }));
+      }
+      const n = Math.min(200, Math.max(1, Number(u.searchParams.get("tail") || 50)));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ count: CLIENTLOG.length, entries: CLIENTLOG.slice(-n) }));
+    }
+    if (req.method === "POST" && req.url.startsWith("/clientlog")) {
+      if (!allow(req, "log")) return tooMany(res);
+      let body = "";
+      req.on("data", (c) => { body += c; if (body.length > 8000) req.destroy(); });
+      req.on("end", () => {
+        try {
+          const b = JSON.parse(body || "{}");
+          const clip = (v, n) => (v == null ? "" : String(v).slice(0, n));
+          const e = {
+            at: new Date().toISOString(),
+            kind: clip(b.k, 16),
+            msg: clip(b.m, 400),
+            page: clip(b.p, 200),
+            ua: clip(b.ua, 200),
+            ms: Number(b.t) || 0,
+            where: [clip(b.f, 160), b.l || 0, b.c || 0].join(":"),
+            stack: clip(b.s, 1200),
+            diag: b.d && typeof b.d === "object" ? b.d : {},
+          };
+          CLIENTLOG.push(e);
+          if (CLIENTLOG.length > 300) CLIENTLOG.splice(0, CLIENTLOG.length - 300);
+          const d = e.diag || {};
+          console.log(`[client] ${e.kind} · ${e.msg} · ${e.page} · react=${d.react} dom=${d.dom} sp=${d.sp} app=${d.app} ls=${d.ls} esm=${d.esm}` +
+            `${d.failed ? " failed=" + [].concat(d.failed).join(",") : ""} · ${e.where} · ${e.ua}`);
+          res.writeHead(204).end();
+        } catch (_) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "bad report" }));
+        }
+      });
+      return;
     }
     // Starter-gas faucet (testnet): a brand-new Privy wallet holds zero STT and
     // can't even send its first deposit tx. One small drip per address, only

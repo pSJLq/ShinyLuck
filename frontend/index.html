@@ -362,7 +362,7 @@ initWins().catch((e) => console.warn("[lobby] wins:", e.message));
         const tab = q.get('tab');
         target = '/poker/lobby.html?' + (tab ? 'tab=' + encodeURIComponent(tab) + '&' : '') + 'embed=1';
       }
-      if (f.dataset.target !== target) { f.src = target; f.dataset.target = target; f.style.height = ''; }
+      if (f.dataset.target !== target) { f.src = target; f.dataset.target = target; f.style.height = ''; watchPokerFrame(f, target); }
     }
     if (isGame) {
       const f = document.getElementById('game-frame');
@@ -373,6 +373,48 @@ initWins().catch((e) => console.warn("[lobby] wins:", e.message));
       if (f.dataset.target !== target) { f.src = target; f.dataset.target = target; f.style.height = ''; }
     }
     window.scrollTo(0, 0);
+  }
+
+  /* The poker frame reports its own failures (frontend/poker/poker-boot.js) —
+     but only once its HTML has arrived and run. If the DOCUMENT itself never
+     loads, the player sees an empty poker tab and nobody hears anything at all,
+     which is exactly the blind spot that made the last one so expensive to
+     chase. So the shell watches from outside: if, well after the frame should
+     be up, nothing has mounted AND the frame's own guard never ran, the SHELL
+     files the report. Same origin, so the check is a plain property read. */
+  function watchPokerFrame(f, target, attempt = 1) {
+    setTimeout(() => {
+      if (f.dataset.target !== target) return;          // navigated away since
+      let inner = null, mounted = -1, guard = 'none';
+      try {
+        const w = f.contentWindow, d = f.contentDocument;
+        inner = d ? (d.readyState || '?') : 'no-document';
+        if (w && w.SPBoot) guard = 'ran';               // the frame speaks for itself
+        const root = d && d.getElementById('root');
+        mounted = root ? root.childElementCount : -1;
+      } catch (e) { inner = 'blocked:' + (e && e.name); }
+      if (guard === 'ran' || mounted > 0) return;
+      /* The frame's own guard never ran, so its document never arrived — it
+         cannot retry itself and cannot report. Give it one clean reload before
+         writing it off; a single failed fetch on a phone's network is the most
+         ordinary reason for this, and a reload is what a player would have done
+         if they had known to. */
+      if (attempt === 1) {
+        f.src = target + (target.indexOf('?') >= 0 ? '&' : '?') + '_shellretry=1';
+        watchPokerFrame(f, target, 2);
+        return;
+      }
+      try {
+        const x = new XMLHttpRequest();
+        x.open('POST', '/dealer/clientlog', true);
+        x.setRequestHeader('Content-Type', 'application/json');
+        x.send(JSON.stringify({
+          k: 'frame', m: 'poker frame never came up, even after a reload: ' + target,
+          p: location.pathname + location.search, ua: navigator.userAgent.slice(0, 200), t: attempt * 14000,
+          d: { inner: inner, guard: guard, root: mounted, src: f.getAttribute('src') || '', attempt: attempt, from: 'shell' },
+        }));
+      } catch (e) {}
+    }, 14000);
   }
 
   // capture-phase click routing: route-links switch views with NO reload
