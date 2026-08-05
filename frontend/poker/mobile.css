@@ -112,9 +112,21 @@
   .statstrip { flex-wrap: wrap; gap: 8px 14px; }
   .subbar { flex-wrap: wrap; gap: 8px; padding: 8px 10px; height: auto; }
   .dthead { display: none !important; }
-  .drow, .sngrow { display: flex !important; flex-wrap: wrap; align-items: center;
-    gap: 6px 14px; padding: 12px 10px; }
-  .drow .rowactions, .sngrow .rowactions { width: 100%; justify-content: flex-end; }
+  /* A row is a CARD on a phone, not a wrapped line. The old rule let the six
+     cells reflow wherever they fitted, so "no entries yet" ended up beside the
+     buy-in and the seat count landed under the payout split — the same data,
+     in a different order on every row. Stacked and left-aligned, each row
+     reads top to bottom: who, what it costs, what it pays, what you can do.
+     (`display: flex` also makes the JSX's inline grid-template-columns inert,
+     which is why it does not need !important on six tracks.) */
+  .drow, .sngrow { display: flex !important; flex-direction: column; flex-wrap: nowrap;
+    align-items: stretch; text-align: left; gap: 7px; padding: 14px 12px;
+    border-left: 0; border-bottom: 1px solid var(--line-2); }
+  .drow .buyincell, .drow .prizecell { flex-direction: row; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+  .drow .regcell { text-align: left; }
+  .drow .regcell .u { display: inline; margin-left: 7px; }
+  .drow .rowactions, .sngrow .rowactions { width: 100%; justify-content: flex-start; gap: 8px; }
+  .drow .rowactions .btn-sm { flex: 1; text-align: center; }
   .sngsplit { grid-template-columns: 1fr; }
   .lt-modal { width: min(440px, 96vw); max-height: 88dvh; overflow-y: auto; }
 }
@@ -123,9 +135,9 @@
    everywhere since the event-week layout round; this sheet loads after
    poker-live.css, so the display must be set here) */
 .railfab { display: grid; position: absolute; right: 10px; bottom: 236px; z-index: 40; width: 46px; height: 46px;
-  border-radius: 50%; place-items: center; border: 1px solid var(--accent-32, rgba(217,171,74,.32));
-  background: rgba(16, 14, 8, .94); color: var(--accent-soft, #f2d78a); cursor: pointer;
+  border-radius: 50%; place-items: center; border: 1px solid var(--accent-32, rgba(217,185,112,.32));
+  background: rgba(16, 14, 8, .94); color: var(--accent-soft, #F4DD9E); cursor: pointer;
   box-shadow: 0 8px 26px rgba(0, 0, 0, .5); }
 .railfab svg { width: 21px; height: 21px; }
 .railclose { display: none; width: 30px; height: 30px; place-items: center; background: transparent;
-  border: 0; color: var(--muted, #9a9aa8); font-size: 16px; cursor: pointer; }
+  border: 0; color: var(--muted, #8F8C85); font-size: 16px; cursor: pointer; }

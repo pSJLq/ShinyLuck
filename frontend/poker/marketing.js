@@ -11,10 +11,10 @@
     return '<svg viewBox="0 0 64 64" style="width:' + px + 'px;height:' + px + 'px;display:inline-block;vertical-align:-0.18em">' +
       '<g transform="rotate(26 32 32)">' +
       '<path d="M 32 3 Q 36.5 23 47 32 Q 36.5 41 32 61 Q 27.5 41 17 32 Q 27.5 23 32 3 Z" fill="#e8c15a" opacity="0.45"/>' +
-      '<path d="M 32 5 Q 36.2 24 45.5 32 Q 36.2 40 32 59 Q 27.8 40 18.5 32 Q 27.8 24 32 5 Z" fill="#fff6dd" stroke="#d9ab4a" stroke-width="1.6" stroke-linejoin="round"/>' +
+      '<path d="M 32 5 Q 36.2 24 45.5 32 Q 36.2 40 32 59 Q 27.8 40 18.5 32 Q 27.8 24 32 5 Z" fill="#fff6dd" stroke="#D9B970" stroke-width="1.6" stroke-linejoin="round"/>' +
       '</g>' +
-      '<path d="M 13 15 L 13.8 17.2 L 16 18 L 13.8 18.8 L 13 21 L 12.2 18.8 L 10 18 L 12.2 17.2 Z" fill="#f2d78a"/>' +
-      '<path d="M 50 48.4 L 50.7 50.3 L 52.6 51 L 50.7 51.7 L 50 53.6 L 49.3 51.7 L 47.4 51 L 49.3 50.3 Z" fill="#f2d78a" opacity="0.9"/>' +
+      '<path d="M 13 15 L 13.8 17.2 L 16 18 L 13.8 18.8 L 13 21 L 12.2 18.8 L 10 18 L 12.2 17.2 Z" fill="#F4DD9E"/>' +
+      '<path d="M 50 48.4 L 50.7 50.3 L 52.6 51 L 50.7 51.7 L 50 53.6 L 49.3 51.7 L 47.4 51 L 49.3 50.3 Z" fill="#F4DD9E" opacity="0.9"/>' +
       '</svg>';
   };
   function logo(size) {
@@ -136,15 +136,15 @@
     // ambient bg grid
     var bg = document.getElementById("mkt-bg");
     if (bg && window.GridField) {
-      new GridField(bg, { cell: 24, gap: 8, speed: 0.34, density: 0.5, accent: "#d9ab4a", accent2: "#f2d78a",
+      new GridField(bg, { cell: 24, gap: 8, speed: 0.34, density: 0.5, accent: "#D9B970", accent2: "#F4DD9E",
         maxAlpha: 0.7, minBright: 0.008, shape: "square" }).start();
     }
 
     // zkShuffle viz
     var zk = document.getElementById("zkviz-canvas");
     if (zk && window.GridField) {
-      var field = new GridField(zk, { cell: 16, gap: 4, speed: 0.5, density: 0.45, accent: "#d9ab4a",
-        accent2: "#f2d78a", maxAlpha: 0.9, minBright: 0.02, shape: "square" });
+      var field = new GridField(zk, { cell: 16, gap: 4, speed: 0.5, density: 0.45, accent: "#D9B970",
+        accent2: "#F4DD9E", maxAlpha: 0.9, minBright: 0.02, shape: "square" });
       field.start();
       window.__zkField = field;
       var btn = document.getElementById("zk-shuffle-btn");

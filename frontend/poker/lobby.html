@@ -7,7 +7,11 @@
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Source+Code+Pro:wght@400;500;600&family=DM+Sans:wght@400;500;600&family=Bricolage+Grotesque:opsz,wght@12..96,600..800&display=swap" rel="stylesheet" />
+<!-- Boot guard · deliberately NOT deferred and ahead of everything it protects:
+     hardens localStorage, reports failures to /dealer/clientlog, and replaces a
+     blank frame with a readable panel. See poker-boot.js. -->
+<script src="poker-boot.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 <link rel="stylesheet" href="lobby.css" />
 <link rel="stylesheet" href="poker-live.css" />
@@ -20,6 +24,17 @@
   /* Embedded in the merged site's Poker tab: the shell owns nav/footer. */
   .sp-embed .topbar { display: none !important; }
   .sp-embed #app-footer { display: none !important; }
+  /* …and the shell owns the PAGE. The lobby used to draw its own bordered,
+     rounded, drop-shadowed panel on top of the casino's background, so the
+     poker tab read as a second application embedded in the site rather than
+     as a part of it. Inside the shell the lobby is just content.
+     NB: do NOT retune .lobby's grid-template-rows to drop the hidden topbar's
+     track. `display:none` removes the topbar from the grid altogether, so the
+     tab band already occupies that first 56px row — zeroing it collapses the
+     tabs onto the filter bar. */
+  .sp-embed .app { background: transparent !important; border: 0 !important;
+    border-radius: 0 !important; box-shadow: none !important; }
+  .sp-embed .lobbyhead, .sp-embed .subbar { background: transparent; backdrop-filter: none; }
   /* Embedded: the stage joins the normal flow so the document has a real
      height · the shell then sizes the iframe to it and only the page
      scrolls (one scrollbar, footer still reachable below). */
@@ -102,9 +117,12 @@
   });
 </script>
 
-<script src="/vendor/privy.bundle.js"></script>
+<!-- Wallet source · reuses the shell's Privy when embedded (same origin),
+     loads the 4.8 MB bundle only when standalone. See poker-auth.js. -->
+<script src="poker-auth.js"></script>
 <script src="poker-grid.js"></script>
 <script src="poker-dust.js"></script>
+<script defer src="/lib/music.js"></script>
   <script src="poker-press.js"></script>
 <!-- Vendored React + precompiled JSX · see the note in table.html: the CDN and
      the in-browser Babel transpile were why some players only ever saw the

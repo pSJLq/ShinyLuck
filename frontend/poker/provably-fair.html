@@ -19,7 +19,7 @@
         <div class="lupd">How ShinyPoker makes the deal impossible to rig · and independently verifiable by anyone. Written straight, including what we don’t yet do.</div>
       </div>
 
-      <div class="callout" style="border-color:rgba(217,171,74,0.45)"><b>The short version.</b> Every cash table and every tournament runs full mental poker. The deck is ElGamal-encrypted under the table’s aggregate key and shuffled by the players’ own browsers; each shuffle carries a <b>Wikström zero-knowledge proof</b> that every other client verifies before it will release a decryption share; each card the room reads is decrypted from proven Chaum–Pedersen shares and checked <b>by the contract</b> to be exactly the card claimed. Your hole cards are decrypted on your machine only · no dealer service ever holds one. Watch the protocol run in real time in the <a href="zk-lab">zk Lab</a>.</div>
+      <div class="callout" style="border-color:rgba(217,185,112,0.45)"><b>The short version.</b> Every cash table and every tournament runs full mental poker. The deck is ElGamal-encrypted under the table’s aggregate key and shuffled by the players’ own browsers; each shuffle carries a <b>Wikström zero-knowledge proof</b> that every other client verifies before it will release a decryption share; each card the room reads is decrypted from proven Chaum–Pedersen shares and checked <b>by the contract</b> to be exactly the card claimed. Your hole cards are decrypted on your machine only · no dealer service ever holds one. Watch the protocol run in real time in the <a href="zk-lab">zk Lab</a>.</div>
 
       <div class="callout"><b>Archived: the v1 commit-reveal scheme (§2–§4).</b> Before zkShuffle, the deck came from a sealed seed committed on-chain and bound to a future block hash, and an off-chain dealer derived it to serve hole cards. That version is retired · its contracts remain on-chain for withdrawals only. The sections below are kept as a record of what it did and where its trust boundary was, so the change is auditable rather than quietly rewritten.</div>
 
@@ -49,7 +49,7 @@
       <div class="callout">Every deal ID, seed commitment, revealed seed and block-hash entropy is on-chain via the dealer contract's <code>dealInfo</code>. Anyone can call <code>recomputeDeck</code> and confirm the cards they were shown match the committed shuffle · no trust required, and no permission needed.</div>
 
       <h2 id="verify">3½. Verify a v1 hand yourself · right now, in this tab</h2>
-      <p>This tool runs <b>in your browser</b>: it reads the deal from the chain, re-derives the whole deck locally from the revealed seed, cross-checks it against the contract's own <code>recomputeDeck()</code>, and diffs the board that was posted street by street. The only thing it talks to is the public RPC. It works against the <b>v1</b> commit-reveal dealer only · v2 deals have no seed to reveal, which is the whole point, and are verified live instead in the <a href="zk-lab" style="color:#f2d78a">zk Lab</a>.</p>
+      <p>This tool runs <b>in your browser</b>: it reads the deal from the chain, re-derives the whole deck locally from the revealed seed, cross-checks it against the contract's own <code>recomputeDeck()</code>, and diffs the board that was posted street by street. The only thing it talks to is the public RPC. It works against the <b>v1</b> commit-reveal dealer only · v2 deals have no seed to reveal, which is the whole point, and are verified live instead in the <a href="zk-lab" style="color:#F4DD9E">zk Lab</a>.</p>
       <div class="fairtool">
         <div class="frow">
           <label>Deal ID</label>
@@ -69,7 +69,7 @@
 
       <h2>4. Archived · the trust boundary v1 had, and v2 closed</h2>
       <p>In v1 an off-chain dealer service derived the deck (once the seed and block hash were known) to deliver each player their two hole cards. It could not cheat the result · cards, board and outcome were bound by the on-chain commitment · but because it derived the deck to serve it, it technically held every hand’s cards while the hand was live. That was a real trust point and we said so at the time.</p>
-      <p><b>That trust point is gone.</b> On zkShuffle v2 there is no seed and no derivation: the coordinator relays ciphertexts and proofs it cannot decrypt, and it is always exactly one decryption share short of any player’s hole cards. It is not that we ask you to trust the dealer less · it holds nothing to be trusted with. See §1½, or watch it in the <a href="zk-lab" style="color:#f2d78a">zk Lab</a>.</p>
+      <p><b>That trust point is gone.</b> On zkShuffle v2 there is no seed and no derivation: the coordinator relays ciphertexts and proofs it cannot decrypt, and it is always exactly one decryption share short of any player’s hole cards. It is not that we ask you to trust the dealer less · it holds nothing to be trusted with. See §1½, or watch it in the <a href="zk-lab" style="color:#F4DD9E">zk Lab</a>.</p>
 
       <h2>5. Session keys (convenience without custody)</h2>
       <p>Signing a wallet transaction for every fold would be unusable. Instead, when you sit down you authorize a <b>session key</b> once, scoped to acting on your behalf at the table. Your actions are then signed locally and settle on-chain in the background · no popup per hand. You can revoke the session key at any time from Settings.</p>
@@ -89,24 +89,24 @@
     </div>
     <div id="site-footer"></div>
   </div>
-  <template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#070707"/><rect x="30" y="30" width="40" height="40" rx="6" fill="#d9ab4a"/><text x="50" y="62" font-family="monospace" font-size="26" fill="#fff" text-anchor="middle">{s}</text></svg></template>
+  <template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#070707"/><rect x="30" y="30" width="40" height="40" rx="6" fill="#D9B970"/><text x="50" y="62" font-family="monospace" font-size="26" fill="#fff" text-anchor="middle">{s}</text></svg></template>
   <style>
     .fairtool { border: 1px solid var(--line, #2c2c36); border-radius: 14px; padding: 18px; margin: 14px 0 6px;
       background: rgba(255,255,255,0.02); }
     .fairtool .frow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .fairtool label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted, #9a9aa8); }
+    .fairtool label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted, #8F8C85); }
     .fairtool input { width: 110px; background: #0d0d11; border: 1px solid var(--line, #2c2c36); color: var(--text, #e6e6ee);
-      border-radius: 8px; padding: 9px 10px; font-family: "IBM Plex Mono", monospace; font-size: 14px; outline: none; }
-    .fairtool input:focus { border-color: rgba(217,171,74,.5); }
-    .fairtool .fror { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted, #9a9aa8);
+      border-radius: 8px; padding: 9px 10px; font-family: var(--code, "JetBrains Mono", ui-monospace, monospace); font-size: 14px; outline: none; }
+    .fairtool input:focus { border-color: rgba(217,185,112,.5); }
+    .fairtool .fror { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted, #8F8C85);
       margin: 12px 0; }
     #fair-result { margin-top: 16px; border-top: 1px solid var(--line, #2c2c36); padding-top: 14px; }
-    .vhead { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--text, #e6e6ee); margin-bottom: 10px; }
+    .vhead { font-family: var(--code, "JetBrains Mono", ui-monospace, monospace); font-size: 13px; color: var(--text, #e6e6ee); margin-bottom: 10px; }
     .vrow { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; font-size: 13.5px; color: var(--text, #e6e6ee); }
     .vrow .vt { width: 20px; flex-shrink: 0; text-align: center; font-weight: 700; }
     .vrow .vt.ok { color: #57d9a3; } .vrow .vt.bad { color: #ef5a6f; } .vrow .vt.wait { color: #e8c15a; }
-    .vrow .vd, .vd { display: block; font-size: 11.5px; color: var(--muted, #9a9aa8); margin-top: 2px; line-height: 1.7; word-break: break-word; }
-    .fc { display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: #e6e6ee;
+    .vrow .vd, .vd { display: block; font-size: 11.5px; color: var(--muted, #8F8C85); margin-top: 2px; line-height: 1.7; word-break: break-word; }
+    .fc { display: inline-block; font-family: var(--code, "JetBrains Mono", ui-monospace, monospace); font-size: 12px; color: #e6e6ee;
       background: #16161c; border: 1px solid #2c2c36; border-radius: 4px; padding: 0 4px; margin: 1px; }
     .fc.red { color: #ff8d9d; }
     .vseat { display: inline-block; margin-right: 12px; }

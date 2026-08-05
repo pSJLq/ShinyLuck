@@ -65,7 +65,9 @@ function TournamentPage() {
   const [pokerBal, setPokerBal] = uS(0);
   const refreshPokerBal = async () => { if (SP.sdk.address) { try { setPokerBal(Number(SP.fmt(await SP.sdk.balanceOf(SP.sdk.address), 6))); } catch {} } };
   uE(() => { if (connected) refreshPokerBal(); }, [connected]);
-  const [theme] = uS(() => localStorage.getItem("sp_theme") || "b");
+  // guarded: a framed WKWebView can THROW here and blank the page (see the
+  // same read in poker-lobby-app.jsx)
+  const [theme] = uS(() => { try { return localStorage.getItem("sp_theme") || "b"; } catch (e) { return "b"; } });
 
   const flash = (m) => { setMsg(m); setTimeout(() => setMsg(null), 4500); };
 
@@ -121,8 +123,8 @@ function TournamentPage() {
     // the clicked button owns the spinner until this settles
     const done = SPPress.claim();
     setBusy(true);
-    try { await fn(); flash(label + " ✓"); await load(); }
-    catch (e) { flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 90)); console.error(e); }
+    try { await fn(); await load(); } // no success toast · the page updates itself
+    catch (e) { flash(label + " ✗ " + SP.pokerError(e)); console.error(e); }
     finally { setBusy(false); done(); }
   }
 
@@ -187,7 +189,7 @@ function TournamentPage() {
             </div>
 
             {/* schedule line */}
-            <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: 10, background: "var(--accent-08, rgba(217,171,74,.08))", fontFamily: "var(--mono)", fontSize: 15, color: "var(--text)" }}>
+            <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: 10, background: "var(--accent-08, rgba(217,185,112,.08))", fontFamily: "var(--mono)", fontSize: 15, color: "var(--text)" }}>
               {info.status === 0 && startTime > 0 && startsIn > 0 && <>⏱ Starts in <b>{clk(startsIn)}</b></>}
               {info.status === 0 && startTime > 0 && startsIn === 0 && <>⏱ Start time reached · waiting on the host / enough players</>}
               {info.status === 0 && startTime === 0 && <>Starts when full or when the host starts it</>}
@@ -218,7 +220,7 @@ function TournamentPage() {
               {structure.map((l, i) => {
                 const cur = info.status === 1 && clock && clock.level === i;
                 return (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "36px 1fr 0.6fr 0.6fr", gap: 6, fontFamily: "var(--mono)", fontSize: 13, padding: "3px 0", color: cur ? "var(--accent-soft)" : "var(--text)", background: cur ? "var(--accent-08, rgba(217,171,74,.08))" : "transparent", borderRadius: 6 }}>
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "36px 1fr 0.6fr 0.6fr", gap: 6, fontFamily: "var(--mono)", fontSize: 13, padding: "3px 0", color: cur ? "var(--accent-soft)" : "var(--text)", background: cur ? "var(--accent-08, rgba(217,185,112,.08))" : "transparent", borderRadius: 6 }}>
                     <span style={{ color: cur ? "var(--accent-soft)" : "var(--muted)" }}>{i + 1}{cur ? " ●" : ""}</span>
                     <span>{l.sb} / {l.bb}</span><span>{l.ante || "-"}</span><span>{Math.round(l.durationSecs / 60)}</span>
                   </div>
@@ -315,7 +317,7 @@ function TournamentPage() {
                     const medal = r.place === 1 ? "🥇" : r.place === 2 ? "🥈" : r.place === 3 ? "🥉" : null;
                     return (
                       <div key={r.place} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderRadius: 8, marginTop: 2,
-                        background: me ? "var(--accent-12, rgba(217,171,74,.12))" : r.place <= 3 ? "var(--accent-08, rgba(217,171,74,.06))" : "transparent" }}>
+                        background: me ? "var(--accent-12, rgba(217,185,112,.12))" : r.place <= 3 ? "var(--accent-08, rgba(217,185,112,.06))" : "transparent" }}>
                         <span style={{ width: 40, fontFamily: "var(--mono)", fontSize: 14, color: r.place <= 3 ? "var(--accent-soft)" : "var(--muted)" }}>{medal || "#" + r.place}</span>
                         <AvatarIcon av={r.avatar} img={r.img} name={r.handle || r.addr} size={24} style={{ borderRadius: 6 }} />
                         <span style={{ flex: 1, fontFamily: "var(--mono)", fontSize: 14, color: "var(--text)" }}>
@@ -332,7 +334,7 @@ function TournamentPage() {
                 const mine = results.find((r) => r.addr.toLowerCase() === addr.toLowerCase());
                 if (!mine) return null;
                 return (
-                  <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "var(--accent-08, rgba(217,171,74,.08))", fontFamily: "var(--mono)", fontSize: 14, color: "var(--text)" }}>
+                  <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "var(--accent-08, rgba(217,185,112,.08))", fontFamily: "var(--mono)", fontSize: 14, color: "var(--text)" }}>
                     {mine.place === 1
                       ? <>🏆 You won this tournament · <b style={{ color: "var(--win, #57d9a3)" }}>{N4(mine.prize)} {sym()}</b> credited to your poker balance.</>
                       : mine.prize > 0n
@@ -350,7 +352,7 @@ function TournamentPage() {
             {players.length === 0 ? <span style={{ color: "var(--muted)", fontFamily: "var(--label)", fontSize: 13 }}>No players registered yet.</span>
               : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {players.map((p) => (
-                    <span key={p.addr} style={{ display: "inline-flex", alignItems: "center", gap: 7, fontFamily: "var(--mono)", fontSize: 13, padding: "4px 10px 4px 5px", borderRadius: 8, background: "var(--accent-08, rgba(217,171,74,.08))", color: "var(--text)" }}>
+                    <span key={p.addr} style={{ display: "inline-flex", alignItems: "center", gap: 7, fontFamily: "var(--mono)", fontSize: 13, padding: "4px 10px 4px 5px", borderRadius: 8, background: "var(--accent-08, rgba(217,185,112,.08))", color: "var(--text)" }}>
                       <AvatarIcon av={p.avatar} img={p.img} name={p.handle || p.addr} size={22} style={{ borderRadius: 6 }} />
                       {p.handle || tshort(p.addr)}
                     </span>

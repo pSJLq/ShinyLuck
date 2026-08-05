@@ -64,7 +64,12 @@ function LobbyApp() {
   const [trnSeated, setTrnSeated] = uS(0);
   const [showCreate, setShowCreate] = uS(false);
   const [showCashier, setShowCashier] = uS(false);
-  const [theme] = uS(() => localStorage.getItem("sp_theme") || "b");
+  // try/catch, not a bare read: in a framed WKWebView (Telegram on iOS with
+  // tracking prevention on) `localStorage` THROWS instead of returning null.
+  // Thrown from a state initializer, that blanks the whole lobby with no error
+  // on screen — the exact failure §26 chased. poker-boot.js also shims the
+  // whole object; this is the second lock on the same door.
+  const [theme] = uS(() => { try { return localStorage.getItem("sp_theme") || "b"; } catch (e) { return "b"; } });
 
   // Ambient backdrop is poker-dust.js now (six composited sparks) instead of a
   // GridField canvas repainting thousands of cells every frame at 16% opacity.
@@ -154,7 +159,7 @@ function LobbyApp() {
           <div className="sep" />
           <div className="spacer" />
           {connected ? (
-            <div className="wallet" style={{ cursor: "pointer" }} title="Cashier · nickname" onClick={() => setShowCashier(true)}><BraceLogo size={16} /><span className="bal tnum">{bal.toFixed(1)}</span><span className="net">{lshort(addr)}</span></div>
+            <div className="wallet" style={{ cursor: "pointer" }} title="Cashier · nickname" onClick={() => setShowCashier(true)}><BraceLogo size={16} /><span className="bal tnum">{fmtMoney(bal)}</span><span className="net">{lshort(addr)}</span></div>
           ) : (
             <button className="metapill" style={{ cursor: "pointer", color: "var(--accent-soft)", borderColor: "var(--accent-32)", background: "var(--accent-12)" }} onClick={connect}>{SPT("Connect Wallet")}</button>
           )}
@@ -185,10 +190,13 @@ function LobbyApp() {
               <div className="spacerflex" />
             </React.Fragment>
           ) : tab === "tournaments" && SP.sdk.hasTournaments() ? (
+            /* The line that used to sit here ("Single-table tournaments ·
+               buy-in or sponsored pools") described the feature to someone who
+               had already chosen it, in the row where they were looking for
+               something to click. */
             <React.Fragment>
-              <span className="filterlabel">Single-table tournaments · buy-in or sponsored pools</span>
               <div className="spacerflex" />
-              <button className="cta" onClick={() => (connected ? setShowCreate(true) : connect())}>+ Create tournament</button>
+              <button className="cta" onClick={() => (connected ? setShowCreate(true) : connect())}>+ {SPT("Create tournament")}</button>
             </React.Fragment>
           ) : <span className="filterlabel">{SPT("Scheduled tournaments")}</span>}
         </div>
@@ -228,7 +236,7 @@ function LobbyApp() {
                           <span className="tc-tags"><span className="gametag">NLHE</span><span className="tc-size">{sizeLabel}</span></span>
                         </div>
                         <div className="tc-felt">
-                          <span className="tc-suit" style={{ transform: `translate(-50%, -52%) rotate(${tilt}deg)`, color: red ? "rgba(190,80,80,.075)" : "rgba(217,171,74,.07)" }}>{suit}</span>
+                          <span className="tc-suit" style={{ transform: `translate(-50%, -52%) rotate(${tilt}deg)`, color: red ? "rgba(190,80,80,.075)" : "rgba(217,185,112,.07)" }}>{suit}</span>
                           {seats.map((s, i) => <span key={i} className={"tc-seat" + (s.on ? " on" : "")} style={{ left: s.x + "%", top: s.y + "%" }} />)}
                           <div className="tc-center">
                             {r.inHand ? (
@@ -237,16 +245,21 @@ function LobbyApp() {
                                 <span className="tc-live"><span className="dot" />{SPT("hand in play")}</span>
                               </React.Fragment>
                             ) : (
-                              <span className="tc-wait">{r.seated > 0 ? "waiting for players" : "open table · be first"}</span>
+                              <span className="tc-wait">{r.seated > 0 ? SPT("waiting for players") : SPT("open table")}</span>
                             )}
                           </div>
                         </div>
                         <div className="tc-bottom">
-                          <span className="tc-rake">rake <b>{r.rake}%</b> · cap {r.cap} · no flop no drop</span>
+                          {/* One fact, legibly. The cap and the "no flop no
+                              drop" rule are real but they are answers to a
+                              question nobody asks while picking a table. */}
+                          <span className="tc-rake" title={`${SPT("Rake")} ${r.rake}% · ${SPT("cap")} ${r.cap} ${sym} · ${SPT("nothing is taken when the hand ends before the flop")}`}>
+                            {SPT("Rake")} <b>{r.rake}%</b>
+                          </span>
                           <span className="tc-actions">
                             {full
                               ? <span className="btn-sm full">{SPT("Full · watch")}</span>
-                              : <span className="btn-sm join">{r.seated === 0 ? "Sit first" : `Join · ${r.seated}/${r.size}`}</span>}
+                              : <span className="btn-sm join">{r.seated === 0 ? SPT("Take a seat") : `${SPT("Join")} · ${r.seated}/${r.size}`}</span>}
                           </span>
                         </div>
                       </a>
@@ -269,6 +282,7 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
   const [mine, setMine] = uS({}); // id -> isRegistered
   const [busy, setBusy] = uS(false);
   const [msg, setMsg] = uS(null);
+  const [showPast, setShowPast] = uS(false);
   const sym = SP.NETWORK.currency.symbol;
 
   function flash(m) { setMsg(m); setTimeout(() => setMsg(null), 4000); }
@@ -298,14 +312,20 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
     // the clicked button owns the spinner until this settles
     const done = SPPress.claim();
     setBusy(true);
-    try { await fn(); flash(label + " ✓"); bustTrnCache(); await load(); }
-    catch (e) { flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 70)); console.error(e); }
+    try { await fn(); bustTrnCache(); await load(); } // no success toast · the row updates itself
+    catch (e) { flash(label + " ✗ " + SP.pokerError(e)); console.error(e); }
     finally { setBusy(false); done(); }
   }
 
   const fmtSplit = (bps) => bps.map((b) => (b / 100) + "%").join(" / ");
   // Private (approval) tournaments are invite-by-link · list them only for their host.
   const visible = (list || []).filter((t) => !t.approvalRequired || (addr && t.creator.toLowerCase() === addr.toLowerCase()));
+  // A finished tournament cannot be joined, watched or acted on — it is a
+  // receipt. Twelve of them above the one event you could actually enter is
+  // what made this page unreadable, so they fold away behind a count.
+  const open = visible.filter((t) => t.status <= 1);
+  const past = visible.filter((t) => t.status > 1);
+  const rowsShown = showPast ? open.concat(past) : open;
 
   return (
     <React.Fragment>
@@ -314,35 +334,54 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
       {list == null ? (
         <div style={{ padding: 50, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>{SPT("Loading tournaments…")}</div>
       ) : visible.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "70px 20px", color: "var(--muted)", fontFamily: "var(--label)" }}>
-          <div style={{ fontSize: 30, marginBottom: 10 }}>♠</div>
-          <div style={{ fontFamily: "var(--mono)", fontSize: 18, color: "var(--text)" }}>{SPT("No tournaments yet")}</div>
-          <div style={{ marginTop: 8, fontSize: 13 }}>Be the first · create one with your own buy-in, prize pool and payout split.</div>
+        <div className="emptystate">
+          <div className="glyph">♠</div>
+          <div className="ttl">{SPT("No tournaments yet")}</div>
+          <div className="sub">{SPT("Be the first · create one with your own buy-in, prize pool and payout split.")}</div>
         </div>
       ) : (
         <div className="dtable">
+          {open.length === 0 && (
+            <div className="emptystate tight">
+              <div className="ttl">{SPT("Nothing running right now")}</div>
+              <div className="sub">{SPT("Create one, or look through what has already been played.")}</div>
+            </div>
+          )}
+          {rowsShown.length > 0 && (
           <div className="dthead" style={{ gridTemplateColumns: TRN_COLS }}>
-            <span className="h">{SPT("Tournament")}</span><span className="h">Buy-in · split</span><span className="h">{SPT("Prize pool")}</span>
+            <span className="h">{SPT("Tournament")}</span><span className="h">{SPT("Buy-in")}</span><span className="h">{SPT("Prize pool")}</span>
             <span className="h c">{SPT("Entrants")}</span><span className="h">{SPT("Status")}</span><span className="h r">{SPT("Action")}</span>
-          </div>
-          {visible.map((t) => {
+          </div>)}
+          {rowsShown.map((t) => {
             const cost = t.buyIn + t.fee;
             const statusCls = ["registering", "running", "finished", "finished"][t.status];
             const reg = mine[t.id];
             const isCreator = addr && t.creator.toLowerCase() === addr.toLowerCase();
             return (
-              <div key={t.id} className="drow" style={{ gridTemplateColumns: TRN_COLS }}>
+              <div key={t.id} className={"drow" + (t.status > 1 ? " past" : "")} style={{ gridTemplateColumns: TRN_COLS }}>
                 <div className="cell-tname">
                   <span className="nm">SNG #{t.id} · {t.maxPlayers}-max</span>
                   <span className="meta"><span>{Number(t.startStack)} chips</span><span>by {t.creator.slice(0, 6)}…</span>{t.pool > t.buyIn * BigInt(t.registered) && <span className="bnt">◆ sponsored</span>}{t.hostBps > 0 && <span className="bnt" style={{ color: "var(--gold, #e8c15a)" }}>★ host {t.hostBps / 100}%</span>}{t.approvalRequired && <span className="bnt">● private</span>}{isCreator && t.pendingCount > 0 && <span className="bnt">{t.pendingCount} applied</span>}</span>
                 </div>
                 <div className="buyincell">
-                  <span className="bi tnum">{Number(SP.fmt(cost, 4))}<span className="u">{sym}</span></span>
-                  <span className="split">payout {fmtSplit(t.payoutBps)}</span>
+                  {/* A free roll used to print a bold gold 0 with a currency
+                      suffix, which reads as a price of zero rather than as no
+                      price at all — say the word. */}
+                  {cost > 0n
+                    ? <span className="bi tnum">{Number(SP.fmt(cost, 4))}<span className="u">{sym}</span></span>
+                    : <span className="bi free">{SPT("Free")}</span>}
+                  <span className="split">{SPT("payout")} {fmtSplit(t.payoutBps)}</span>
                 </div>
+                {/* The "✓ secured on-chain" badge under every prize pool was
+                    true of literally everything on this site, so it carried no
+                    information and cost a colour. */}
                 <div className="prizecell">
-                  <span className="pp tnum">{Number(SP.fmt(t.pool, 4))}<span className="u">{sym}</span></span>
-                  <span className="securechip">✓ secured on-chain</span>
+                  {/* Gold is reserved for a pool that exists. Before the first
+                      entry there is nothing to win, and a bright zero pulled
+                      the eye to the emptiest cell in the row. */}
+                  {t.pool > 0n
+                    ? <span className="pp tnum">{Number(SP.fmt(t.pool, 4))}<span className="u">{sym}</span></span>
+                    : <span className="pp empty">{SPT("no entries yet")}</span>}
                 </div>
                 <div className="regcell tnum">{t.registered}/{t.maxPlayers}{t.status === 1 && <span className="u">{t.remaining} left</span>}</div>
                 <div><span className={"statuschip " + statusCls}>{SP.TRN_STATUS[t.status]}</span></div>
@@ -353,11 +392,16 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
                   {t.status === 0 && !t.approvalRequired && connected && !reg && <button className="btn-sm join" disabled={busy} onClick={() => act("Register", () => SP.sdk.registerTournament(t.id, cost))}>{SPT("Register")}</button>}
                   {t.status === 0 && !t.approvalRequired && connected && reg && <button className="btn-sm" disabled={busy} onClick={() => act("Unregister", () => SP.sdk.unregisterTournament(t.id))}>{SPT("Unregister")}</button>}
                   {t.status === 0 && connected && isCreator && t.registered >= 2 && <button className="btn-sm join" disabled={busy} onClick={() => act("Start", () => SP.sdk.startTournament(t.id))}>{SPT("Start")}</button>}
-                  {t.status === 1 && <a className="btn-sm join" href={"table?t=" + t.tableId}>{reg ? "Play →" : "Observe"}</a>}
+                  {t.status === 1 && <a className="btn-sm join" href={"table?t=" + t.tableId}>{reg ? SPT("Play") + " →" : SPT("Observe")}</a>}
                 </div>
               </div>
             );
           })}
+          {past.length > 0 && (
+            <button className="pasttoggle" onClick={() => setShowPast((v) => !v)}>
+              {showPast ? SPT("Hide finished") : SPT("Show finished") + " (" + past.length + ")"}
+            </button>
+          )}
         </div>
       )}
     </React.Fragment>
@@ -405,8 +449,8 @@ function SngTab({ connected, connect, addr }) {
     // the clicked button owns the spinner until this settles
     const done = SPPress.claim();
     setBusy(true);
-    try { await fn(); flash(label + " ✓"); bustTrnCache(); await load(); }
-    catch (e) { flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 70)); console.error(e); }
+    try { await fn(); bustTrnCache(); await load(); } // no success toast · the row updates itself
+    catch (e) { flash(label + " ✗ " + SP.pokerError(e)); console.error(e); }
     finally { setBusy(false); done(); }
   }
 

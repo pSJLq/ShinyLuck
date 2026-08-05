@@ -131,7 +131,15 @@ function TournamentPage() {
   uE(() => {
     if (connected) refreshPokerBal();
   }, [connected]);
-  const [theme] = uS(() => localStorage.getItem("sp_theme") || "b");
+  // guarded: a framed WKWebView can THROW here and blank the page (see the
+  // same read in poker-lobby-app.jsx)
+  const [theme] = uS(() => {
+    try {
+      return localStorage.getItem("sp_theme") || "b";
+    } catch (e) {
+      return "b";
+    }
+  });
   const flash = m => {
     setMsg(m);
     setTimeout(() => setMsg(null), 4500);
@@ -236,10 +244,10 @@ function TournamentPage() {
     setBusy(true);
     try {
       await fn();
-      flash(label + " ✓");
       await load();
-    } catch (e) {
-      flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 90));
+    } // no success toast · the page updates itself
+    catch (e) {
+      flash(label + " ✗ " + SP.pokerError(e));
       console.error(e);
     } finally {
       setBusy(false);
@@ -453,7 +461,7 @@ function TournamentPage() {
       marginTop: 16,
       padding: "10px 14px",
       borderRadius: 10,
-      background: "var(--accent-08, rgba(217,171,74,.08))",
+      background: "var(--accent-08, rgba(217,185,112,.08))",
       fontFamily: "var(--mono)",
       fontSize: 15,
       color: "var(--text)"
@@ -516,7 +524,7 @@ function TournamentPage() {
         fontSize: 13,
         padding: "3px 0",
         color: cur ? "var(--accent-soft)" : "var(--text)",
-        background: cur ? "var(--accent-08, rgba(217,171,74,.08))" : "transparent",
+        background: cur ? "var(--accent-08, rgba(217,185,112,.08))" : "transparent",
         borderRadius: 6
       }
     }, /*#__PURE__*/React.createElement("span", {
@@ -764,7 +772,7 @@ function TournamentPage() {
         padding: "8px 10px",
         borderRadius: 8,
         marginTop: 2,
-        background: me ? "var(--accent-12, rgba(217,171,74,.12))" : r.place <= 3 ? "var(--accent-08, rgba(217,171,74,.06))" : "transparent"
+        background: me ? "var(--accent-12, rgba(217,185,112,.12))" : r.place <= 3 ? "var(--accent-08, rgba(217,185,112,.06))" : "transparent"
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
@@ -813,7 +821,7 @@ function TournamentPage() {
         marginTop: 12,
         padding: "10px 14px",
         borderRadius: 10,
-        background: "var(--accent-08, rgba(217,171,74,.08))",
+        background: "var(--accent-08, rgba(217,185,112,.08))",
         fontFamily: "var(--mono)",
         fontSize: 14,
         color: "var(--text)"
@@ -862,7 +870,7 @@ function TournamentPage() {
       fontSize: 13,
       padding: "4px 10px 4px 5px",
       borderRadius: 8,
-      background: "var(--accent-08, rgba(217,171,74,.08))",
+      background: "var(--accent-08, rgba(217,185,112,.08))",
       color: "var(--text)"
     }
   }, /*#__PURE__*/React.createElement(AvatarIcon, {

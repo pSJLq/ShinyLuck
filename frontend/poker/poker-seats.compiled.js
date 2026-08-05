@@ -14,7 +14,7 @@ function ChipStack({
     className: "chipdot",
     style: {
       borderColor: color,
-      background: "rgba(217,171,74,0.25)"
+      background: "rgba(217,185,112,0.25)"
     }
   })));
 }
@@ -43,7 +43,7 @@ function Marker({
 const COMBO_TIERS = [{
   bg: "rgba(255,255,255,.05)",
   bd: "rgba(255,255,255,.16)",
-  fg: "var(--muted, #9a9aa8)"
+  fg: "var(--muted, #8F8C85)"
 }, {
   bg: "rgba(255,255,255,.07)",
   bd: "rgba(255,255,255,.24)",
@@ -131,6 +131,7 @@ function Seat({
   if (data.folded) cls.push("folded");
   if (data.allin) cls.push("allin");
   if (data.winner) cls.push("winner");
+  if (data.dimmed) cls.push("dimmed");
   if (data.disc) cls.push("disc");
   if (data.sittingout) cls.push("sittingout");
   const name = data.name || player.name;
@@ -141,13 +142,16 @@ function Seat({
       left: pos.x + "%",
       top: pos.y + "%"
     }
-  }, data.lastAct && /*#__PURE__*/React.createElement("span", {
-    className: "actchip " + data.lastAct.kind
-  }, data.lastAct.text), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
     className: "seatcard"
   }, data.bounty && /*#__PURE__*/React.createElement("span", {
     className: "bountytag"
-  }, "\u25C6", data.bounty), /*#__PURE__*/React.createElement(AvatarIcon, {
+  }, "\u25C6", data.bounty), data.lastAct && !data.winner && /*#__PURE__*/React.createElement("span", {
+    className: "actchip " + data.lastAct.kind
+  }, data.lastAct.text), data.winner && /*#__PURE__*/React.createElement("span", {
+    className: "crown",
+    "aria-hidden": "true"
+  }, "\uD83D\uDC51"), /*#__PURE__*/React.createElement(AvatarIcon, {
     av: player.avId,
     img: player.avImg,
     name: name
@@ -161,11 +165,15 @@ function Seat({
     className: "bbcount"
   }, " BB")) : chipMode ? /*#__PURE__*/React.createElement("div", {
     className: "stack tnum"
-  }, fmtChips(data.chips)) : /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(ChipMark, {
+    size: 13
+  }), fmtChips(data.chips)) : /*#__PURE__*/React.createElement("div", {
     className: "stack tnum"
-  }, data.stack.toFixed(1), /*#__PURE__*/React.createElement("span", {
-    className: "u"
-  }, "SOMI")), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(SomiCoin, {
+    size: 13
+  }), fmtMoney(data.stack)), data.winner ? /*#__PURE__*/React.createElement("div", {
+    className: "wonchip"
+  }, data.won ? "+" + data.won : SPT("WINNER")) : /*#__PURE__*/React.createElement("div", {
     className: "status"
   }, data.status)), marker && /*#__PURE__*/React.createElement(Marker, {
     kind: marker
@@ -220,11 +228,13 @@ function BetChips({
       "--csx": csx,
       "--csy": csy
     }
-  }, /*#__PURE__*/React.createElement(ChipStack, {
-    n: amount > 20 ? 4 : amount > 5 ? 3 : 2
+  }, chips ? /*#__PURE__*/React.createElement(ChipMark, {
+    size: 13
+  }) : /*#__PURE__*/React.createElement(SomiCoin, {
+    size: 13
   }), /*#__PURE__*/React.createElement("span", {
     className: "amt tnum"
-  }, chips ? fmtChips(amount) : amount.toFixed(amount % 1 ? 1 : 0)));
+  }, chips ? fmtChips(amount) : fmtMoney(amount)));
 }
 
 /* `due` = how many board cards this street is entitled to. Slots between what
@@ -338,18 +348,20 @@ function Pot({
     className: "potmain"
   }, /*#__PURE__*/React.createElement("span", {
     className: "k"
-  }, SPT("Total pot")), /*#__PURE__*/React.createElement("span", {
+  }, SPT("Pot")), chips ? /*#__PURE__*/React.createElement(ChipMark, {
+    size: 15
+  }) : /*#__PURE__*/React.createElement(SomiCoin, {
+    size: 15
+  }), /*#__PURE__*/React.createElement("span", {
     className: "v tnum"
-  }, chips ? fmtChips(pot) : pot.toFixed(pot % 1 ? 1 : 0)), /*#__PURE__*/React.createElement("span", {
-    className: "u"
-  }, chips ? SPT("chips") : "SOMI")), sidePots.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, chips ? fmtChips(pot) : fmtMoney(pot))), sidePots.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "sides"
   }, sidePots.map((s, i) => /*#__PURE__*/React.createElement("span", {
     key: i,
     className: "side"
   }, s.label, " ", /*#__PURE__*/React.createElement("b", {
     className: "tnum"
-  }, s.v.toFixed(0))))));
+  }, fmtMoney(s.v))))));
 }
 Object.assign(window, {
   Seat,

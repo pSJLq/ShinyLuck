@@ -44,7 +44,7 @@
 /* ---------- pot collect: chips fly from center to winner ---------- */
 .flychips { position: absolute; left: 50%; top: 43%; z-index: 16; pointer-events: none; transform: translate(-50%,-50%); }
 .flychip { position: absolute; width: 18px; height: 18px; border-radius: 50%; border: 2px dashed rgba(255,255,255,0.6);
-  background: rgba(217,171,74,0.4); box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  background: rgba(217,185,112,0.4); box-shadow: 0 2px 6px rgba(0,0,0,0.5);
   animation: potFly calc(620ms * var(--deal-unit)) cubic-bezier(.4,.1,.2,1) forwards; }
 @keyframes potFly {
   from { opacity: 0; transform: translate(0,0) scale(0.6); }

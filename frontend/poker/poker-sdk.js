@@ -33,7 +33,77 @@ const ROOM_ABI = [
   "function sessionKeyOf(address) view returns (address)",
   "function sessionOwnerOf(address) view returns (address)",
   "function tableController(uint256) view returns (address)",
+  // The contracts revert with CUSTOM ERRORS, and ethers can only name one it
+  // has been given. Without these lines every refusal reached the player as
+  // "unknown custom error" — including the ordinary, correct one you get for
+  // pressing Leave while you are still in a hand.
+  "error NotDealer()", "error NotDealerOrOperator()", "error TableInactive()",
+  "error BadConfig()", "error BadSeat()", "error SeatTaken()", "error AlreadySeated()",
+  "error NotSeated()", "error InsufficientBalance()", "error BuyInOutOfRange()",
+  "error MaxStackExceeded()", "error InHand()", "error NotIdle()", "error ZeroAmount()",
+  "error TransferFailed()", "error HandAlreadyInProgress()", "error NoHandInProgress()",
+  "error NotEnoughPlayers()", "error NotYourTurn()", "error IllegalAction()",
+  "error BelowMinBet()", "error BelowMinRaise()", "error InsufficientChips()",
+  "error TooEarly()", "error ShowdownNotReady()", "error InvalidSessionKey()",
+  "error NotFactory()", "error NotController()", "error ControlledTable()",
+  "error NoAccusation()", "error AccusationActive()", "error RescueWindowNotElapsed()",
+  "error AlreadyVindicated()", "error NotResponsive()", "error BadRescueWindow()",
 ];
+
+/* A contract refusal, in words a player can act on.
+   `e.shortMessage` for a custom error is the class name at best and "unknown
+   custom error" at worst — neither tells anyone what to do next. */
+const ERR_TEXT = {
+  InHand: { en: "You're in this hand — you can leave once it ends", ru: "Вы в раздаче — выйти можно, когда она закончится" },
+  ControlledTable: { en: "Tournament seats are managed by the tournament", ru: "Турнирными местами распоряжается турнир" },
+  NotSeated: { en: "You're not seated at this table", ru: "Вы не сидите за этим столом" },
+  SeatTaken: { en: "Someone just took that seat", ru: "Место только что заняли" },
+  AlreadySeated: { en: "You're already seated at this table", ru: "Вы уже сидите за этим столом" },
+  InsufficientBalance: { en: "Not enough in your poker balance — top up in the cashier", ru: "Не хватает на покерном балансе — пополните в кассе" },
+  InsufficientChips: { en: "Not enough chips for that", ru: "Не хватает фишек" },
+  BuyInOutOfRange: { en: "That buy-in is outside this table's limits", ru: "Бай-ин вне лимитов этого стола" },
+  MaxStackExceeded: { en: "That would put you over the table's max stack", ru: "Стек превысит максимум для этого стола" },
+  NotYourTurn: { en: "It's not your turn", ru: "Сейчас не ваш ход" },
+  IllegalAction: { en: "That action isn't legal here", ru: "Это действие здесь невозможно" },
+  BelowMinBet: { en: "Below the minimum bet", ru: "Меньше минимальной ставки" },
+  BelowMinRaise: { en: "Below the minimum raise", ru: "Меньше минимального рейза" },
+  NoHandInProgress: { en: "No hand is running", ru: "Раздача не идёт" },
+  HandAlreadyInProgress: { en: "A hand is already running", ru: "Раздача уже идёт" },
+  NotEnoughPlayers: { en: "Not enough players", ru: "Недостаточно игроков" },
+  TableInactive: { en: "This table is closed", ru: "Стол закрыт" },
+  ZeroAmount: { en: "Amount must be above zero", ru: "Сумма должна быть больше нуля" },
+  TooEarly: { en: "Too early — try again in a moment", ru: "Ещё рано — попробуйте через момент" },
+  // tournaments
+  NotRegistering: { en: "Registration for this tournament is closed", ru: "Регистрация в этот турнир закрыта" },
+  NotRunning: { en: "This tournament isn't running", ru: "Турнир не идёт" },
+  Full: { en: "This tournament is full", ru: "Турнир заполнен" },
+  AlreadyIn: { en: "You're already registered", ru: "Вы уже зарегистрированы" },
+  NotIn: { en: "You're not registered", ru: "Вы не зарегистрированы" },
+  TooFew: { en: "Not enough players registered yet", ru: "Пока зарегистрировано слишком мало игроков" },
+  WrongValue: { en: "Wrong amount sent", ru: "Отправлена неверная сумма" },
+  HandLive: { en: "A hand is still being played", ru: "Раздача ещё идёт" },
+  NotCreator: { en: "Only the tournament's host can do that", ru: "Это может сделать только создатель турнира" },
+};
+
+/** Turn a thrown contract/wallet error into one sentence a player can act on. */
+export function pokerError(e) {
+  const ru = typeof window !== "undefined" && window.__SPLANG === "ru";
+  const pick = (t) => (ru ? t.ru : t.en);
+  // ethers hides the decoded name in a few places depending on the path taken
+  const name = e?.revert?.name || e?.errorName ||
+    (typeof e?.shortMessage === "string" && (e.shortMessage.match(/reverted with custom error '([A-Za-z0-9_]+)/) || [])[1]) ||
+    (typeof e?.message === "string" && (e.message.match(/custom error '([A-Za-z0-9_]+)/) || [])[1]) || null;
+  if (name && ERR_TEXT[name]) return pick(ERR_TEXT[name]);
+  if (e?.code === "ACTION_REJECTED") return ru ? "Отменено в кошельке" : "Cancelled in your wallet";
+  if (e?.code === "INSUFFICIENT_GAS" && e?.message) return e.message;
+  const raw = (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").trim();
+  // Never surface ethers' own placeholder — it tells the player nothing at all.
+  if (!raw || /unknown custom error/i.test(raw)) {
+    return name ? (ru ? "Отклонено контрактом: " : "Refused by the contract: ") + name
+                : (ru ? "Не прошло — попробуйте ещё раз" : "That didn't go through — try again");
+  }
+  return raw.slice(0, 90);
+}
 
 const TRN_ABI = [
   "function count() view returns (uint256)",
@@ -58,6 +128,12 @@ const TRN_ABI = [
   "function owner() view returns (address)",
   "function feeCollected() view returns (uint256)",
   "function withdrawFees(address,uint256)",
+  // same reason as PokerRoom above: an undeclared custom error reaches the
+  // player as "unknown custom error"
+  "error NotOperator()", "error BadParams()", "error WrongValue()", "error Full()",
+  "error AlreadyIn()", "error NotIn()", "error NotRegistering()", "error NotRunning()",
+  "error TooFew()", "error HandLive()", "error NotDue()", "error NotBusted()",
+  "error NotCreator()", "error NotPending()", "error NotIdleLongEnough()",
 ];
 
 // Fully on-chain uploaded avatars · see contracts/poker/AvatarStore.sol.
@@ -221,18 +297,18 @@ export class ShinyPoker {
 
   // wallet chooser modal (email primary, injected wallets flagged BETA)
   _chooseWallet() {
-    const ACC = "#d9ab4a", ACC2 = "#f2d78a";
+    const ACC = "#D9B970", ACC2 = "#F4DD9E";
     return new Promise((resolve, reject) => {
       const mask = document.createElement("div");
-      mask.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);z-index:9000;display:grid;place-items:center;padding:24px;font-family:'Source Code Pro',monospace";
+      mask.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);z-index:9000;display:grid;place-items:center;padding:24px;font-family:Inter,system-ui,sans-serif";
       const hasInjected = !!window.ethereum;
       mask.innerHTML = `
         <div style="background:#111114;border:1px solid #2c2c36;border-radius:16px;max-width:400px;width:100%;padding:26px;color:#e6e6ee">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <h3 style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:18px">Connect to <span style="color:${ACC}">ShinyPoker</span></h3>
-            <button data-x style="background:transparent;border:1px solid #2c2c36;color:#9a9aa8;border-radius:8px;padding:4px 9px;cursor:pointer">✕</button>
+            <h3 style="margin:0;font-family:Inter,system-ui,sans-serif;font-size:18px">Connect to <span style="color:${ACC}">ShinyPoker</span></h3>
+            <button data-x style="background:transparent;border:1px solid #2c2c36;color:#8F8C85;border-radius:8px;padding:4px 9px;cursor:pointer">✕</button>
           </div>
-          <p style="margin:0 0 18px;font-size:12px;color:#9a9aa8;line-height:1.55">Sign in with email to get a Somnia wallet · same wallet as the ShinyLuck casino, no extension, and <b style="color:${ACC2}">no popups</b> while you play.</p>
+          <p style="margin:0 0 18px;font-size:12px;color:#8F8C85;line-height:1.55">Sign in with email to get a Somnia wallet · same wallet as the ShinyLuck casino, no extension, and <b style="color:${ACC2}">no popups</b> while you play.</p>
           <button data-m="privy" style="display:flex;align-items:center;gap:10px;width:100%;padding:13px 14px;margin-bottom:9px;background:${ACC};border:1px solid ${ACC};color:#fff;border-radius:10px;cursor:pointer;font-family:inherit;font-size:14px;font-weight:600">📧 Continue with Email</button>
           <button data-m="injected" ${hasInjected ? "" : "disabled"} style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:13px 14px;margin-bottom:9px;background:#1c1c22;border:1px solid #2c2c36;color:${hasInjected ? "#e6e6ee" : "#5a5a66"};border-radius:10px;cursor:${hasInjected ? "pointer" : "not-allowed"};font-family:inherit;font-size:14px">
             <span>🦊 MetaMask${hasInjected ? "" : " (not detected)"}</span><span style="font-size:9px;letter-spacing:1px;background:rgba(232,193,90,.15);color:#e8c15a;border:1px solid rgba(232,193,90,.3);border-radius:999px;padding:2px 7px">BETA</span>
@@ -255,6 +331,16 @@ export class ShinyPoker {
   // ---- session keys (act without a wallet popup per action) ----
   _sessKey() { return ("sp_sess_" + this.net.chainId + "_" + this.cfg.pokerRoom + "_" + this.address).toLowerCase(); }
 
+  // Storage that cannot take the page down with it. A framed WKWebView with
+  // tracking prevention on THROWS on these calls (it does not return null), and
+  // this module sits in the import chain of everything — a throw here means no
+  // lobby, no table, no message. `typeof localStorage !== "undefined"`, which
+  // guarded this before, tests the wrong thing: the object exists, the CALL is
+  // what fails. Losing the session key only costs a wallet popup per action.
+  _lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  _lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+  _lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
   _bindSession(priv) {
     this.sessionWallet = new ethers.Wallet(priv, this.read);
     this.roomSession = new ethers.Contract(this.cfg.pokerRoom, ROOM_ABI, this.sessionWallet);
@@ -263,7 +349,7 @@ export class ShinyPoker {
   /// Restore a saved session and confirm it's still authorized on-chain.
   async loadSession() {
     this.sessionActive = false;
-    const priv = (typeof localStorage !== "undefined") ? localStorage.getItem(this._sessKey()) : null;
+    const priv = this._lsGet(this._sessKey());
     if (!priv) return false;
     try {
       this._bindSession(priv);
@@ -282,7 +368,7 @@ export class ShinyPoker {
   async activateSession(gasEth = 0.05) {
     this.requireWallet();
     const key = ethers.Wallet.createRandom();
-    localStorage.setItem(this._sessKey(), key.privateKey);
+    this._lsSet(this._sessKey(), key.privateKey);
     await (await this.roomWrite.setSessionKey(key.address, { value: ethers.parseEther(String(gasEth)) })).wait();
     this._bindSession(key.privateKey);
     this.sessionActive = true;
@@ -294,7 +380,7 @@ export class ShinyPoker {
   async revokeSession() {
     this.requireWallet();
     try { await (await this.roomWrite.revokeSessionKey()).wait(); } catch {}
-    if (typeof localStorage !== "undefined") localStorage.removeItem(this._sessKey());
+    this._lsDel(this._sessKey());
     this.sessionWallet = null; this.roomSession = null; this.sessionActive = false; this._sessNonce = null;
   }
 

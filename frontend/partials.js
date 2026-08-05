@@ -90,6 +90,21 @@
   const icon = (d, size = 20, sw = 1.5) =>
     `<svg width="${size}" height="${size}" viewBox="0 0 24 24"><path d="${d}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
 
+  // ---------- MUSIC ----------
+  // Site-wide, not per-game: the shell is the top document and every game sits
+  // in its iframe, so loading it here means one player that keeps going as you
+  // move between games. `lib/music.js` refuses to run inside a frame, which is
+  // what stops the framed pages (which load it too, for direct visits) from
+  // stacking a second copy of the same track on top.
+  (function () {
+    if (document.querySelector('script[data-sl-music]')) return;
+    var sc = document.createElement('script');
+    sc.src = R('lib/music.js');
+    sc.defer = true;
+    sc.setAttribute('data-sl-music', '1');
+    document.head.appendChild(sc);
+  })();
+
   // ---------- LOADER ----------
   const loader = document.createElement('div');
   loader.className = 'loader2';
@@ -358,6 +373,21 @@
             <span style="flex:none;width:44px;text-align:right;font:700 14px var(--mono);color:var(--fg-strong)"><span data-vol-fx-label>40</span>%</span>
           </div>
         </div>
+        <div style="border:1px solid var(--line-3);background:var(--panel-2);border-radius:14px;padding:16px 18px;margin-top:14px">
+          <div style="display:flex;align-items:center;gap:13px">
+            <span style="flex:none;width:42px;height:42px;border-radius:11px;background:rgba(217,185,112,.12);display:flex;align-items:center;justify-content:center;color:var(--gold)"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="6" cy="18" r="3" fill="none" stroke="currentColor" stroke-width="1.6"></circle><circle cx="18" cy="16" r="3" fill="none" stroke="currentColor" stroke-width="1.6"></circle></svg></span>
+            <div style="flex:1;min-width:0">
+              <div style="font:700 15px var(--sans);color:var(--fg)">Music</div>
+              <div style="font:400 11.5px var(--sans);color:var(--fg-mute)">Twelve lounge tracks at the poker tables, shuffled.</div>
+            </div>
+            <button class="btn2 btn2-line" data-music-toggle style="height:34px;padding:0 16px;font:600 11px var(--sans)">ON</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-top:16px">
+            <span class="k-label" style="flex:none">Volume</span>
+            <input type="range" min="0" max="100" step="5" data-vol-music aria-label="Music volume" style="flex:1;--p:35%">
+            <span style="flex:none;width:44px;text-align:right;font:700 14px var(--mono);color:var(--fg-strong)"><span data-vol-music-label>35</span>%</span>
+          </div>
+        </div>
         <div class="k-label" style="margin-top:22px">Language</div>
         <div style="border:1px solid var(--line-3);background:var(--panel-2);border-radius:14px;padding:16px 18px;margin-top:14px">
           <div style="display:flex;align-items:center;gap:13px;flex-wrap:wrap">
@@ -372,7 +402,7 @@
             </div>
           </div>
         </div>
-        <p style="margin:14px 0 0;font:400 11.5px var(--sans);color:var(--fg-ghost)">Audio is synthesized in your browser · there is no music track, so this is the one mix that matters.</p>
+        <p style="margin:14px 0 0;font:400 11.5px var(--sans);color:var(--fg-ghost)">The speaker in the sidebar mutes everything at once. Effects are synthesized in your browser; music streams one track at a time, and only while it is on.</p>
       </div>
     </div>
   `;
@@ -385,10 +415,19 @@
     try { const v = parseInt(localStorage.getItem('sl-vol-fx') || '40', 10); return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 40; }
     catch (_) { return 40; }
   };
+  // Music is its own switch: it is ambient, it plays continuously, and someone
+  // who wants click feedback does not necessarily want a soundtrack. OFF by
+  // default — starting music at a stranger unasked is the rudest thing a page
+  // can do, so it waits to be turned on (and for a gesture, per autoplay).
+  const musicOn = () => { try { return localStorage.getItem('sl-music-on') !== '0'; } catch (_) { return true; } };
+  const volMusic = () => {
+    try { const v = parseInt(localStorage.getItem('sl-vol-music') || '35', 10); return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 35; }
+    catch (_) { return 35; }
+  };
   function paintSound() {
     const on = soundOn();
     const v = volFx();
-    document.querySelectorAll('[data-sound-path]').forEach((el) => el.setAttribute('d', on ? SND_ON : SND_OFF));
+    document.querySelectorAll('[data-sound-path]').forEach((el) => el.setAttribute('d', (on || musicOn()) ? SND_ON : SND_OFF));
     document.querySelectorAll('[data-sound-toggle]').forEach((el) => { el.textContent = on ? 'ON' : 'OFF'; });
     document.querySelectorAll('[data-vol-fx]').forEach((el) => {
       el.value = String(v);
@@ -397,6 +436,15 @@
       el.style.opacity = on ? '1' : '.45';
     });
     document.querySelectorAll('[data-vol-fx-label]').forEach((el) => { el.textContent = String(v); });
+    const mOn = musicOn(), mv = volMusic();
+    document.querySelectorAll('[data-music-toggle]').forEach((el) => { el.textContent = mOn ? 'ON' : 'OFF'; });
+    document.querySelectorAll('[data-vol-music]').forEach((el) => {
+      el.value = String(mv);
+      el.style.setProperty('--p', mv + '%');
+      el.disabled = !mOn;
+      el.style.opacity = mOn ? '1' : '.45';
+    });
+    document.querySelectorAll('[data-vol-music-label]').forEach((el) => { el.textContent = String(mv); });
   }
   // Games live in the shell's iframe. localStorage is the shared channel: the
   // `storage` event fires in every OTHER same-origin document, so writing here
@@ -404,17 +452,35 @@
   // CustomEvent covers same-document listeners, which `storage` skips.
   function announceSound() {
     paintSound();
-    document.dispatchEvent(new CustomEvent('shinyluck:sound', { detail: { on: soundOn(), volume: volFx() } }));
+    const detail = { on: soundOn(), volume: volFx(), music: musicOn(), musicVolume: volMusic() };
+    document.dispatchEvent(new CustomEvent('shinyluck:sound', { detail }));
     document.querySelectorAll('iframe').forEach((f) => {
-      try { f.contentDocument?.dispatchEvent(new CustomEvent('shinyluck:sound', { detail: { on: soundOn(), volume: volFx() } })); } catch (_) {}
+      try { f.contentDocument?.dispatchEvent(new CustomEvent('shinyluck:sound', { detail })); } catch (_) {}
     });
   }
+  // The Settings panel has a switch per channel. The speaker in the sidebar is
+  // the MASTER: one press and the site is silent — no effects, no music. It
+  // used to toggle only the effects, so pressing it left the music playing and
+  // read as a broken button.
   function toggleSound() {
-    try { localStorage.setItem('sl-sound-on', soundOn() ? '0' : '1'); } catch (_) {}
+    const silencing = soundOn() || musicOn();
+    try {
+      localStorage.setItem('sl-sound-on', silencing ? '0' : '1');
+      localStorage.setItem('sl-music-on', silencing ? '0' : '1');
+    } catch (_) {}
     announceSound();
   }
+
   function setVolFx(v) {
     try { localStorage.setItem('sl-vol-fx', String(Math.min(100, Math.max(0, v)))); } catch (_) {}
+    announceSound();
+  }
+  function toggleMusic() {
+    try { localStorage.setItem('sl-music-on', musicOn() ? '0' : '1'); } catch (_) {}
+    announceSound();
+  }
+  function setVolMusic(v) {
+    try { localStorage.setItem('sl-vol-music', String(Math.min(100, Math.max(0, v)))); } catch (_) {}
     announceSound();
   }
 
@@ -538,7 +604,8 @@
   document.addEventListener('click', (e) => {
     const t = e.target;
     if (t.closest('[data-sound-btn]') || t.closest('[data-sound-toggle]')) { toggleSound(); return; }
-    if (t.closest('[data-vol-fx]')) return; // slider · handled by the input listener
+    if (t.closest('[data-music-toggle]')) { toggleMusic(); return; }
+    if (t.closest('[data-vol-fx]') || t.closest('[data-vol-music]')) return; // sliders · handled by the input listener
     if (t.closest('[data-settings-btn]')) { document.querySelector('[data-smodal-mask]')?.classList.add('on'); return; }
     const lb = t.closest('[data-lang]');
     if (lb) { window.SLI18N?.setLang(lb.getAttribute('data-lang')); paintLang(); return; }
@@ -548,9 +615,12 @@
 
   // ---------- VOLUME SLIDER ----------
   document.addEventListener('input', (e) => {
-    const el = e.target.closest && e.target.closest('[data-vol-fx]');
-    if (!el) return;
-    setVolFx(parseInt(el.value, 10) || 0);
+    const c = e.target.closest;
+    if (!c) return;
+    const fx = e.target.closest('[data-vol-fx]');
+    if (fx) { setVolFx(parseInt(fx.value, 10) || 0); return; }
+    const mu = e.target.closest('[data-vol-music]');
+    if (mu) { setVolMusic(parseInt(mu.value, 10) || 0); return; }
   });
 
   // ---------- PAGE TRANSITIONS ----------

@@ -98,12 +98,12 @@ function CashierModal({
     setBusy(true);
     try {
       await fn();
-      flash(label + " ✓");
       setAmt("");
       setNick("");
       await refreshAll();
-    } catch (e) {
-      flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 70));
+    } // no success toast · the figures refresh
+    catch (e) {
+      flash(label + " ✗ " + SP.pokerError(e));
       console.error(e);
     } finally {
       setBusy(false);
@@ -180,7 +180,7 @@ function CashierModal({
       marginBottom: 12,
       padding: "8px 10px",
       borderRadius: 8,
-      background: "var(--accent-08, rgba(217,171,74,.08))"
+      background: "var(--accent-08, rgba(217,185,112,.08))"
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
@@ -337,7 +337,7 @@ function CashierModal({
         background: "transparent",
         cursor: "pointer",
         borderRadius: 9,
-        border: sel ? "2px solid var(--accent, #d9ab4a)" : "2px solid transparent"
+        border: sel ? "2px solid var(--accent, #D9B970)" : "2px solid transparent"
       }
     }, /*#__PURE__*/React.createElement(AvatarIcon, {
       av: id,

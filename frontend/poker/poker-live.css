@@ -1,5 +1,5 @@
 /* Live-only extras layered on top of the design's styles.css. */
-.center-load { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted, #9a9aa8); font-family: var(--label, monospace); }
+.center-load { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted, #8F8C85); font-family: var(--label, monospace); }
 
 /* ---- chat rail = slide-out drawer on EVERY screen size ----
    The fixed 332px right column ate a fifth of the stage for a panel most
@@ -9,7 +9,7 @@
 .mainrow { grid-template-columns: 1fr; }
 .siderail { position: absolute; top: 56px; right: 0; bottom: 0; width: 340px; z-index: 45;
   transform: translateX(105%); transition: transform .22s ease;
-  border-left: 1px solid var(--line-2, #3a3a48); box-shadow: -18px 0 60px rgba(0, 0, 0, .55); }
+  border-left: 1px solid var(--line-2, rgba(255,255,255,0.14)); box-shadow: -18px 0 60px rgba(0, 0, 0, .55); }
 .siderail.open { transform: translateX(0); }
 .railfab { display: grid; }
 .railclose { display: grid !important; }
@@ -25,72 +25,152 @@
    the first pre-measure paint on the design shape. */
 @media (min-width: 761px) {
   .feltwrap .felt { inset: 92px var(--sp-feltside, 150px) 188px; border-radius: var(--sp-feltr, 280px); }
-  [data-dir="a"] .feltwrap .felt::before { border-radius: calc(var(--sp-feltr, 280px) - 16px); }
 }
 
+/* An empty seat is an invitation, not a competitor for attention: on a six-max
+   table five of them used to shout as loudly as the players. Quiet by default,
+   gold on hover, and it grows a little so the target stays easy to hit. */
 .emptyseat {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  width: 86px; height: 86px; border-radius: 50%; border: 1.5px dashed var(--line-2, #3a3a48);
-  background: rgba(255, 255, 255, 0.02); color: var(--muted, #9a9aa8);
-  font-family: var(--label, monospace); font-size: 12px; cursor: pointer; transition: .15s;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  width: 68px; height: 68px; border-radius: 50%;
+  border: 1.5px dashed rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.025); color: rgba(255,255,255,0.44);
+  font-family: var(--label); font-size: 10.5px; font-weight: 500; letter-spacing: .02em;
+  cursor: pointer; transition: transform .16s ease, border-color .16s, color .16s, background .16s, box-shadow .16s;
 }
-.emptyseat:hover { border-color: var(--accent, #d9ab4a); color: var(--accent-soft, #f2d78a); background: rgba(217, 171, 74, .08); }
-.emptyseat .plus { font-size: 22px; line-height: 1; }
+.emptyseat:hover { border-color: var(--accent, #D9B970); color: var(--accent-soft, #F4DD9E);
+  background: rgba(217,185,112,.10); transform: scale(1.07); box-shadow: 0 0 22px rgba(217,185,112,.16); }
+.emptyseat .plus { font-size: 20px; line-height: 1; font-weight: 300; }
 
 .lt-strip { display: flex !important; align-items: center; justify-content: center; gap: 18px;
-  font-family: var(--label, monospace); color: var(--muted, #9a9aa8); font-size: 14px; }
+  font-family: var(--label, monospace); color: var(--muted, #8F8C85); font-size: 14px; }
 .lt-seatctl { display: flex; gap: 8px; }
 
-.lt-toast { position: fixed; left: 50%; bottom: 122px; transform: translateX(-50%); z-index: 200;
-  background: rgba(20, 20, 28, .97); border: 1px solid var(--line-2, #3a3a48); border-radius: 10px;
+/* Confirmations land at the TOP. At the bottom they sat exactly on the hero's
+   own plaque and covered the one number the player was watching — their stack
+   — for the two seconds after every single action. */
+.lt-toast { position: fixed; left: 50%; top: 74px; transform: translateX(-50%); z-index: 200;
+  background: rgba(20, 20, 28, .97); border: 1px solid var(--line-2, rgba(255,255,255,0.14)); border-radius: 10px;
   padding: 11px 16px; font-family: var(--label, monospace); font-size: 13px; color: var(--text, #e6e6ee);
   box-shadow: 0 14px 40px rgba(0, 0, 0, .5); max-width: 90vw; }
 
 .lt-modalbg { position: fixed; inset: 0; background: rgba(0, 0, 0, .66); display: grid; place-items: center; z-index: 300; }
-.lt-modal { background: rgba(15, 15, 20, .99); border: 1px solid var(--line-2, #3a3a48); border-radius: 16px;
+.lt-modal { background: rgba(15, 15, 20, .99); border: 1px solid var(--line-2, rgba(255,255,255,0.14)); border-radius: 16px;
   padding: 22px; width: min(380px, 92vw); font-family: var(--label, monospace);
-  scrollbar-width: thin; scrollbar-color: var(--line-2, #3a3a48) transparent; }
+  scrollbar-width: thin; scrollbar-color: var(--line-2, rgba(255,255,255,0.14)) transparent; }
 /* the default white/system scrollbar on the scrolling create-tournament modal
    looked jarring against the matte-black chrome · theme it to the gold-line UI */
 .lt-modal::-webkit-scrollbar { width: 9px; }
 .lt-modal::-webkit-scrollbar-track { background: transparent; }
-.lt-modal::-webkit-scrollbar-thumb { background: var(--line-2, #3a3a48); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-.lt-modal::-webkit-scrollbar-thumb:hover { background: var(--accent, #d9ab4a); background-clip: padding-box; }
-.lt-modal h3 { margin: 0 0 12px; font-family: var(--mono, 'IBM Plex Mono', monospace); color: var(--text, #e6e6ee); }
-.lt-modal .note { font-size: 12px; color: var(--muted, #9a9aa8); line-height: 1.5; }
-.lt-modal label { display: block; font-size: 12px; color: var(--muted, #9a9aa8); margin: 12px 0 5px; }
-.lt-modal input { width: 100%; background: rgba(255, 255, 255, .04); border: 1px solid var(--line-2, #3a3a48);
+.lt-modal::-webkit-scrollbar-thumb { background: var(--line-2, rgba(255,255,255,0.14)); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+.lt-modal::-webkit-scrollbar-thumb:hover { background: var(--accent, #D9B970); background-clip: padding-box; }
+.lt-modal h3 { margin: 0 0 12px; font-family: var(--mono); color: var(--text, #e6e6ee); }
+.lt-modal .note { font-size: 12px; color: var(--muted, #8F8C85); line-height: 1.5; }
+.lt-modal label { display: block; font-size: 12px; color: var(--muted, #8F8C85); margin: 12px 0 5px; }
+.lt-modal input { width: 100%; background: rgba(255, 255, 255, .04); border: 1px solid var(--line-2, rgba(255,255,255,0.14));
   color: var(--text, #e6e6ee); border-radius: 9px; padding: 11px; font-family: var(--mono, monospace); font-size: 15px; }
+/* ---- the buy-in / top-up panel ----
+   Facts first (what you have, what it costs), then one number you can drag,
+   then the sizes anyone actually picks, then one button. */
+/* facts, quietly, in a panel of their own */
+.buyrows { display: flex; flex-direction: column; gap: 0; margin: 2px 0 16px;
+  border: 1px solid var(--line-2, rgba(255,255,255,0.12)); border-radius: 12px;
+  background: rgba(255,255,255,0.025); overflow: hidden; }
+.buyrow { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-family: var(--label); font-size: 12.5px; color: var(--muted, #8F8C85); }
+.buyrow:last-child { border-bottom: 0; }
+.buyrow b { display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-weight: 700; font-size: 14px; color: var(--text, #e6e6ee); }
+.buyrow b svg { flex-shrink: 0; }
+
+/* THE amount · the one thing on this panel you are choosing */
+.buyamt { position: relative; display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px; border-radius: 13px;
+  border: 1px solid var(--accent-32, rgba(217,185,112,.32));
+  background: linear-gradient(180deg, rgba(217,185,112,.10), rgba(217,185,112,.03)); }
+.buyamt .coin { flex: none; display: inline-flex; }
+.lt-modal .buyamt input.buybig { flex: 1; min-width: 0; width: auto; background: transparent; border: 0;
+  padding: 0; outline: none; font-family: var(--mono); font-weight: 800; font-size: 26px;
+  letter-spacing: -0.01em; color: #fff; }
+.buyamt .unit { flex: none; font-family: var(--label); font-size: 12px; font-weight: 600;
+  color: var(--accent-soft, #F4DD9E); letter-spacing: .04em; }
+.buyamt.bad { border-color: var(--danger, #E56B6B); background: rgba(229,107,107,.08); }
+
+.buyslider { position: relative; display: flex; align-items: center; gap: 11px; margin-top: 16px; }
+/* The min/max ends belong BESIDE the slider, not stacked under it in 11px grey
+   where they collided with the preset row. */
+.buyslider .end { flex: none; font-family: var(--mono); font-size: 11.5px; font-weight: 600;
+  color: var(--muted, #8F8C85); min-width: 26px; }
+.buyslider .end.hi { text-align: right; }
+/* `.lt-modal input` is a blanket rule for the modal's text fields: 11px of
+   padding, a 1px border and a 9px radius. Landing on a range input it turned
+   the 5px track into a fat rounded bar with a border — the thing that read as
+   a progress bar rather than a slider. Undo all of it here. */
+.buyslider input[type="range"] { flex: 1; min-width: 0; width: auto;
+  -webkit-appearance: none; appearance: none;
+  height: 6px; padding: 0; border: 0; border-radius: 999px;
+  outline: none; cursor: pointer; }
+.buyslider input::-webkit-slider-thumb { -webkit-appearance: none; width: 19px; height: 19px; border-radius: 50%;
+  background: var(--accent); border: 3px solid #0C0E0D; cursor: grab;
+  box-shadow: 0 0 0 1px var(--accent), 0 0 12px var(--accent-55); }
+.buyslider input::-moz-range-thumb { width: 19px; height: 19px; box-sizing: border-box; border-radius: 50%;
+  background: var(--accent); border: 3px solid #0C0E0D; cursor: grab; box-shadow: 0 0 0 1px var(--accent); }
+
+.buypresets { display: flex; gap: 8px; margin-top: 14px; }
+.buypresets button { flex: 1; padding: 11px 6px; font-family: var(--label); font-size: 12.5px; font-weight: 600;
+  color: var(--text-2, #E6E6E6); background: rgba(255,255,255,0.04);
+  border: 1px solid var(--line-2, rgba(255,255,255,0.14)); border-radius: 10px; cursor: pointer; transition: .14s; }
+.buypresets button:hover { border-color: var(--accent-32); background: var(--accent-12); color: #fff; }
+.buypresets button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.lt-modal .pill.buycta { width: 100%; padding: 15px; font-size: 14.5px; font-weight: 700; border-radius: 12px;
+  letter-spacing: .01em; }
+
+/* the table's own Top-up button, beside the gear */
+.topupbtn { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px;
+  border-radius: var(--r-sm, 5px); cursor: pointer; white-space: nowrap;
+  font-family: var(--label); font-size: 12px; font-weight: 600;
+  color: var(--accent-soft, #F4DD9E); background: var(--accent-12, rgba(217,185,112,.12));
+  border: 1px solid var(--accent-32, rgba(217,185,112,.32)); transition: .15s; }
+.topupbtn:hover { background: var(--accent-20, rgba(217,185,112,.2)); border-color: var(--accent-55); color: #fff; }
+.topupbtn .ic { width: 13px; height: 13px; display: inline-flex; }
+.topupbtn .ic svg { width: 100%; height: 100%; }
+
 .lt-modal .row { display: flex; gap: 10px; margin-top: 16px; }
 .lt-modal .row .pill { flex: 1; text-align: center; }
-.pill.primary { background: var(--accent, #d9ab4a); border-color: var(--accent, #d9ab4a); color: #fff; }
+.pill.primary { background: var(--accent, #D9B970); border-color: var(--accent, #D9B970); color: #fff; }
 .abtn:disabled, .pill:disabled { opacity: .45; cursor: not-allowed; }
 
 /* tournament HUD strip (under the topbar on controlled tables).
    MUST be an absolute overlay: as a static flex child of .app it stretched to
    ~560px tall and shoved the felt half off-screen. */
-.trn-hud { display: flex; align-items: center; gap: 22px; padding: 8px 18px; flex-wrap: wrap;
+/* A dark band with a gold hairline, not a gold wash. This strip sits directly
+   above the felt and ran a tinted gradient the full width of the table, which
+   put a second bright horizontal band in the eye's path to the cards. The
+   information is unchanged; only its volume is. */
+.trn-hud { display: flex; align-items: center; gap: 20px; padding: 9px 18px; flex-wrap: wrap;
   position: absolute; top: 56px; left: 0; right: 0; z-index: 30;
-  font-family: var(--label, 'Source Code Pro', monospace); font-size: 12px; color: var(--muted, #9a9aa8);
-  background: linear-gradient(90deg, rgba(217,171,74,.14), rgba(217,171,74,.05)); border-bottom: 1px solid var(--accent-32, rgba(217,171,74,.32)); }
-.trn-hud .tag { color: var(--accent-soft, #f2d78a); letter-spacing: .1em; font-size: 10.5px; }
+  font-family: var(--label); font-size: 12px; font-weight: 500; color: var(--muted, #8F8C85);
+  background: linear-gradient(180deg, rgba(14,16,15,0.96), rgba(9,10,10,0.96));
+  border-bottom: 1px solid rgba(217,185,112,0.22); backdrop-filter: blur(4px); }
+.trn-hud .tag { color: var(--accent-soft, #F4DD9E); letter-spacing: .09em; font-size: 10.5px; font-weight: 700; }
 /* blinds, level and player counts — the numbers people check mid-hand, so they
    get their own size instead of inheriting the label's */
-.trn-hud b { color: var(--text, #e6e6ee); font-family: var(--mono, 'IBM Plex Mono', monospace); font-weight: 700; font-size: 14.5px; margin-left: 3px; }
-.trn-hud .done { color: var(--gold, #e8c15a); letter-spacing: .1em; }
+.trn-hud b { color: var(--white, #fff); font-family: var(--mono); font-weight: 700; font-size: 14.5px; margin-left: 4px; }
+.trn-hud .done { color: var(--gold, #E9CC85); letter-spacing: .09em; font-weight: 700; }
 
 /* funding box in the cashier / fund modal */
-.lt-modal .fundbox { margin: 12px 0 4px; padding: 12px; border-radius: 10px; border: 1px solid var(--accent-32, rgba(217,171,74,.32)); background: var(--accent-12, rgba(217,171,74,.1)); }
+.lt-modal .fundbox { margin: 12px 0 4px; padding: 12px; border-radius: 10px; border: 1px solid var(--accent-32, rgba(217,185,112,.32)); background: var(--accent-12, rgba(217,185,112,.1)); }
 .lt-modal .fundbox .fh { font-size: 12.5px; color: var(--text, #e6e6ee); line-height: 1.5; }
 .lt-modal .fundbox .fa { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.lt-modal .fundbox .fa .mono { flex: 1; font-family: var(--mono, monospace); font-size: 11px; color: var(--accent-soft, #f2d78a); word-break: break-all; }
-.lt-modal .mono { font-family: var(--mono, 'IBM Plex Mono', monospace); }
+.lt-modal .fundbox .fa .mono { flex: 1; font-family: var(--code); font-size: 11px; color: var(--accent-soft, #F4DD9E); word-break: break-all; }
+.lt-modal .mono { font-family: var(--code); }
 
 /* current best-hand label under the hero's hole cards */
 .herocombo {
   margin: 4px auto 2px; text-align: center; font-family: var(--label, monospace); font-size: 12px;
-  letter-spacing: .02em; color: var(--accent-soft, #f2d78a); background: var(--accent-12, rgba(217,171,74,.12));
-  border: 1px solid var(--accent-32, rgba(217,171,74,.32)); border-radius: 999px; padding: 3px 12px; width: fit-content;
+  letter-spacing: .02em; color: var(--accent-soft, #F4DD9E); background: var(--accent-12, rgba(217,185,112,.12));
+  border: 1px solid var(--accent-32, rgba(217,185,112,.32)); border-radius: 999px; padding: 3px 12px; width: fit-content;
   white-space: nowrap; transition: color .25s, background .25s, border-color .25s, box-shadow .25s;
 }
 
@@ -113,20 +193,32 @@
 /* settling spinner inside the win banner */
 .sp-spin svg { animation: spin .9s linear infinite; }
 
-/* floating last-action badge above a seat ("Fold", "Raise 0.06", …) */
-.actchip { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); z-index: 11;
-  font-family: var(--label, monospace); font-size: 10px; letter-spacing: .05em; text-transform: uppercase;
-  padding: 3px 10px; border-radius: 999px; background: rgba(18, 18, 26, .96); border: 1px solid var(--line-2, #3a3a48);
+/* Floating last-action badge ("Fold", "Raise 0.06", …). It hangs BELOW the pod
+   now: the portrait breaks the pod's top edge, so a badge centred above the
+   card landed square on the player's face — and the face is how you tell the
+   seats apart. */
+/* Straddling the bottom of the portrait (which itself overhangs the plaque by
+   23px), so it reads as a label ON the player. Colour carries the KIND, so
+   "who is still in" is answerable without reading a single word. */
+.actchip { position: absolute; top: -6px; left: 50%; transform: translateX(-50%); z-index: 12;
+  font-family: var(--label, monospace); font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 999px; background: rgba(10, 12, 11, .97); border: 1px solid var(--line-2, rgba(255,255,255,0.14));
   color: var(--text, #e6e6ee); white-space: nowrap; pointer-events: none;
+  box-shadow: 0 3px 10px rgba(0,0,0,.6);
   animation: actPop .18s ease-out; }
 @keyframes actPop { from { opacity: 0; transform: translateX(-50%) translateY(5px) scale(.9); } to { opacity: 1; transform: translateX(-50%); } }
-.actchip.fold { color: #ff8d9d; border-color: rgba(239, 90, 111, .5); background: rgba(56, 16, 24, .96); }
-.actchip.check { color: var(--muted, #9a9aa8); }
-.actchip.call { color: var(--accent-soft, #f2d78a); border-color: var(--accent-32, rgba(217,171,74,.32)); }
-.actchip.bet, .actchip.raise { color: var(--gold, #e8c15a); border-color: rgba(232, 193, 90, .45); }
-.actchip.allin { color: #ff9d5c; border-color: rgba(229, 86, 42, .55); box-shadow: 0 0 12px rgba(229, 86, 42, .3); }
+/* one colour per kind · passive states recede, aggressive ones come forward */
+.actchip.fold  { color: #C9C4BC; border-color: rgba(255,255,255,.20); background: rgba(24,24,26,.97); }
+.actchip.check { color: #B9D9C6; border-color: rgba(111,207,151,.32); background: rgba(12,26,19,.97); }
+.actchip.call  { color: #8FC7E8; border-color: rgba(90,160,205,.45); background: rgba(10,22,32,.97); }
+.actchip.bet,
+.actchip.raise { color: var(--accent-ink, #241A05); border-color: var(--accent-soft, #F4DD9E);
+  background: linear-gradient(180deg, #E7CE8C, #C09B47); box-shadow: 0 3px 12px rgba(217,185,112,.35); }
+.actchip.allin { color: #FFE3E3; border-color: rgba(229,107,107,.75);
+  background: linear-gradient(180deg, #8A3535, #5E1F1F); box-shadow: 0 0 14px rgba(229,107,107,.45); }
 .heroinfo { position: relative; }
-.heroinfo .actchip { top: -16px; }
+/* the hero's badge is a normal member of the bar, not an overlay */
+.actchip.inbar { position: static; transform: none; animation: none; box-shadow: none; }
 
 /* Sitting out reads as "why is nothing happening?" · dim the seat so the state
    is visible at a glance, and put the way back on the seat itself. */
@@ -151,9 +243,8 @@
 /* ---- gold rebrand (SparkLogo palette): dark ink on gold surfaces · the old
    white-on-purple text is unreadable on gold ---- */
 .switcher button.on, .btnmark.bb, .quickchips button.on, .pill.primary,
-.hud .hgroup button.on, .chipset button.on, .cta, .btn-sm.join, .spinbtn, .regbtn { color: #1b1407 !important; }
-.abtn.raise { background: linear-gradient(180deg, #e7c26a, #c8963a) !important; border-color: var(--accent) !important; }
-.abtn.raise .lbl, .abtn.raise .amt, .abtn.raise .key { color: #1b1407 !important; }
+.hud .hgroup button.on, .chipset button.on, .cta, .btn-sm.join, .spinbtn, .regbtn { color: var(--accent-ink) !important; }
+.abtn.raise .lbl, .abtn.raise .amt, .abtn.raise .key { color: var(--accent-ink) !important; }
 
 /* fold: the face-down cards fling toward the pot and fade (muck) */
 @keyframes muckFly {
@@ -163,11 +254,20 @@
 .app[data-anim="on"] .seatbacks.muck { animation: muckFly 700ms cubic-bezier(.4, .1, .6, 1) forwards; }
 .app[data-anim="off"] .seatbacks.muck { display: none; }
 
+/* …and the hero's own hand, which sits in the flow rather than absolutely
+   positioned, so it needs its own keyframes (no translate(-50%,-50%) base) */
+@keyframes muckFlyHero {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(-190px) rotate(-13deg) scale(.66); }
+}
+.app[data-anim="on"] .hole.muck { animation: muckFlyHero 700ms cubic-bezier(.4, .1, .6, 1) forwards; }
+.app[data-anim="off"] .hole.muck { opacity: 0; }
+
 /* ---- character pass: display face for brand + hero numbers, avatar deco ---- */
-.wordmark { font-family: "Bricolage Grotesque", var(--label), sans-serif; font-weight: 800; letter-spacing: -0.01em; }
-.winbanner .hand { font-family: "Bricolage Grotesque", var(--mono), monospace; font-weight: 800; letter-spacing: -0.01em; }
-.pot .v { font-family: "Bricolage Grotesque", var(--mono), monospace !important; font-weight: 800; }
-.stat .v { font-family: "Bricolage Grotesque", var(--mono), monospace !important; font-weight: 800; }
+.wordmark { font-family: var(--label), system-ui, sans-serif; font-weight: 800; letter-spacing: -0.01em; }
+.winbanner .hand { font-family: var(--mono), system-ui, sans-serif; font-weight: 800; letter-spacing: -0.01em; }
+.pot .v { font-family: var(--mono), system-ui, sans-serif !important; font-weight: 800; }
+.stat .v { font-family: var(--mono), system-ui, sans-serif !important; font-weight: 800; }
 .avatar.deco { color: #fff; overflow: hidden; border: 0; text-shadow: 0 1px 3px rgba(0,0,0,.45); }
 .avatar.deco svg { pointer-events: none; }
 
@@ -201,9 +301,29 @@ button[data-sp-busy]::after {
 }
 @keyframes sp-press-spin { to { transform: rotate(360deg); } }
 
+/* On a GOLD-FILLED button a gold spinner is nearly invisible — and these are
+   exactly the buttons whose wait matters (sit down, top up, raise). Dark ink
+   on the fill, and a light scrim so the button does not just go muddy. */
+.pill.primary[data-sp-busy]::after,
+.buycta[data-sp-busy]::after,
+.abtn.raise[data-sp-busy]::after,
+.btn-sm.join[data-sp-busy]::after,
+.cta[data-sp-busy]::after {
+  border-color: rgba(36, 26, 5, .30); border-top-color: var(--accent-ink, #241A05);
+}
+.pill.primary[data-sp-busy]::before,
+.buycta[data-sp-busy]::before,
+.abtn.raise[data-sp-busy]::before,
+.btn-sm.join[data-sp-busy]::before,
+.cta[data-sp-busy]::before { background: rgba(255, 246, 224, .26); }
+
 /* Reduced motion: keep the state legible, drop the spin */
 @media (prefers-reduced-motion: reduce) {
   button { transition: none; }
   button[data-sp-press] { scale: 1; filter: brightness(.8); }
   button[data-sp-busy]::after { animation: none; border-top-color: var(--accent, #e8c15a); }
 }
+
+/* the panel says what it is waiting for, under the button that is spinning */
+.buywait { margin: 10px 0 0; text-align: center; font-family: var(--label);
+  font-size: 11.5px; color: var(--muted, #8F8C85); }

@@ -84,7 +84,7 @@ function avatarColors(seed) {
   let h = 0;
   const s = String(seed || "?").toLowerCase();
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i) & 0xffffffff) >>> 0;
-  const PAL = [["#d9ab4a", "#7c5117"], ["#e2793f", "#6e2a12"], ["#c8963a", "#3f2a0e"], ["#b8574f", "#521c1c"], ["#7a9a4e", "#2a4319"], ["#4f8f8b", "#1b3d3b"], ["#9a6ad0", "#37215a"], ["#c0576f", "#4e1c2c"], ["#5e82c8", "#1f3153"], ["#b0b46a", "#44461e"], ["#cf8f5c", "#5a3416"], ["#6aa9a0", "#24443f"]];
+  const PAL = [["#D9B970", "#7c5117"], ["#e2793f", "#6e2a12"], ["#c8963a", "#3f2a0e"], ["#b8574f", "#521c1c"], ["#7a9a4e", "#2a4319"], ["#4f8f8b", "#1b3d3b"], ["#9a6ad0", "#37215a"], ["#c0576f", "#4e1c2c"], ["#5e82c8", "#1f3153"], ["#b0b46a", "#44461e"], ["#cf8f5c", "#5a3416"], ["#6aa9a0", "#24443f"]];
   const p = PAL[h % PAL.length];
   return {
     a: p[0],
@@ -157,24 +157,24 @@ function SparkLogo({
   }), /*#__PURE__*/React.createElement("path", {
     d: "M 32 3 Q 36.5 23 47 32 Q 36.5 41 32 61 Q 27.5 41 17 32 Q 27.5 23 32 3 Z",
     fill: "url(#spkCore)",
-    stroke: "#d9ab4a",
+    stroke: "#D9B970",
     strokeWidth: "1.4",
     strokeLinejoin: "round"
   })), /*#__PURE__*/React.createElement("path", {
     d: star(13, 18, 3),
-    fill: "#f2d78a",
+    fill: "#F4DD9E",
     opacity: "0.95"
   }), /*#__PURE__*/React.createElement("path", {
     d: star(52, 13, 2.2),
-    fill: "#f2d78a",
+    fill: "#F4DD9E",
     opacity: "0.8"
   }), /*#__PURE__*/React.createElement("path", {
     d: star(50, 51, 2.6),
-    fill: "#f2d78a",
+    fill: "#F4DD9E",
     opacity: "0.9"
   }), /*#__PURE__*/React.createElement("path", {
     d: star(12, 47, 1.8),
-    fill: "#f2d78a",
+    fill: "#F4DD9E",
     opacity: "0.7"
   }));
 }
@@ -256,6 +256,117 @@ function SomiIcon({
   }), /*#__PURE__*/React.createElement("path", {
     d: "M 585.892 238.618 L 565.321 238.618 C 559.493 238.618 554.35 239.99 549.893 242.733 C 545.779 245.132 542.179 248.561 539.094 253.018 C 536.351 257.132 534.123 261.932 532.408 267.417 C 531.037 272.56 530.351 277.874 530.351 283.359 L 530.351 366.156 C 530.351 378.841 528.98 389.983 526.237 399.583 C 523.837 409.183 519.38 417.24 512.866 423.753 C 506.695 430.61 498.295 435.753 487.667 439.181 C 477.382 442.61 464.354 444.324 448.583 444.324 L 406.928 444.324 L 406.928 410.897 L 450.64 410.897 C 465.04 410.897 475.154 407.64 480.982 401.126 C 487.153 394.612 490.239 382.784 490.239 365.642 L 490.239 294.673 C 490.239 271.703 493.667 254.904 500.524 244.275 C 507.381 233.304 515.266 225.933 524.18 222.162 C 515.266 218.048 507.381 210.334 500.524 199.02 C 493.667 187.706 490.239 171.25 490.239 149.651 L 490.239 78.682 C 490.239 61.54 487.153 49.712 480.982 43.198 C 474.811 36.684 464.526 33.427 450.126 33.427 L 406.928 33.427 L 406.928 0 L 448.583 0 C 464.354 0 477.382 1.714 487.667 5.143 C 498.295 8.571 506.695 13.714 512.866 20.571 C 519.38 27.085 523.837 35.141 526.237 44.741 C 528.98 54.341 530.351 65.483 530.351 78.168 L 530.351 160.965 C 530.351 166.107 531.037 171.421 532.408 176.907 C 533.78 182.049 535.837 186.849 538.58 191.306 C 541.665 195.42 545.265 198.849 549.379 201.591 C 553.836 204.334 558.979 205.706 564.807 205.706 L 585.892 205.706 L 585.892 238.618 Z",
     fill: "currentColor"
+  }));
+}
+
+/* The SOMI token as a COIN, for standing in front of a figure.
+   `SomiIcon` above is the bare {} mark — correct as a logo, but at the 13px a
+   stack label needs it just reads as punctuation. Minted into a disc it reads
+   as money at a glance, which is the whole job: every number on the felt is
+   either chips or SOMI and the player must never have to work out which. */
+function SomiCoin({
+  size = 14,
+  className,
+  style
+}) {
+  return /*#__PURE__*/React.createElement("svg", {
+    className: "somicoin " + (className || ""),
+    style: style,
+    width: size,
+    height: size,
+    viewBox: "0 0 32 32",
+    "aria-hidden": "true"
+  }, /*#__PURE__*/React.createElement("defs", null, /*#__PURE__*/React.createElement("linearGradient", {
+    id: "somiRim",
+    x1: "0",
+    y1: "0",
+    x2: "0",
+    y2: "1"
+  }, /*#__PURE__*/React.createElement("stop", {
+    offset: "0%",
+    stopColor: "#F4DD9E"
+  }), /*#__PURE__*/React.createElement("stop", {
+    offset: "100%",
+    stopColor: "#A6822F"
+  }))), /*#__PURE__*/React.createElement("circle", {
+    cx: "16",
+    cy: "16",
+    r: "15",
+    fill: "#100E09",
+    stroke: "url(#somiRim)",
+    strokeWidth: "1.6"
+  }), /*#__PURE__*/React.createElement("g", {
+    transform: "translate(16 16) scale(0.0325) translate(-292.9 -222.2)",
+    fill: "#F4DD9E"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M 0 205.706 L 20.571 205.706 C 26.399 205.706 31.542 204.506 35.998 202.106 C 40.455 199.363 44.055 195.935 46.798 191.82 C 49.884 187.364 52.112 182.564 53.483 177.421 C 55.198 171.936 56.055 166.45 56.055 160.965 L 56.055 78.168 C 56.055 65.483 57.255 54.341 59.655 44.741 C 62.397 35.141 66.854 27.085 73.025 20.571 C 79.197 13.714 87.425 8.571 97.71 5.143 C 108.338 1.714 121.538 0 137.308 0 L 178.964 0 L 178.964 33.427 L 135.251 33.427 C 120.852 33.427 110.567 36.684 104.396 43.198 C 98.567 49.712 95.653 61.54 95.653 78.682 L 95.653 149.651 C 95.653 172.621 92.225 189.592 85.368 200.563 C 78.511 211.191 70.626 218.391 61.712 222.162 C 70.626 226.276 78.511 233.99 85.368 245.304 C 92.225 256.618 95.653 273.074 95.653 294.673 L 95.653 365.642 C 95.653 382.784 98.739 394.612 104.91 401.126 C 111.081 407.64 121.366 410.897 135.766 410.897 L 178.964 410.897 L 178.964 444.324 L 137.308 444.324 C 121.538 444.324 108.338 442.61 97.71 439.181 C 87.425 435.753 79.197 430.61 73.025 423.753 C 66.854 417.24 62.397 409.183 59.655 399.583 C 57.255 389.983 56.055 378.841 56.055 366.156 L 56.055 283.359 C 56.055 278.217 55.198 273.074 53.483 267.932 C 52.112 262.446 49.884 257.646 46.798 253.532 C 44.055 249.075 40.455 245.475 35.998 242.733 C 31.884 239.99 26.913 238.618 21.085 238.618 L 0 238.618 L 0 205.706 Z"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M 585.892 238.618 L 565.321 238.618 C 559.493 238.618 554.35 239.99 549.893 242.733 C 545.779 245.132 542.179 248.561 539.094 253.018 C 536.351 257.132 534.123 261.932 532.408 267.417 C 531.037 272.56 530.351 277.874 530.351 283.359 L 530.351 366.156 C 530.351 378.841 528.98 389.983 526.237 399.583 C 523.837 409.183 519.38 417.24 512.866 423.753 C 506.695 430.61 498.295 435.753 487.667 439.181 C 477.382 442.61 464.354 444.324 448.583 444.324 L 406.928 444.324 L 406.928 410.897 L 450.64 410.897 C 465.04 410.897 475.154 407.64 480.982 401.126 C 487.153 394.612 490.239 382.784 490.239 365.642 L 490.239 294.673 C 490.239 271.703 493.667 254.904 500.524 244.275 C 507.381 233.304 515.266 225.933 524.18 222.162 C 515.266 218.048 507.381 210.334 500.524 199.02 C 493.667 187.706 490.239 171.25 490.239 149.651 L 490.239 78.682 C 490.239 61.54 487.153 49.712 480.982 43.198 C 474.811 36.684 464.526 33.427 450.126 33.427 L 406.928 33.427 L 406.928 0 L 448.583 0 C 464.354 0 477.382 1.714 487.667 5.143 C 498.295 8.571 506.695 13.714 512.866 20.571 C 519.38 27.085 523.837 35.141 526.237 44.741 C 528.98 54.341 530.351 65.483 530.351 78.168 L 530.351 160.965 C 530.351 166.107 531.037 171.421 532.408 176.907 C 533.78 182.049 535.837 186.849 538.58 191.306 C 541.665 195.42 545.265 198.849 549.379 201.591 C 553.836 204.334 558.979 205.706 564.807 205.706 L 585.892 205.706 L 585.892 238.618 Z"
+  })), /*#__PURE__*/React.createElement("text", {
+    x: "16",
+    y: "16",
+    textAnchor: "middle",
+    dominantBaseline: "central",
+    fontFamily: "Inter, system-ui, sans-serif",
+    fontWeight: "700",
+    fontSize: "13",
+    fill: "#F4DD9E"
+  }, "s"));
+}
+
+/* Money, at whatever size it actually is.
+   Every figure on the felt used to be printed with `toFixed(v % 1 ? 1 : 0)` —
+   one decimal place. The smallest cash table runs 0.01/0.02 blinds, so a real
+   pot of 0.04 rendered as **0.0** and a 0.04 bet as **0.0**: the table showed
+   a player that their money had gone nowhere. Places scale with magnitude, so
+   a 1200-chip pot does not carry four meaningless decimals either, and a
+   non-zero amount can never round away to "0". */
+function fmtMoney(n) {
+  n = Number(n) || 0;
+  if (!isFinite(n) || n === 0) return "0";
+  const a = Math.abs(n);
+  const dp = a >= 1000 ? 0 : a >= 100 ? 1 : a >= 1 ? 2 : a >= 0.01 ? 3 : 4;
+  const s = n.toFixed(dp);
+  if (/^-?0(\.0*)?$/.test(s)) return (n < 0 ? "-" : "") + "<0.0001";
+  return s.indexOf(".") < 0 ? s : s.replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/* Tournament chips are NOT the token · a stack of 10 000 tournament chips is
+   worth nothing off the table, so it must never wear the money mark. */
+function ChipMark({
+  size = 14,
+  className,
+  style
+}) {
+  return /*#__PURE__*/React.createElement("svg", {
+    className: "chipmark " + (className || ""),
+    style: style,
+    width: size,
+    height: size,
+    viewBox: "0 0 32 32",
+    "aria-hidden": "true"
+  }, /*#__PURE__*/React.createElement("circle", {
+    cx: "16",
+    cy: "16",
+    r: "14.4",
+    fill: "#141018",
+    stroke: "#D9B970",
+    strokeWidth: "1.5"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: "16",
+    cy: "16",
+    r: "8.2",
+    fill: "none",
+    stroke: "#D9B970",
+    strokeWidth: "1.5",
+    strokeDasharray: "3.6 3.4",
+    opacity: "0.85"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: "16",
+    cy: "16",
+    r: "3.2",
+    fill: "#D9B970",
+    opacity: "0.9"
   }));
 }
 
@@ -363,9 +474,12 @@ function SPCompressAvatar(file, maxBytes = 7800) {
 Object.assign(window, {
   Card,
   Suit,
+  fmtMoney,
   BraceMark,
   BraceLogo,
   SomiIcon,
+  SomiCoin,
+  ChipMark,
   SparkLogo,
   SparkMark,
   avatarColors,
@@ -398,6 +512,9 @@ const SP_I18N_RU = {
   "All-in": "Олл-ин",
   "Best": "Комбо",
   "Pot odds": "Шансы банка",
+  "Pre-select your move": "Выбрать ход заранее",
+  "Less": "Меньше",
+  "More": "Больше",
   "You win": "Вы выиграли",
   "You lose": "Вы проиграли",
   "wins": "выигрывает",
@@ -439,6 +556,43 @@ const SP_I18N_RU = {
   "Hand": "Рука",
   "Cashier": "Касса",
   "Connect Wallet": "Подключить кошелёк",
+  "Show finished": "Показать завершённые",
+  "Hide finished": "Скрыть завершённые",
+  "Take a seat": "Сесть за стол",
+  "Join": "Присоединиться",
+  "Rake": "Рейк",
+  "cap": "потолок",
+  "no entries yet": "пока никого",
+  "WINNER": "ПОБЕДА",
+  "Confirming on-chain · this takes a moment": "Подтверждаем в сети · это займёт момент",
+  "You're in this hand — you can leave once it ends": "Вы в раздаче — выйти можно, когда она закончится",
+  "Leaving · you'll be folded and stood up when this hand ends": "Выходим · сфолдим и поднимем из-за стола, как только рука закончится",
+  "Leaving after this hand · click to stay": "Выходим после этой руки · нажмите, чтобы остаться",
+  "Staying at the table": "Остаёмся за столом",
+  "Game": "Игра",
+  "Available": "Доступно",
+  "You will be charged": "Спишется",
+  "Sit down": "Сесть",
+  "Max": "Макс",
+  "Add chips": "Добавить фишек",
+  "Your stack": "Ваш стек",
+  "Table max": "Максимум стола",
+  "Top up": "Пополнить",
+  "Add chips to your stack": "Добавить фишек в стек",
+  "Up to": "До",
+  "You're already at this table's maximum stack.": "У вас уже максимальный стек для этого стола.",
+  "open table": "стол свободен",
+  "waiting for players": "ждём игроков",
+  "nothing is taken when the hand ends before the flop": "если рука закончилась до флопа, рейк не берётся",
+  "Nothing running right now": "Сейчас ничего не идёт",
+  "Create one, or look through what has already been played.": "Создайте свой или посмотрите, что уже сыграно.",
+  "Be the first · create one with your own buy-in, prize pool and payout split.": "Будьте первым · создайте турнир со своим бай-ином, призовым и раскладкой выплат.",
+  "Create tournament": "Создать турнир",
+  "Buy-in": "Бай-ин",
+  "Free": "Бесплатно",
+  "payout": "выплаты",
+  "Play": "Играть",
+  "Observe": "Смотреть",
   "Say something…": "Напишите что-нибудь…",
   "Sit down to chat": "Сядьте за стол, чтобы писать",
   "Send": "Отпр.",
@@ -473,6 +627,10 @@ const SP_I18N_RU = {
   "Settings": "Настройки",
   "Sit out": "Сит-аут",
   "Sit in": "Вернуться в игру",
+  "Sit out next hand": "Пропустить следующие руки",
+  "Sit back in": "Вернуться в игру",
+  "You keep your seat and your chips while sitting out.": "Место и фишки остаются за вами.",
+  "Keeps your seat and chips · you are not dealt in until you sit back.": "Место и фишки остаются за вами · карты не раздаются, пока не вернётесь.",
   // ---- poker lobby (terms like NLHE / rake / Sit & Go stay English) ----
   "Players seated": "Игроков за столами",
   "Tables": "Столы",

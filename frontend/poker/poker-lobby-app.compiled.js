@@ -106,7 +106,18 @@ function LobbyApp() {
   const [trnSeated, setTrnSeated] = uS(0);
   const [showCreate, setShowCreate] = uS(false);
   const [showCashier, setShowCashier] = uS(false);
-  const [theme] = uS(() => localStorage.getItem("sp_theme") || "b");
+  // try/catch, not a bare read: in a framed WKWebView (Telegram on iOS with
+  // tracking prevention on) `localStorage` THROWS instead of returning null.
+  // Thrown from a state initializer, that blanks the whole lobby with no error
+  // on screen — the exact failure §26 chased. poker-boot.js also shims the
+  // whole object; this is the second lock on the same door.
+  const [theme] = uS(() => {
+    try {
+      return localStorage.getItem("sp_theme") || "b";
+    } catch (e) {
+      return "b";
+    }
+  });
 
   // Ambient backdrop is poker-dust.js now (six composited sparks) instead of a
   // GridField canvas repainting thousands of cells every frame at 16% opacity.
@@ -279,7 +290,7 @@ function LobbyApp() {
     size: 16
   }), /*#__PURE__*/React.createElement("span", {
     className: "bal tnum"
-  }, bal.toFixed(1)), /*#__PURE__*/React.createElement("span", {
+  }, fmtMoney(bal)), /*#__PURE__*/React.createElement("span", {
     className: "net"
   }, lshort(addr))) : /*#__PURE__*/React.createElement("button", {
     className: "metapill",
@@ -348,14 +359,18 @@ function LobbyApp() {
     onClick: () => setSize(k)
   }, l))), /*#__PURE__*/React.createElement("div", {
     className: "spacerflex"
-  })) : tab === "tournaments" && SP.sdk.hasTournaments() ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
-    className: "filterlabel"
-  }, "Single-table tournaments \xB7 buy-in or sponsored pools"), /*#__PURE__*/React.createElement("div", {
+  })) : tab === "tournaments" && SP.sdk.hasTournaments() ?
+  /*#__PURE__*/
+  /* The line that used to sit here ("Single-table tournaments ·
+     buy-in or sponsored pools") described the feature to someone who
+     had already chosen it, in the row where they were looking for
+     something to click. */
+  React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "spacerflex"
   }), /*#__PURE__*/React.createElement("button", {
     className: "cta",
     onClick: () => connected ? setShowCreate(true) : connect()
-  }, "+ Create tournament")) : /*#__PURE__*/React.createElement("span", {
+  }, "+ ", SPT("Create tournament"))) : /*#__PURE__*/React.createElement("span", {
     className: "filterlabel"
   }, SPT("Scheduled tournaments"))), /*#__PURE__*/React.createElement("div", {
     className: "lobbybody"
@@ -450,7 +465,7 @@ function LobbyApp() {
       className: "tc-suit",
       style: {
         transform: `translate(-50%, -52%) rotate(${tilt}deg)`,
-        color: red ? "rgba(190,80,80,.075)" : "rgba(217,171,74,.07)"
+        color: red ? "rgba(190,80,80,.075)" : "rgba(217,185,112,.07)"
       }
     }, suit), seats.map((s, i) => /*#__PURE__*/React.createElement("span", {
       key: i,
@@ -471,17 +486,18 @@ function LobbyApp() {
       className: "dot"
     }), SPT("hand in play"))) : /*#__PURE__*/React.createElement("span", {
       className: "tc-wait"
-    }, r.seated > 0 ? "waiting for players" : "open table · be first"))), /*#__PURE__*/React.createElement("div", {
+    }, r.seated > 0 ? SPT("waiting for players") : SPT("open table")))), /*#__PURE__*/React.createElement("div", {
       className: "tc-bottom"
     }, /*#__PURE__*/React.createElement("span", {
-      className: "tc-rake"
-    }, "rake ", /*#__PURE__*/React.createElement("b", null, r.rake, "%"), " \xB7 cap ", r.cap, " \xB7 no flop no drop"), /*#__PURE__*/React.createElement("span", {
+      className: "tc-rake",
+      title: `${SPT("Rake")} ${r.rake}% · ${SPT("cap")} ${r.cap} ${sym} · ${SPT("nothing is taken when the hand ends before the flop")}`
+    }, SPT("Rake"), " ", /*#__PURE__*/React.createElement("b", null, r.rake, "%")), /*#__PURE__*/React.createElement("span", {
       className: "tc-actions"
     }, full ? /*#__PURE__*/React.createElement("span", {
       className: "btn-sm full"
     }, SPT("Full · watch")) : /*#__PURE__*/React.createElement("span", {
       className: "btn-sm join"
-    }, r.seated === 0 ? "Sit first" : `Join · ${r.seated}/${r.size}`))));
+    }, r.seated === 0 ? SPT("Take a seat") : `${SPT("Join")} · ${r.seated}/${r.size}`))));
   }))))));
 }
 
@@ -499,6 +515,7 @@ function TournamentsTab({
   const [mine, setMine] = uS({}); // id -> isRegistered
   const [busy, setBusy] = uS(false);
   const [msg, setMsg] = uS(null);
+  const [showPast, setShowPast] = uS(false);
   const sym = SP.NETWORK.currency.symbol;
   function flash(m) {
     setMsg(m);
@@ -537,11 +554,11 @@ function TournamentsTab({
     setBusy(true);
     try {
       await fn();
-      flash(label + " ✓");
       bustTrnCache();
       await load();
-    } catch (e) {
-      flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 70));
+    } // no success toast · the row updates itself
+    catch (e) {
+      flash(label + " ✗ " + SP.pokerError(e));
       console.error(e);
     } finally {
       setBusy(false);
@@ -551,6 +568,12 @@ function TournamentsTab({
   const fmtSplit = bps => bps.map(b => b / 100 + "%").join(" / ");
   // Private (approval) tournaments are invite-by-link · list them only for their host.
   const visible = (list || []).filter(t => !t.approvalRequired || addr && t.creator.toLowerCase() === addr.toLowerCase());
+  // A finished tournament cannot be joined, watched or acted on — it is a
+  // receipt. Twelve of them above the one event you could actually enter is
+  // what made this page unreadable, so they fold away behind a count.
+  const open = visible.filter(t => t.status <= 1);
+  const past = visible.filter(t => t.status > 1);
+  const rowsShown = showPast ? open.concat(past) : open;
   return /*#__PURE__*/React.createElement(React.Fragment, null, msg && /*#__PURE__*/React.createElement("div", {
     className: "lt-toast",
     style: {
@@ -572,31 +595,22 @@ function TournamentsTab({
       textAlign: "center"
     }
   }, SPT("Loading tournaments…")) : visible.length === 0 ? /*#__PURE__*/React.createElement("div", {
-    style: {
-      textAlign: "center",
-      padding: "70px 20px",
-      color: "var(--muted)",
-      fontFamily: "var(--label)"
-    }
+    className: "emptystate"
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 30,
-      marginBottom: 10
-    }
+    className: "glyph"
   }, "\u2660"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontFamily: "var(--mono)",
-      fontSize: 18,
-      color: "var(--text)"
-    }
+    className: "ttl"
   }, SPT("No tournaments yet")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 8,
-      fontSize: 13
-    }
-  }, "Be the first \xB7 create one with your own buy-in, prize pool and payout split.")) : /*#__PURE__*/React.createElement("div", {
+    className: "sub"
+  }, SPT("Be the first · create one with your own buy-in, prize pool and payout split."))) : /*#__PURE__*/React.createElement("div", {
     className: "dtable"
+  }, open.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "emptystate tight"
   }, /*#__PURE__*/React.createElement("div", {
+    className: "ttl"
+  }, SPT("Nothing running right now")), /*#__PURE__*/React.createElement("div", {
+    className: "sub"
+  }, SPT("Create one, or look through what has already been played."))), rowsShown.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "dthead",
     style: {
       gridTemplateColumns: TRN_COLS
@@ -605,7 +619,7 @@ function TournamentsTab({
     className: "h"
   }, SPT("Tournament")), /*#__PURE__*/React.createElement("span", {
     className: "h"
-  }, "Buy-in \xB7 split"), /*#__PURE__*/React.createElement("span", {
+  }, SPT("Buy-in")), /*#__PURE__*/React.createElement("span", {
     className: "h"
   }, SPT("Prize pool")), /*#__PURE__*/React.createElement("span", {
     className: "h c"
@@ -613,14 +627,14 @@ function TournamentsTab({
     className: "h"
   }, SPT("Status")), /*#__PURE__*/React.createElement("span", {
     className: "h r"
-  }, SPT("Action"))), visible.map(t => {
+  }, SPT("Action"))), rowsShown.map(t => {
     const cost = t.buyIn + t.fee;
     const statusCls = ["registering", "running", "finished", "finished"][t.status];
     const reg = mine[t.id];
     const isCreator = addr && t.creator.toLowerCase() === addr.toLowerCase();
     return /*#__PURE__*/React.createElement("div", {
       key: t.id,
-      className: "drow",
+      className: "drow" + (t.status > 1 ? " past" : ""),
       style: {
         gridTemplateColumns: TRN_COLS
       }
@@ -643,21 +657,23 @@ function TournamentsTab({
       className: "bnt"
     }, t.pendingCount, " applied"))), /*#__PURE__*/React.createElement("div", {
       className: "buyincell"
-    }, /*#__PURE__*/React.createElement("span", {
+    }, cost > 0n ? /*#__PURE__*/React.createElement("span", {
       className: "bi tnum"
     }, Number(SP.fmt(cost, 4)), /*#__PURE__*/React.createElement("span", {
       className: "u"
-    }, sym)), /*#__PURE__*/React.createElement("span", {
+    }, sym)) : /*#__PURE__*/React.createElement("span", {
+      className: "bi free"
+    }, SPT("Free")), /*#__PURE__*/React.createElement("span", {
       className: "split"
-    }, "payout ", fmtSplit(t.payoutBps))), /*#__PURE__*/React.createElement("div", {
+    }, SPT("payout"), " ", fmtSplit(t.payoutBps))), /*#__PURE__*/React.createElement("div", {
       className: "prizecell"
-    }, /*#__PURE__*/React.createElement("span", {
+    }, t.pool > 0n ? /*#__PURE__*/React.createElement("span", {
       className: "pp tnum"
     }, Number(SP.fmt(t.pool, 4)), /*#__PURE__*/React.createElement("span", {
       className: "u"
-    }, sym)), /*#__PURE__*/React.createElement("span", {
-      className: "securechip"
-    }, "\u2713 secured on-chain")), /*#__PURE__*/React.createElement("div", {
+    }, sym)) : /*#__PURE__*/React.createElement("span", {
+      className: "pp empty"
+    }, SPT("no entries yet"))), /*#__PURE__*/React.createElement("div", {
       className: "regcell tnum"
     }, t.registered, "/", t.maxPlayers, t.status === 1 && /*#__PURE__*/React.createElement("span", {
       className: "u"
@@ -689,8 +705,11 @@ function TournamentsTab({
     }, SPT("Start")), t.status === 1 && /*#__PURE__*/React.createElement("a", {
       className: "btn-sm join",
       href: "table?t=" + t.tableId
-    }, reg ? "Play →" : "Observe")));
-  })));
+    }, reg ? SPT("Play") + " →" : SPT("Observe"))));
+  }), past.length > 0 && /*#__PURE__*/React.createElement("button", {
+    className: "pasttoggle",
+    onClick: () => setShowPast(v => !v)
+  }, showPast ? SPT("Hide finished") : SPT("Show finished") + " (" + past.length + ")")));
 }
 
 /* ---------------- Sit & Go (live, one-click presets on the tournament engine) ---------------- */
@@ -792,11 +811,11 @@ function SngTab({
     setBusy(true);
     try {
       await fn();
-      flash(label + " ✓");
       bustTrnCache();
       await load();
-    } catch (e) {
-      flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 70));
+    } // no success toast · the row updates itself
+    catch (e) {
+      flash(label + " ✗ " + SP.pokerError(e));
       console.error(e);
     } finally {
       setBusy(false);

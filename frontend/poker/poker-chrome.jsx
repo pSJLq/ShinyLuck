@@ -57,7 +57,7 @@ function TopBar({ scene, product, onProduct, onSettings, deckMode, balance, mode
       )}
       <div className={"wallet" + (wrongNetwork ? " wrongnet" : "")} data-anno="wallet">
         <BraceLogo size={16} />
-        <span className="bal tnum">{balance.toFixed(1)}</span>
+        <span className="bal tnum">{fmtMoney(balance)}</span>
         <span className="net">{wrongNetwork ? "Wrong network" : "Somnia"}</span>
       </div>
       <button className="iconbtn" title="Settings" onClick={onSettings}>{I.gear}</button>
@@ -111,61 +111,76 @@ function SideRail() {
   );
 }
 
-/* ---------------- Action bar (your turn) ---------------- */
-function ActionBar({ action, deckMode, onFold, onCheckCall, onRaise, betValue, setBetValue }) {
-  const { toCall, minRaise, potForBet, heroStack, best, outs, potOdds, raiseLabel, canCheck, step, symbol } = action;
+/* ---------------- Action bar (your turn) ----------------
+   One card, two rows: how much on top, what to do underneath. The old bar
+   spread four unrelated clusters across the full width — helper chips at the
+   far left, a timer ring in the middle of the sizing controls, buttons at the
+   far right — so the two things a player actually does (pick a size, press an
+   action) were the two furthest apart. The amounts now live ON the buttons,
+   which is also what stops a mis-read: you press a number, not a word. */
+function ActionBar({ action, deckMode, onFold, onCheckCall, onRaise, onAllIn, betValue, setBetValue }) {
+  const { toCall, minRaise, potForBet, heroStack, best, potOdds, raiseLabel, canCheck, step, symbol, chips } = action;
   const [active, setActive] = React.useState(null);
   const min = minRaise, max = heroStack;
-  const fill = ((betValue - min) / (max - min)) * 100;
+  const fill = max > min ? ((betValue - min) / (max - min)) * 100 : 100;
+  const stepN = step || 0.5;
+  const clamp = (v) => Math.min(max, Math.max(min, v));
+  const fmt = (v) => (chips ? fmtChips(Math.round(v)) : fmtMoney(v));
   const quick = [
     { k: SPT("Min"), v: minRaise },
-    { k: "½", v: round1(potForBet * 0.5 + toCall) },
-    { k: "⅔", v: round1(potForBet * 0.66 + toCall) },
+    { k: "50%", v: round1(potForBet * 0.5 + toCall) },
+    { k: "75%", v: round1(potForBet * 0.75 + toCall) },
     { k: SPT("Pot"), v: round1(potForBet + toCall) },
-    { k: SPT("All-in"), v: heroStack },
-  ];
+  ].filter((q) => clamp(q.v) > min || q.k === SPT("Min"));
+  const secsLeft = action.timer;
+  const urgent = secsLeft != null && secsLeft <= 8;
+  const pct = secsLeft != null ? Math.max(0, Math.min(1, secsLeft / (action.timerTotal || 30))) : 1;
+
   return (
     <div className="actionbar">
-      <div className="helpers" data-anno="helpers">
-        <span className="helperchip best"><span className="k">{SPT("Best")}</span><b>{best}</b></span>
-        <div style={{ display: "flex", gap: 7 }}>
-          <span className="helperchip"><span className="k">{SPT("Pot odds")}</span><b>{potOdds}</b></span>
-        </div>
-      </div>
+      <div className={"actbar" + (urgent ? " urgent" : "")}>
+        {/* the clock reads as the card draining, not as a widget to look up */}
+        <div className="acttimer"><i style={{ width: (pct * 100) + "%" }} /></div>
 
-      <div className="betcontrols" data-anno="bet">
-        <div className="quickchips">
-          {quick.map(q => (
-            <button key={q.k} className={active === q.k ? "on" : ""}
-              onClick={() => { setActive(q.k); setBetValue(Math.min(max, Math.max(min, q.v))); }}>{q.k}</button>
-          ))}
-        </div>
-        <div className="sliderrow">
-          <div className="bslider" style={{ "--fill": fill + "%" }}>
-            <input type="range" min={min} max={max} step={step || 0.5} value={betValue}
-              onChange={e => { setBetValue(parseFloat(e.target.value)); setActive(null); }} />
+        <div className="actrow sizing" data-anno="bet">
+          <div className="quickchips">
+            {quick.map((q) => (
+              <button key={q.k} className={active === q.k ? "on" : ""}
+                onClick={() => { setActive(q.k); setBetValue(clamp(q.v)); }}>{q.k}</button>
+            ))}
           </div>
+          <button className="nudge" title={SPT("Less")} onClick={() => { setActive(null); setBetValue(clamp(betValue - stepN)); }}>−</button>
+          <div className="bslider" style={{ "--fill": Math.max(0, Math.min(1, fill / 100)) }}>
+            <input type="range" min={min} max={max} step={stepN} value={betValue}
+              onChange={(e) => { setBetValue(parseFloat(e.target.value)); setActive(null); }} />
+          </div>
+          <button className="nudge" title={SPT("More")} onClick={() => { setActive(null); setBetValue(clamp(betValue + stepN)); }}>+</button>
           <div className="betinput">
-            <input type="text" value={betValue.toFixed(betValue % 1 ? 1 : 0)}
-              onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setBetValue(v); }} />
-            <span className="u">{symbol || "SOMI"}</span>
+            <input type="text" value={fmt(betValue)} aria-label={SPT("Raise to")}
+              onChange={(e) => { const v = parseFloat(String(e.target.value).replace(/[^\d.]/g, "")); if (!isNaN(v)) setBetValue(v); }} />
+          </div>
+          <div className="youhave">
+            <span className="k">{SPT("Best")}</span><b>{best}</b>
+            {potOdds && potOdds !== "-" && <><span className="k">{SPT("Pot odds")}</span><b>{potOdds}</b></>}
+            {secsLeft != null && <span className={"secs tnum" + (urgent ? " hot" : "")}>{secsLeft}s</span>}
           </div>
         </div>
-      </div>
 
-      <div className="timebank">
-        <div className="tbring">
-          <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="20" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3"/>
-            <circle cx="24" cy="24" r="20" fill="none" stroke={action.timer != null && action.timer <= 8 ? "var(--danger-soft)" : "var(--accent)"} strokeWidth="3" strokeLinecap="round"
-              strokeDasharray="125.6" strokeDashoffset={action.timer != null ? (125.6 * (1 - Math.max(0, Math.min(1, action.timer / (action.timerTotal || 45))))) : 34} transform="rotate(-90 24 24)" /></svg>
-          <span className="num tnum">{action.timer != null ? action.timer : 18}</span>
+        <div className="actrow actions" data-anno="actions">
+          <button className="abtn fold" onClick={onFold}>
+            <span className="lbl">{SPT("Fold")}</span></button>
+          <button className="abtn call" onClick={onCheckCall}>
+            <span className="lbl">{canCheck ? SPT("Check") : SPT("Call")}</span>
+            {!canCheck && <span className="amt tnum">{fmt(toCall)}</span>}</button>
+          <button className="abtn raise" onClick={() => onRaise(betValue)}>
+            <span className="lbl">{raiseLabel || SPT("Raise to")}</span>
+            <span className="amt tnum">{fmt(betValue)}</span></button>
+          {onAllIn && heroStack > min && (
+            <button className="abtn allin" onClick={onAllIn}>
+              <span className="lbl">{SPT("All-in")}</span>
+              <span className="amt tnum">{fmt(heroStack)}</span></button>
+          )}
         </div>
-      </div>
-
-      <div className="actions" data-anno="actions">
-        <button className="abtn fold" onClick={onFold}><span className="key">F</span><span className="lbl">{SPT("Fold")}</span></button>
-        <button className="abtn call" onClick={onCheckCall}><span className="key">C</span><span className="lbl">{canCheck ? SPT("Check") : SPT("Call")}</span>{!canCheck && <span className="amt tnum">{toCall.toFixed(2)}</span>}</button>
-        <button className="abtn raise" onClick={() => onRaise(betValue)}><span className="key">R</span><span className="lbl">{raiseLabel || SPT("Raise to")}</span><span className="amt tnum">{betValue.toFixed(betValue % 1 ? 1 : 0)}</span></button>
       </div>
     </div>
   );
@@ -176,11 +191,10 @@ function round1(n) { return Math.round(n * 2) / 2; }
 /* status strip for non-your-turn states */
 function StatusStrip({ text, sub, accent }) {
   return (
-    <div className="actionbar" style={{ alignItems: "center", justifyContent: "center" }}>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, paddingBottom: 6 }}>
-        <div style={{ fontFamily: "var(--label)", fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase",
-          color: accent || "var(--muted)" }}>{text}</div>
-        {sub && <div style={{ fontFamily: "var(--body)", fontSize: 12.5, color: "var(--muted)" }}>{sub}</div>}
+    <div className="actionbar">
+      <div className="actbar narrow waiting">
+        <div className="waitline" style={accent ? { color: accent, fontWeight: 600 } : undefined}>{text}</div>
+        {sub && <div className="waitsub">{sub}</div>}
       </div>
     </div>
   );
@@ -193,15 +207,21 @@ function StatusStrip({ text, sub, accent }) {
    should also see what the pot paid), red-tinted on a loss. */
 function WinBanner({ hand, won, lose, unit, name, pending }) {
   const title = name ? name + " " + SPT("wins") : (lose ? SPT("You lose") : SPT("You win"));
+  // One line, not a stack of three. The felt between the board and the hero's
+  // hole cards is about 80px tall, and a three-row banner simply did not fit
+  // there — it printed itself over the community cards and over the player's
+  // own hand, at the exact moment both of those most need to be readable.
   return (
     <div className={"winbanner" + (lose ? " lose" : "")}>
-      <div className="won">{title}</div>
-      {hand ? <div className="hand">{hand}</div> : null}
-      {pending
-        ? <div className="zkbadge" style={{ marginTop: 4 }}><span className="chk sp-spin">{I.check}</span>{SPT("Settling pot on-chain…")}</div>
-        : won != null
-          ? <div className="zkbadge" style={{ marginTop: 4, ...(lose ? { borderColor: "rgba(229,86,42,0.4)", color: "var(--danger-soft)" } : {}) }}><span className="chk">{I.check}</span>{won} {unit || "SOMI"} {SPT("paid out on-chain")}</div>
-          : <div className="zkbadge" style={{ marginTop: 4, ...(lose ? { borderColor: "rgba(229,86,42,0.4)", color: "var(--danger-soft)" } : {}) }}>{SPT("pot settled on-chain")}</div>}
+      <span className="won">{title}</span>
+      {hand ? <span className="hand">{hand}</span> : null}
+      <span className="paid">
+        {pending
+          ? <><span className="chk sp-spin">{I.check}</span>{SPT("settling…")}</>
+          : won != null
+            ? <><span className="chk">{I.check}</span>{won} {unit || "SOMI"}</>
+            : <><span className="chk">{I.check}</span>{SPT("settled")}</>}
+      </span>
     </div>
   );
 }
@@ -242,12 +262,12 @@ function TxToast() {
 
 /* ---------------- Settings popover ---------------- */
 const THEME_SWATCHES = [
-  { k: "a", name: "Terminal", bg: "radial-gradient(120% 120% at 50% 30%, rgba(217,171,74,0.18), #08080b 60%)", border: "1px solid rgba(255,255,255,0.14)" },
-  { k: "b", name: "Premium", bg: "radial-gradient(70% 70% at 50% 35%, #2b2310, #171208 60%, #0d0a05)", border: "2px solid rgba(217,171,74,0.5)" },
+  { k: "a", name: "Terminal", bg: "radial-gradient(120% 120% at 50% 30%, rgba(217,185,112,0.18), #08080b 60%)", border: "1px solid rgba(255,255,255,0.14)" },
+  { k: "b", name: "Premium", bg: "radial-gradient(70% 70% at 50% 35%, #2b2310, #171208 60%, #0d0a05)", border: "2px solid rgba(217,185,112,0.5)" },
   { k: "c", name: "Grid", bg: "linear-gradient(180deg,#0e0e11,#0a0a0c)", border: "1px solid rgba(255,255,255,0.1)", grid: true },
 ];
 
-function SettingsPanel({ t, set, dir, setDir, onClose, session }) {  // language moved to casino Settings
+function SettingsPanel({ t, set, dir, setDir, onClose, session, seat }) {  // language moved to casino Settings
   const Row = ({ label, children }) => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "9px 0", borderBottom: "1px solid var(--hair)" }}>
       <span style={{ fontFamily: "var(--label)", fontSize: 12, color: "var(--text-2)" }}>{label}</span>{children}
@@ -269,6 +289,20 @@ function SettingsPanel({ t, set, dir, setDir, onClose, session }) {  // language
           a smaller stage again plus its own type sizes for stacks, pot and
           blinds. Named for what it does now, not for what it used to be. */}
       <Row label={SPT("Extra large interface")}><Sw on={t.bigui} onClick={() => set("bigui", !t.bigui)} /></Row>
+      {/* Stepping away from the table · moved off the top bar, where it was an
+          unlabelled pause glyph next to Leave. Named, and told what it does. */}
+      {seat && (
+        <div style={{ marginTop: 10 }}>
+          <button className="pill" disabled={seat.busy} onClick={seat.toggle}
+            style={{ width: "100%", fontSize: 12, padding: "9px 12px" }}>
+            {seat.sittingOut ? SPT("Sit back in") : SPT("Sit out next hand")}
+          </button>
+          <div style={{ fontFamily: "var(--label)", fontSize: 10.5, color: "var(--muted)", marginTop: 6, lineHeight: 1.45 }}>
+            {seat.sittingOut ? SPT("You keep your seat and your chips while sitting out.")
+              : SPT("Keeps your seat and chips · you are not dealt in until you sit back.")}
+          </div>
+        </div>
+      )}
       {session && (
         <div style={{ marginTop: 10, padding: "10px 11px", borderRadius: 8, border: "1px solid var(--accent-32)", background: "var(--accent-12)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: "var(--label)", fontSize: 11, color: "var(--accent-soft)" }}>

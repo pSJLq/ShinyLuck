@@ -1,7 +1,7 @@
 // Bridges the ES-module SDK into the design's classic-script React layer.
 // The live table app (poker-live-table.jsx, loaded via Babel) reads window.SP.
 import { ethers } from "/vendor/ethers.bundle.js";
-import { ShinyPoker, ACTION, STREET, STREET_NAME, TRN_STATUS, fmt } from "./poker-sdk.js";
+import { ShinyPoker, ACTION, STREET, STREET_NAME, TRN_STATUS, fmt, pokerError } from "./poker-sdk.js";
 import { POKER_CONFIG, NETWORK } from "./poker-config.js";
 
 const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
@@ -70,7 +70,7 @@ function handEval(cards) {
 
 window.SP = {
   sdk: new ShinyPoker(),
-  ACTION, STREET, STREET_NAME, TRN_STATUS, fmt, intToCardStr, handName, handEval, NETWORK, POKER_CONFIG,
+  ACTION, STREET, STREET_NAME, TRN_STATUS, fmt, pokerError, intToCardStr, handName, handEval, NETWORK, POKER_CONFIG,
   parseEther: (v) => ethers.parseEther(String(v)),
   tableId: Number(new URLSearchParams(location.search).get("t") || 0),
 };

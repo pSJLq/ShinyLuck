@@ -191,7 +191,7 @@ function TopBar({
     size: 16
   }), /*#__PURE__*/React.createElement("span", {
     className: "bal tnum"
-  }, balance.toFixed(1)), /*#__PURE__*/React.createElement("span", {
+  }, fmtMoney(balance)), /*#__PURE__*/React.createElement("span", {
     className: "net"
   }, wrongNetwork ? "Wrong network" : "Somnia")), /*#__PURE__*/React.createElement("button", {
     className: "iconbtn",
@@ -300,13 +300,20 @@ function SideRail() {
   }, "cards"), " player-encrypted \xB7 every reveal proven"))));
 }
 
-/* ---------------- Action bar (your turn) ---------------- */
+/* ---------------- Action bar (your turn) ----------------
+   One card, two rows: how much on top, what to do underneath. The old bar
+   spread four unrelated clusters across the full width — helper chips at the
+   far left, a timer ring in the middle of the sizing controls, buttons at the
+   far right — so the two things a player actually does (pick a size, press an
+   action) were the two furthest apart. The amounts now live ON the buttons,
+   which is also what stops a mis-read: you press a number, not a word. */
 function ActionBar({
   action,
   deckMode,
   onFold,
   onCheckCall,
   onRaise,
+  onAllIn,
   betValue,
   setBetValue
 }) {
@@ -316,53 +323,48 @@ function ActionBar({
     potForBet,
     heroStack,
     best,
-    outs,
     potOdds,
     raiseLabel,
     canCheck,
     step,
-    symbol
+    symbol,
+    chips
   } = action;
   const [active, setActive] = React.useState(null);
   const min = minRaise,
     max = heroStack;
-  const fill = (betValue - min) / (max - min) * 100;
+  const fill = max > min ? (betValue - min) / (max - min) * 100 : 100;
+  const stepN = step || 0.5;
+  const clamp = v => Math.min(max, Math.max(min, v));
+  const fmt = v => chips ? fmtChips(Math.round(v)) : fmtMoney(v);
   const quick = [{
     k: SPT("Min"),
     v: minRaise
   }, {
-    k: "½",
+    k: "50%",
     v: round1(potForBet * 0.5 + toCall)
   }, {
-    k: "⅔",
-    v: round1(potForBet * 0.66 + toCall)
+    k: "75%",
+    v: round1(potForBet * 0.75 + toCall)
   }, {
     k: SPT("Pot"),
     v: round1(potForBet + toCall)
-  }, {
-    k: SPT("All-in"),
-    v: heroStack
-  }];
+  }].filter(q => clamp(q.v) > min || q.k === SPT("Min"));
+  const secsLeft = action.timer;
+  const urgent = secsLeft != null && secsLeft <= 8;
+  const pct = secsLeft != null ? Math.max(0, Math.min(1, secsLeft / (action.timerTotal || 30))) : 1;
   return /*#__PURE__*/React.createElement("div", {
     className: "actionbar"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "helpers",
-    "data-anno": "helpers"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "helperchip best"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "k"
-  }, SPT("Best")), /*#__PURE__*/React.createElement("b", null, best)), /*#__PURE__*/React.createElement("div", {
+    className: "actbar" + (urgent ? " urgent" : "")
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "acttimer"
+  }, /*#__PURE__*/React.createElement("i", {
     style: {
-      display: "flex",
-      gap: 7
+      width: pct * 100 + "%"
     }
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "helperchip"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "k"
-  }, SPT("Pot odds")), /*#__PURE__*/React.createElement("b", null, potOdds)))), /*#__PURE__*/React.createElement("div", {
-    className: "betcontrols",
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "actrow sizing",
     "data-anno": "bet"
   }, /*#__PURE__*/React.createElement("div", {
     className: "quickchips"
@@ -371,91 +373,85 @@ function ActionBar({
     className: active === q.k ? "on" : "",
     onClick: () => {
       setActive(q.k);
-      setBetValue(Math.min(max, Math.max(min, q.v)));
+      setBetValue(clamp(q.v));
     }
-  }, q.k))), /*#__PURE__*/React.createElement("div", {
-    className: "sliderrow"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, q.k))), /*#__PURE__*/React.createElement("button", {
+    className: "nudge",
+    title: SPT("Less"),
+    onClick: () => {
+      setActive(null);
+      setBetValue(clamp(betValue - stepN));
+    }
+  }, "\u2212"), /*#__PURE__*/React.createElement("div", {
     className: "bslider",
     style: {
-      "--fill": fill + "%"
+      "--fill": Math.max(0, Math.min(1, fill / 100))
     }
   }, /*#__PURE__*/React.createElement("input", {
     type: "range",
     min: min,
     max: max,
-    step: step || 0.5,
+    step: stepN,
     value: betValue,
     onChange: e => {
       setBetValue(parseFloat(e.target.value));
       setActive(null);
     }
-  })), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "nudge",
+    title: SPT("More"),
+    onClick: () => {
+      setActive(null);
+      setBetValue(clamp(betValue + stepN));
+    }
+  }, "+"), /*#__PURE__*/React.createElement("div", {
     className: "betinput"
   }, /*#__PURE__*/React.createElement("input", {
     type: "text",
-    value: betValue.toFixed(betValue % 1 ? 1 : 0),
+    value: fmt(betValue),
+    "aria-label": SPT("Raise to"),
     onChange: e => {
-      const v = parseFloat(e.target.value);
+      const v = parseFloat(String(e.target.value).replace(/[^\d.]/g, ""));
       if (!isNaN(v)) setBetValue(v);
     }
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "u"
-  }, symbol || "SOMI")))), /*#__PURE__*/React.createElement("div", {
-    className: "timebank"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "tbring"
-  }, /*#__PURE__*/React.createElement("svg", {
-    viewBox: "0 0 48 48"
-  }, /*#__PURE__*/React.createElement("circle", {
-    cx: "24",
-    cy: "24",
-    r: "20",
-    fill: "none",
-    stroke: "rgba(255,255,255,0.08)",
-    strokeWidth: "3"
-  }), /*#__PURE__*/React.createElement("circle", {
-    cx: "24",
-    cy: "24",
-    r: "20",
-    fill: "none",
-    stroke: action.timer != null && action.timer <= 8 ? "var(--danger-soft)" : "var(--accent)",
-    strokeWidth: "3",
-    strokeLinecap: "round",
-    strokeDasharray: "125.6",
-    strokeDashoffset: action.timer != null ? 125.6 * (1 - Math.max(0, Math.min(1, action.timer / (action.timerTotal || 45)))) : 34,
-    transform: "rotate(-90 24 24)"
-  })), /*#__PURE__*/React.createElement("span", {
-    className: "num tnum"
-  }, action.timer != null ? action.timer : 18))), /*#__PURE__*/React.createElement("div", {
-    className: "actions",
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "youhave"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "k"
+  }, SPT("Best")), /*#__PURE__*/React.createElement("b", null, best), potOdds && potOdds !== "-" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+    className: "k"
+  }, SPT("Pot odds")), /*#__PURE__*/React.createElement("b", null, potOdds)), secsLeft != null && /*#__PURE__*/React.createElement("span", {
+    className: "secs tnum" + (urgent ? " hot" : "")
+  }, secsLeft, "s"))), /*#__PURE__*/React.createElement("div", {
+    className: "actrow actions",
     "data-anno": "actions"
   }, /*#__PURE__*/React.createElement("button", {
     className: "abtn fold",
     onClick: onFold
   }, /*#__PURE__*/React.createElement("span", {
-    className: "key"
-  }, "F"), /*#__PURE__*/React.createElement("span", {
     className: "lbl"
   }, SPT("Fold"))), /*#__PURE__*/React.createElement("button", {
     className: "abtn call",
     onClick: onCheckCall
   }, /*#__PURE__*/React.createElement("span", {
-    className: "key"
-  }, "C"), /*#__PURE__*/React.createElement("span", {
     className: "lbl"
   }, canCheck ? SPT("Check") : SPT("Call")), !canCheck && /*#__PURE__*/React.createElement("span", {
     className: "amt tnum"
-  }, toCall.toFixed(2))), /*#__PURE__*/React.createElement("button", {
+  }, fmt(toCall))), /*#__PURE__*/React.createElement("button", {
     className: "abtn raise",
     onClick: () => onRaise(betValue)
   }, /*#__PURE__*/React.createElement("span", {
-    className: "key"
-  }, "R"), /*#__PURE__*/React.createElement("span", {
     className: "lbl"
   }, raiseLabel || SPT("Raise to")), /*#__PURE__*/React.createElement("span", {
     className: "amt tnum"
-  }, betValue.toFixed(betValue % 1 ? 1 : 0)))));
+  }, fmt(betValue))), onAllIn && heroStack > min && /*#__PURE__*/React.createElement("button", {
+    className: "abtn allin",
+    onClick: onAllIn
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "lbl"
+  }, SPT("All-in")), /*#__PURE__*/React.createElement("span", {
+    className: "amt tnum"
+  }, fmt(heroStack))))));
 }
 function round1(n) {
   return Math.round(n * 2) / 2;
@@ -468,33 +464,17 @@ function StatusStrip({
   accent
 }) {
   return /*#__PURE__*/React.createElement("div", {
-    className: "actionbar",
-    style: {
-      alignItems: "center",
-      justifyContent: "center"
-    }
+    className: "actionbar"
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      gap: 4,
-      paddingBottom: 6
-    }
+    className: "actbar narrow waiting"
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontFamily: "var(--label)",
-      fontSize: 13,
-      letterSpacing: "0.1em",
-      textTransform: "uppercase",
-      color: accent || "var(--muted)"
-    }
+    className: "waitline",
+    style: accent ? {
+      color: accent,
+      fontWeight: 600
+    } : undefined
   }, text), sub && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontFamily: "var(--body)",
-      fontSize: 12.5,
-      color: "var(--muted)"
-    }
+    className: "waitsub"
   }, sub)));
 }
 
@@ -512,40 +492,25 @@ function WinBanner({
   pending
 }) {
   const title = name ? name + " " + SPT("wins") : lose ? SPT("You lose") : SPT("You win");
+  // One line, not a stack of three. The felt between the board and the hero's
+  // hole cards is about 80px tall, and a three-row banner simply did not fit
+  // there — it printed itself over the community cards and over the player's
+  // own hand, at the exact moment both of those most need to be readable.
   return /*#__PURE__*/React.createElement("div", {
     className: "winbanner" + (lose ? " lose" : "")
-  }, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", {
     className: "won"
-  }, title), hand ? /*#__PURE__*/React.createElement("div", {
+  }, title), hand ? /*#__PURE__*/React.createElement("span", {
     className: "hand"
-  }, hand) : null, pending ? /*#__PURE__*/React.createElement("div", {
-    className: "zkbadge",
-    style: {
-      marginTop: 4
-    }
-  }, /*#__PURE__*/React.createElement("span", {
+  }, hand) : null, /*#__PURE__*/React.createElement("span", {
+    className: "paid"
+  }, pending ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
     className: "chk sp-spin"
-  }, I.check), SPT("Settling pot on-chain…")) : won != null ? /*#__PURE__*/React.createElement("div", {
-    className: "zkbadge",
-    style: {
-      marginTop: 4,
-      ...(lose ? {
-        borderColor: "rgba(229,86,42,0.4)",
-        color: "var(--danger-soft)"
-      } : {})
-    }
-  }, /*#__PURE__*/React.createElement("span", {
+  }, I.check), SPT("settling…")) : won != null ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
     className: "chk"
-  }, I.check), won, " ", unit || "SOMI", " ", SPT("paid out on-chain")) : /*#__PURE__*/React.createElement("div", {
-    className: "zkbadge",
-    style: {
-      marginTop: 4,
-      ...(lose ? {
-        borderColor: "rgba(229,86,42,0.4)",
-        color: "var(--danger-soft)"
-      } : {})
-    }
-  }, SPT("pot settled on-chain")));
+  }, I.check), won, " ", unit || "SOMI") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+    className: "chk"
+  }, I.check), SPT("settled"))));
 }
 function RunItTwicePrompt({
   onChoose
@@ -596,13 +561,13 @@ function TxToast() {
 const THEME_SWATCHES = [{
   k: "a",
   name: "Terminal",
-  bg: "radial-gradient(120% 120% at 50% 30%, rgba(217,171,74,0.18), #08080b 60%)",
+  bg: "radial-gradient(120% 120% at 50% 30%, rgba(217,185,112,0.18), #08080b 60%)",
   border: "1px solid rgba(255,255,255,0.14)"
 }, {
   k: "b",
   name: "Premium",
   bg: "radial-gradient(70% 70% at 50% 35%, #2b2310, #171208 60%, #0d0a05)",
-  border: "2px solid rgba(217,171,74,0.5)"
+  border: "2px solid rgba(217,185,112,0.5)"
 }, {
   k: "c",
   name: "Grid",
@@ -616,7 +581,8 @@ function SettingsPanel({
   dir,
   setDir,
   onClose,
-  session
+  session,
+  seat
 }) {
   // language moved to casino Settings
   const Row = ({
@@ -686,7 +652,28 @@ function SettingsPanel({
   }, /*#__PURE__*/React.createElement(Sw, {
     on: t.bigui,
     onClick: () => set("bigui", !t.bigui)
-  })), session && /*#__PURE__*/React.createElement("div", {
+  })), seat && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "pill",
+    disabled: seat.busy,
+    onClick: seat.toggle,
+    style: {
+      width: "100%",
+      fontSize: 12,
+      padding: "9px 12px"
+    }
+  }, seat.sittingOut ? SPT("Sit back in") : SPT("Sit out next hand")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: "var(--label)",
+      fontSize: 10.5,
+      color: "var(--muted)",
+      marginTop: 6,
+      lineHeight: 1.45
+    }
+  }, seat.sittingOut ? SPT("You keep your seat and your chips while sitting out.") : SPT("Keeps your seat and chips · you are not dealt in until you sit back."))), session && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 10,
       padding: "10px 11px",

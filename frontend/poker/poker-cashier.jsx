@@ -53,8 +53,8 @@ function CashierModal({ close, addr, bal, refresh }) {
     // the clicked button owns the spinner until this settles
     const done = SPPress.claim();
     setBusy(true);
-    try { await fn(); flash(label + " ✓"); setAmt(""); setNick(""); await refreshAll(); }
-    catch (e) { flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 70)); console.error(e); }
+    try { await fn(); setAmt(""); setNick(""); await refreshAll(); } // no success toast · the figures refresh
+    catch (e) { flash(label + " ✗ " + SP.pokerError(e)); console.error(e); }
     finally { setBusy(false); done(); }
   }
   // The casino's feeds (Latest/Biggest wins) cache profiles for 30 min in
@@ -76,7 +76,7 @@ function CashierModal({ close, addr, bal, refresh }) {
           <div><div style={{ fontFamily: "var(--label)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--muted)" }}>Poker balance</div><div style={{ fontFamily: "var(--mono)", fontSize: 18, color: "var(--accent-soft)" }}>{Number(bal).toFixed(4)} {sym}</div></div>
         </div>
         <p className="note" style={{ marginTop: -4, marginBottom: 10 }}>Wallet = your on-chain {sym}. Poker balance = {sym} you moved into the game to buy in.</p>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, padding: "8px 10px", borderRadius: 8, background: "var(--accent-08, rgba(217,171,74,.08))" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, padding: "8px 10px", borderRadius: 8, background: "var(--accent-08, rgba(217,185,112,.08))" }}>
           <span style={{ fontFamily: "var(--label)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--muted)", whiteSpace: "nowrap" }}>Your address</span>
           <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{addr}</span>
           <button className="btn-sm" onClick={() => { navigator.clipboard?.writeText(addr); flash("Address copied · send STT here to top up"); }}>Copy</button>
@@ -121,7 +121,7 @@ function CashierModal({ close, addr, bal, refresh }) {
                   else { setPendAv(id); flash("Picked · saves with your nickname"); }
                 }}
                 style={{ padding: 0, background: "transparent", cursor: "pointer", borderRadius: 9,
-                  border: sel ? "2px solid var(--accent, #d9ab4a)" : "2px solid transparent" }}>
+                  border: sel ? "2px solid var(--accent, #D9B970)" : "2px solid transparent" }}>
                 <AvatarIcon av={id} name={handle || addr} size={34} style={{ borderRadius: 7 }} />
               </button>
             );

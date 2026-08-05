@@ -7,7 +7,9 @@
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Source+Code+Pro:wght@400;500;600&family=DM+Sans:wght@400;500;600&family=Bricolage+Grotesque:opsz,wght@12..96,600..800&display=swap" rel="stylesheet" />
+<!-- Boot guard · see poker-boot.js (storage hardening + failure beacon). -->
+<script src="poker-boot.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 <link rel="stylesheet" href="table-anim.css" />
 <link rel="stylesheet" href="poker-live.css" />
@@ -55,8 +57,12 @@
 <div id="stage"><div id="root"></div></div>
 
 <!-- Privy (email → embedded Somnia wallet, headless). Same bundle/app as the casino. -->
-<script src="/vendor/privy.bundle.js"></script>
+<!-- Wallet source · reuses the shell's Privy when embedded (same origin),
+     loads the 4.8 MB bundle only when standalone. See poker-auth.js. -->
+<script src="poker-auth.js"></script>
 <script src="poker-dust.js"></script>
+<!-- ambient pad · obeys the casino Settings panel (Music card) -->
+<script defer src="/lib/music.js"></script>
   <script src="poker-press.js"></script>
 <!-- React is served from our own host and the JSX ships precompiled. This page
      used to fetch three files from unpkg.com — including Babel Standalone, 2.9 MB —

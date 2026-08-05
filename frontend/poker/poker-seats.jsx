@@ -4,7 +4,7 @@ function ChipStack({ n = 3, color = "var(--accent)" }) {
   return (
     <span className="stackimg">
       {Array.from({ length: n }).map((_, i) => (
-        <span key={i} className="chipdot" style={{ borderColor: color, background: "rgba(217,171,74,0.25)" }} />
+        <span key={i} className="chipdot" style={{ borderColor: color, background: "rgba(217,185,112,0.25)" }} />
       ))}
     </span>
   );
@@ -20,7 +20,7 @@ function Marker({ kind }) {
    monsters · so a beginner instantly reads how big the hand is. Index = the
    evaluator's category (0 high card … 8 straight flush / royal). */
 const COMBO_TIERS = [
-  { bg: "rgba(255,255,255,.05)", bd: "rgba(255,255,255,.16)", fg: "var(--muted, #9a9aa8)" },
+  { bg: "rgba(255,255,255,.05)", bd: "rgba(255,255,255,.16)", fg: "var(--muted, #8F8C85)" },
   { bg: "rgba(255,255,255,.07)", bd: "rgba(255,255,255,.24)", fg: "var(--text-2, #c9c9d4)" },
   { bg: "rgba(190,200,215,.10)", bd: "rgba(190,200,215,.35)", fg: "#dfe6f2" },
   { bg: "rgba(70,211,154,.12)", bd: "rgba(70,211,154,.4)", fg: "#46d39a" },
@@ -52,6 +52,7 @@ function fmtChips(n) {
   return String(n);
 }
 
+
 function Seat({ player, data, pos, active, marker, deckMode, revealCards, revealAnim, revealDim }) {
   const cls = ["seat"];
   if (player.hero) cls.push("hero");
@@ -59,27 +60,41 @@ function Seat({ player, data, pos, active, marker, deckMode, revealCards, reveal
   if (data.folded) cls.push("folded");
   if (data.allin) cls.push("allin");
   if (data.winner) cls.push("winner");
+  if (data.dimmed) cls.push("dimmed");
   if (data.disc) cls.push("disc");
   if (data.sittingout) cls.push("sittingout");
   const name = data.name || player.name;
   const chipMode = data.chips != null;
   return (
     <div className={cls.join(" ")} style={{ left: pos.x + "%", top: pos.y + "%" }}>
-      {data.lastAct && <span className={"actchip " + data.lastAct.kind}>{data.lastAct.text}</span>}
       <div className="seatcard">
         {data.bounty && <span className="bountytag">◆{data.bounty}</span>}
+        {/* The last action sits ACROSS the bottom of the portrait, above the
+            name — where a live table would leave the chips. Off in a corner it
+            was easy to miss, and it is the single thing you read a seat for. */}
+        {data.lastAct && !data.winner && <span className={"actchip " + data.lastAct.kind}>{data.lastAct.text}</span>}
+        {/* The winner wears a crown. It sits above the portrait, so who took
+            the pot is answered by a glance at the seats — the banner in the
+            middle of the felt names the HAND, it should not be the only way to
+            find the PLAYER. */}
+        {data.winner && <span className="crown" aria-hidden="true">👑</span>}
         <AvatarIcon av={player.avId} img={player.avImg} name={name} />
         <div className="seatinfo">
           <div className="nm">{player.hero ? SPT("YOU") : name}</div>
           {/* One number, never two: the "Stacks in big blinds" toggle PICKS the
               unit · off = the plain stack, on = big blinds. Showing chips and
               "· Nbb" side by side was just clutter. */}
+          {/* The mark in front of the figure says WHAT the figure is, so a
+              tournament stack can never be mistaken for money and the token
+              never has to be spelled out in a 10px suffix nobody reads. */}
           {data.bbstacks && data.bbval != null
             ? <div className="stack tnum">{data.bbval}<span className="bbcount"> BB</span></div>
             : chipMode
-              ? <div className="stack tnum">{fmtChips(data.chips)}</div>
-              : <div className="stack tnum">{data.stack.toFixed(1)}<span className="u">SOMI</span></div>}
-          <div className="status">{data.status}</div>
+              ? <div className="stack tnum"><ChipMark size={13} />{fmtChips(data.chips)}</div>
+              : <div className="stack tnum"><SomiCoin size={13} />{fmtMoney(data.stack)}</div>}
+          {data.winner
+            ? <div className="wonchip">{data.won ? "+" + data.won : SPT("WINNER")}</div>
+            : <div className="status">{data.status}</div>}
         </div>
         {marker && <Marker kind={marker} />}
         {active && !data.disc && <TimerRing seconds={data.timer || 18} />}
@@ -108,8 +123,8 @@ function BetChips({ pos, amount, chips, slide, fromSeat }) {
   const csy = fromSeat ? ((pos.y - 46) * 0.9) + "px" : "0px";
   return (
     <div className={"betchips" + (slide ? " slide" : "")} style={{ position: "absolute", left: x + "%", top: y + "%", transform: "translate(-50%,-50%)", "--csx": csx, "--csy": csy }}>
-      <ChipStack n={amount > 20 ? 4 : amount > 5 ? 3 : 2} />
-      <span className="amt tnum">{chips ? fmtChips(amount) : amount.toFixed(amount % 1 ? 1 : 0)}</span>
+      {chips ? <ChipMark size={13} /> : <SomiCoin size={13} />}
+      <span className="amt tnum">{chips ? fmtChips(amount) : fmtMoney(amount)}</span>
     </div>
   );
 }
@@ -153,14 +168,14 @@ function Pot({ pot, sidePots = [], chips }) {
   return (
     <div className="pot">
       <div className="potmain">
-        <span className="k">{SPT("Total pot")}</span>
-        <span className="v tnum">{chips ? fmtChips(pot) : pot.toFixed(pot % 1 ? 1 : 0)}</span>
-        <span className="u">{chips ? SPT("chips") : "SOMI"}</span>
+        <span className="k">{SPT("Pot")}</span>
+        {chips ? <ChipMark size={15} /> : <SomiCoin size={15} />}
+        <span className="v tnum">{chips ? fmtChips(pot) : fmtMoney(pot)}</span>
       </div>
       {sidePots.length > 0 && (
         <div className="sides">
           {sidePots.map((s, i) => (
-            <span key={i} className="side">{s.label} <b className="tnum">{s.v.toFixed(0)}</b></span>
+            <span key={i} className="side">{s.label} <b className="tnum">{fmtMoney(s.v)}</b></span>
           ))}
         </div>
       )}
