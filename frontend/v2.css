@@ -128,6 +128,24 @@ main { overflow-x: clip; }
   [data-r-fs-m] { font-size: 34px !important; }
   [data-r-full-m] { width: 100% !important; min-width: 0 !important; }
   [data-r-wrap-m] { flex-wrap: wrap !important; }
+
+  /* ---- phone = app ----------------------------------------------------
+     An app has one chrome, not two, and no scrollbar drawn down its side.
+     Scrollbars first: WebKit keeps a 10px gutter for the page scrollbar, so
+     the site sat inset from the right edge of the screen with a pale strip
+     beside it — the single most "this is a web page" detail on the phone. */
+  html, body { scrollbar-width: none; }
+  html::-webkit-scrollbar, body::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+  /* At a TABLE the site header is dead weight: the table draws its own strip
+     (blinds, hand number, settings) directly under it, so a phone spent 64px
+     of a 664px screen saying the same thing twice. The felt takes that room
+     instead — set by the shell, which is the only place that knows the route. */
+  body.sl-at-table .nav2 { display: none; }
+  body.sl-at-table .view-frame-wrap iframe { height: calc(100dvh - 66px); }
+  body.sl-at-table [data-r-padb-m] { padding-bottom: 0 !important; }
+  /* the bottom bar floats over the felt rather than cutting the screen in two */
+  body.sl-at-table .mob2 { background: rgba(7, 7, 8, .82); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

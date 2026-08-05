@@ -363,6 +363,12 @@ initWins().catch((e) => console.warn("[lobby] wins:", e.message));
         target = '/poker/lobby.html?' + (tab ? 'tab=' + encodeURIComponent(tab) + '&' : '') + 'embed=1';
       }
       if (f.dataset.target !== target) { f.src = target; f.dataset.target = target; f.style.height = ''; watchPokerFrame(f, target); }
+      /* A table is a full-screen app view on a phone: the site header hides
+         and the felt gets those 64px (see .sl-at-table in v2.css). The lobby
+         keeps the header — that is where the wallet chip lives. */
+      document.body.classList.toggle('sl-at-table', v === 'table');
+    } else {
+      document.body.classList.remove('sl-at-table');
     }
     if (isGame) {
       const f = document.getElementById('game-frame');
@@ -442,7 +448,9 @@ initWins().catch((e) => console.warn("[lobby] wins:", e.message));
           ? document.getElementById('game-frame')
           : null;
       if (f) {
-        const floor = window.innerHeight - 64 - (window.innerWidth <= 860 ? 66 : 0);
+        // header 64 (hidden at a table on a phone) + bottom tab bar 66
+        const hidesHeader = document.body.classList.contains('sl-at-table') && window.innerWidth <= 860;
+        const floor = window.innerHeight - (hidesHeader ? 0 : 64) - (window.innerWidth <= 860 ? 66 : 0);
         f.style.height = Math.max(d.h, floor) + 'px';
       }
       return;

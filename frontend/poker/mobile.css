@@ -34,9 +34,22 @@
     font-size: 11px; white-space: nowrap; scrollbar-width: none; }
   .trn-hud::-webkit-scrollbar { display: none; }
 
-  /* ---- table: full width; the side rail becomes a bottom sheet ---- */
+  /* ---- table: a PORTRAIT table, not a landscape one squeezed sideways ----
+     A phone is tall and a poker felt was wide, so the oval was drawn across
+     the top of the area while the seat ring used the WHOLE area: the bottom
+     three seats ended up floating on the black background BELOW the table.
+     Rotate the whole idea instead — a tall stadium down the middle of the
+     screen, seats on its rail, hero at the bottom. `--sp-side` is the one
+     number that has to agree with POS_M in poker-live-table.jsx: the side
+     seats sit exactly on those edges. */
   .mainrow { grid-template-columns: 1fr !important; }
-  .felt { inset: 42px 8px 224px; border-radius: 150px; }
+  .feltwrap { --sp-side: 15%; }
+  /* 999px, not a measured radius: the browser clamps an over-large radius to
+     the box, which on a TALL box gives a true stadium — half-circle top and
+     bottom, straight sides. An exact value left flat shoulders where the
+     rail's sheen (.felt::after, inset -16px, border-radius: inherit) did not
+     line up with the cloth. */
+  .felt { inset: 5% var(--sp-side) 20%; border-radius: 999px; }
   .siderail { position: fixed; left: 0; right: 0; bottom: 0; top: auto; height: 64dvh; z-index: 320;
     transform: translateY(112%); transition: transform .28s ease; border-left: 0;
     border-top: 1px solid var(--line-2); border-radius: 16px 16px 0 0;

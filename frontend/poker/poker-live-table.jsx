@@ -11,13 +11,16 @@ const POS = {
   6: [{ x: 50, y: 83 }, { x: 15, y: 65 }, { x: 15, y: 27 }, { x: 50, y: 12 }, { x: 85, y: 27 }, { x: 85, y: 65 }],
   9: [{ x: 50, y: 87 }, { x: 18, y: 80 }, { x: 6, y: 52 }, { x: 14, y: 22 }, { x: 38, y: 8 }, { x: 62, y: 8 }, { x: 86, y: 22 }, { x: 94, y: 52 }, { x: 82, y: 80 }],
 };
-// Phones: the feltwrap is short, the HUD/topbar eat a bigger share of it and
-// the action bar overlays the bottom — pull top seats down and bottom seats up
-// so nothing slides under the chrome.
+// Phones: a PORTRAIT table. The felt is a tall stadium (mobile.css: inset 5%
+// / 15% / 20%), so the seats ring that shape rather than the old landscape
+// oval — which is why the bottom seats used to sit on the black background
+// under the table instead of at it. x=15/85 puts the side pods ON the rail,
+// seat 0 stays bottom-centre (the hero, under the board), and the top seat
+// clears the tournament HUD.
 const POS_M = {
-  2: [{ x: 50, y: 78 }, { x: 50, y: 18 }],
-  6: [{ x: 50, y: 78 }, { x: 14, y: 61 }, { x: 14, y: 32 }, { x: 50, y: 17 }, { x: 86, y: 32 }, { x: 86, y: 61 }],
-  9: [{ x: 50, y: 80 }, { x: 17, y: 74 }, { x: 7, y: 51 }, { x: 15, y: 27 }, { x: 38, y: 15 }, { x: 62, y: 15 }, { x: 85, y: 27 }, { x: 93, y: 51 }, { x: 83, y: 74 }],
+  2: [{ x: 50, y: 76 }, { x: 50, y: 12 }],
+  6: [{ x: 50, y: 76 }, { x: 15, y: 62 }, { x: 15, y: 30 }, { x: 50, y: 11 }, { x: 85, y: 30 }, { x: 85, y: 62 }],
+  9: [{ x: 50, y: 78 }, { x: 20, y: 70 }, { x: 13, y: 50 }, { x: 20, y: 30 }, { x: 38, y: 12 }, { x: 62, y: 12 }, { x: 80, y: 30 }, { x: 87, y: 50 }, { x: 80, y: 70 }],
 };
 
 // ---- desktop felt geometry ----
@@ -1675,7 +1678,7 @@ function Modal({ kind, close, sdk, tableId, cfg, bal, tx, refresh }) {
   const topMax = kind.type === "topup" ? Math.max(0, Math.min(maxE - (kind.stack || 0), bal)) : 0;
   const [amt, setAmt] = useState(kind.type === "sit" ? String(Math.min(maxE, bal || maxE))
     : kind.type === "topup" ? String(Math.max(0, Math.min(maxE - (kind.stack || 0), bal))) : "1");
-  const amtNum = parseFloat(amt) || 0;
+  const amtNum = SP.num(amt);
   const amtOk = amtNum >= minE && amtNum <= maxE && amtNum <= bal;
   const topOk = amtNum > 0 && amtNum <= topMax;
   const round = (v) => Math.round(Math.min(maxE, Math.max(minE, v)) * 10000) / 10000;
