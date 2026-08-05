@@ -13,6 +13,7 @@
 import { ethers } from "/vendor/ethers.bundle.js";
 import { SL } from "../wallet.js";
 import { CONFIG } from "../config.js";
+import { normalizeAmount } from "../amount.js";
 import { CONFIG_V15 } from "../config-v15.js";
 import { CHAINS } from "../shinyluck-sdk.js";
 import { provider, wsProvider, fetchRecentLogs } from "../rpc.js";
@@ -340,10 +341,16 @@ export async function refreshRecentEvents({
   }
 }
 
+/// The typed stake, as a string ethers can parse.
+///
+/// This used to strip every non-digit, which turned a phone keyboard's "0,2"
+/// into "02": the player asked for 0.2 STT and the contract was told TWO. Ten
+/// times the bet, silently, phones only. The separator is handled before
+/// anything is stripped now — one implementation, in lib/amount.js.
 export function readStakeStr() {
   const el = $("[data-sl-stake]");
   if (!el) return "0";
-  return (el.value || el.textContent || "0").replace(/[^\d.]/g, "");
+  return normalizeAmount(el.value || el.textContent || "0");
 }
 
 // ---------------------------------------------------------------------

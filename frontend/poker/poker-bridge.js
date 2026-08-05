@@ -3,6 +3,7 @@
 import { ethers } from "/vendor/ethers.bundle.js";
 import { ShinyPoker, ACTION, STREET, STREET_NAME, TRN_STATUS, fmt, pokerError } from "./poker-sdk.js";
 import { POKER_CONFIG, NETWORK } from "./poker-config.js";
+import { parseAmount, toWei } from "/lib/amount.js";
 
 const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
 const SUITS = ["c", "d", "h", "s"];
@@ -71,7 +72,11 @@ function handEval(cards) {
 window.SP = {
   sdk: new ShinyPoker(),
   ACTION, STREET, STREET_NAME, TRN_STATUS, fmt, pokerError, intToCardStr, handName, handEval, NETWORK, POKER_CONFIG,
-  parseEther: (v) => ethers.parseEther(String(v)),
+  // `num` · what a human typed, as a number. The classic-script UI files
+  // validate amounts with it, so a phone keyboard's comma ("0,2") is not
+  // read as zero and answered with "Enter an amount". See lib/amount.js.
+  num: parseAmount,
+  parseEther: (v) => toWei(v),
   tableId: Number(new URLSearchParams(location.search).get("t") || 0),
 };
 // Globals the design's SideRail expects (live feeds can replace these later).

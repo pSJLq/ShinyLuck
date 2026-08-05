@@ -119,7 +119,7 @@ function CashierModal({
     } catch (_) {}
   };
   const stop = e => e.stopPropagation();
-  const amtOk = parseFloat(amt) > 0;
+  const amtOk = SP.num(amt) > 0;
   const nickOk = nick.trim().length >= 3;
   return /*#__PURE__*/React.createElement(Portal, null, /*#__PURE__*/React.createElement("div", {
     className: "lt-modalbg",
@@ -409,7 +409,7 @@ function CashierModal({
     }
   }), /*#__PURE__*/React.createElement("button", {
     className: "btn-sm",
-    disabled: busy || !(parseFloat(sendAmt) > 0) || !/^0x[0-9a-fA-F]{40}$/.test(sendTo.trim()),
+    disabled: busy || !(SP.num(sendAmt) > 0) || !/^0x[0-9a-fA-F]{40}$/.test(sendTo.trim()),
     onClick: () => run("Sent", () => SP.sdk.sendNative(sendTo.trim(), sendAmt))
   }, "Send")), isOwner && /*#__PURE__*/React.createElement("div", {
     style: {

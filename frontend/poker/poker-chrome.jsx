@@ -157,7 +157,7 @@ function ActionBar({ action, deckMode, onFold, onCheckCall, onRaise, onAllIn, be
           <button className="nudge" title={SPT("More")} onClick={() => { setActive(null); setBetValue(clamp(betValue + stepN)); }}>+</button>
           <div className="betinput">
             <input type="text" value={fmt(betValue)} aria-label={SPT("Raise to")}
-              onChange={(e) => { const v = parseFloat(String(e.target.value).replace(/[^\d.]/g, "")); if (!isNaN(v)) setBetValue(v); }} />
+              onChange={(e) => { const v = SP.num(e.target.value); if (e.target.value.trim()) setBetValue(v); }} />
           </div>
           <div className="youhave">
             <span className="k">{SPT("Best")}</span><b>{best}</b>

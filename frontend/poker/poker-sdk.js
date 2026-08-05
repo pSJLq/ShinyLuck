@@ -2,6 +2,7 @@
 // PokerRoom + CommitRevealDealer, plus the off-chain dealer's hole-card API.
 // ES module; ethers comes from the same vendored bundle ShinyLuck uses.
 import { ethers } from "/vendor/ethers.bundle.js";
+import { toWei } from "/lib/amount.js";
 import { POKER_CONFIG, NETWORK } from "./poker-config.js";
 
 export const ACTION = { FOLD: 0, CHECK: 1, CALL: 2, BET: 3, RAISE: 4, ALLIN: 5 };
@@ -369,7 +370,7 @@ export class ShinyPoker {
     this.requireWallet();
     const key = ethers.Wallet.createRandom();
     this._lsSet(this._sessKey(), key.privateKey);
-    await (await this.roomWrite.setSessionKey(key.address, { value: ethers.parseEther(String(gasEth)) })).wait();
+    await (await this.roomWrite.setSessionKey(key.address, { value: toWei(gasEth) })).wait();
     this._bindSession(key.privateKey);
     this.sessionActive = true;
     this._sessNonce = 0; // fresh key starts at nonce 0 · no round-trip needed
@@ -606,8 +607,8 @@ export class ShinyPoker {
     this.requireWallet();
     if (!this.trnWrite) throw new Error("tournaments not deployed");
     const p = {
-      buyIn: ethers.parseEther(String(buyInEth)),
-      fee: ethers.parseEther(String(feeEth)),
+      buyIn: toWei(buyInEth),
+      fee: toWei(feeEth),
       maxPlayers,
       seatsPerTable,
       startStack: BigInt(startStack),
@@ -623,7 +624,7 @@ export class ShinyPoker {
       structure: (structure || []).map((l) => ({ sb: BigInt(l.sb), bb: BigInt(l.bb), ante: BigInt(l.ante || 0), durationSecs: Number(l.durationSecs) })),
       hostBps: Number(hostBps) || 0,
     };
-    return (await this.trnWrite.createTournament(p, { value: ethers.parseEther(String(sponsorEth)) })).wait();
+    return (await this.trnWrite.createTournament(p, { value: toWei(sponsorEth) })).wait();
   }
 
   async registerTournament(id, costWei) {
@@ -1024,16 +1025,16 @@ export class ShinyPoker {
   }
 
   // ---- writes ----
-  async deposit(amountEth) { this.requireWallet(); return (await this.roomWrite.deposit({ value: ethers.parseEther(String(amountEth)) })).wait(); }
-  async withdraw(amountEth) { this.requireWallet(); return (await this.roomWrite.withdraw(ethers.parseEther(String(amountEth)))).wait(); }
+  async deposit(amountEth) { this.requireWallet(); return (await this.roomWrite.deposit({ value: toWei(amountEth) })).wait(); }
+  async withdraw(amountEth) { this.requireWallet(); return (await this.roomWrite.withdraw(toWei(amountEth))).wait(); }
   async roomOwner() { try { return await this.roomRead.owner(); } catch { return ethers.ZeroAddress; } }
   async rakeCollected() { try { return await this.roomRead.rakeCollected(); } catch { return 0n; } }
-  async withdrawRake(to, amountEth) { this.requireWallet(); return (await this.roomWrite.withdrawRake(to, ethers.parseEther(String(amountEth)))).wait(); }
+  async withdrawRake(to, amountEth) { this.requireWallet(); return (await this.roomWrite.withdrawRake(to, toWei(amountEth))).wait(); }
   async withdrawAllRake(to) { this.requireWallet(); const amt = await this.roomRead.rakeCollected(); return (await this.roomWrite.withdrawRake(to, amt)).wait(); }
   /// Cash out: send native STT from the connected wallet to any external address.
-  async sendNative(to, amountEth) { this.requireWallet(); return (await this.signer.sendTransaction({ to, value: ethers.parseEther(String(amountEth)) })).wait(); }
-  async sitDown(t, seat, buyInEth) { this.requireWallet(); return (await this.roomWrite.sitDown(t, seat, ethers.parseEther(String(buyInEth)))).wait(); }
-  async topUp(t, amountEth) { this.requireWallet(); return (await this.roomWrite.topUp(t, ethers.parseEther(String(amountEth)))).wait(); }
+  async sendNative(to, amountEth) { this.requireWallet(); return (await this.signer.sendTransaction({ to, value: toWei(amountEth) })).wait(); }
+  async sitDown(t, seat, buyInEth) { this.requireWallet(); return (await this.roomWrite.sitDown(t, seat, toWei(buyInEth))).wait(); }
+  async topUp(t, amountEth) { this.requireWallet(); return (await this.roomWrite.topUp(t, toWei(amountEth))).wait(); }
   async leave(t) { this.requireWallet(); return (await this.roomWrite.leaveTable(t)).wait(); }
   async sitOut(t, on) { this.requireWallet(); return (await this.roomWrite.setSitOut(t, on)).wait(); }
 
@@ -1043,7 +1044,7 @@ export class ShinyPoker {
   async act(t, action, amount = 0, chips = false) {
     this.requireWallet();
     const amt = action === ACTION.BET || action === ACTION.RAISE
-      ? (chips ? BigInt(Math.round(Number(amount))) : ethers.parseEther(String(amount)))
+      ? (chips ? BigInt(Math.round(Number(amount))) : toWei(amount))
       : 0;
     // Session key active → FAST PATH: locally-managed nonce + cached fee + fixed
     // gas + a single eth_sendRawTransaction. This is the ~650ms per-action path

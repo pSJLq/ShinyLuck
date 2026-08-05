@@ -172,6 +172,35 @@ async function main() {
     else bad(`chain does not agree: balance moved by ${ethers.formatEther(moved)} STT`);
   }
 
+  step("12  a comma is an amount, not a zero");
+  // On a phone the decimal key is whatever the locale says, and in Russian it
+  // is a COMMA. The cashier read parseFloat("0,2") → 0 and told the player to
+  // "Enter an amount" when they just had; the casino's stake reader stripped
+  // the comma and bet "02" — ten times the money. Both go through one
+  // normalizer now, and this proves the whole path: typed string → contract.
+  const parsed = await frame.evaluate(() => ({
+    num: window.SP.num("0,2"),
+    wei: window.SP.parseEther("0,2").toString(),
+    spaced: window.SP.num(" 1 234,56 "),
+    junk: window.SP.num("abc"),
+  }));
+  if (parsed.num === 0.2 && parsed.wei === "200000000000000000") ok(`"0,2" reads as ${parsed.num} (${parsed.wei} wei)`);
+  else bad(`"0,2" still misreads: ${JSON.stringify(parsed)}`);
+  if (parsed.spaced === 1234.56 && parsed.junk === 0) ok("thousands separators survive, junk collapses to 0");
+  else bad(`normalizer edge cases wrong: ${JSON.stringify(parsed)}`);
+
+  const beforeComma = await room.balance(wallet.address);
+  const dep2 = await frame.evaluate(async () => {
+    try { await window.SP.sdk.deposit("0,2"); return { ok: true }; }
+    catch (e) { return { ok: false, err: String((e && e.message) || e).slice(0, 160) }; }
+  });
+  if (!dep2.ok) bad(`depositing "0,2" failed: ${dep2.err}`);
+  else {
+    const moved = (await room.balance(wallet.address)) - beforeComma;
+    if (moved === ethers.parseEther("0.2")) ok(`the chain received 0.2 STT, not 0 and not 2`);
+    else bad(`typed "0,2" but the chain moved ${ethers.formatEther(moved)} STT`);
+  }
+
   if (!KEEP) await browser.close();
 }
 

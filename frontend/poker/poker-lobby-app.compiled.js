@@ -1260,7 +1260,7 @@ function CreateTournamentModal({
   const splitOk = splitBps.length > 0 && splitBps.reduce((a, b) => a + b, 0) === 10000;
   const startTime = f.schedule === "scheduled" && f.startAt ? Math.floor(new Date(f.startAt).getTime() / 1000) : 0;
   const scheduleOk = f.schedule === "open" || startTime > Math.floor(Date.now() / 1000) + 60;
-  const sponsorOk = !sponsored || parseFloat(f.sponsor) > 0;
+  const sponsorOk = !sponsored || SP.num(f.sponsor) > 0;
   // The action clock is enforced here rather than in the contract (which only
   // defaults a 0 to 30s): tournament #23 shipped with our own 15s default and
   // spent 57% of its turns inside the last ten seconds.
@@ -1317,7 +1317,7 @@ function CreateTournamentModal({
     style: {
       marginTop: 4
     }
-  }, "Free entry \xB7 prize pool gets 90% \xB7 10% platform fee", parseFloat(f.sponsor) > 0 ? ` · pool ≈ ${(parseFloat(f.sponsor) * 0.9).toFixed(4)} ${sym}` : "")) : /*#__PURE__*/React.createElement("div", {
+  }, "Free entry \xB7 prize pool gets 90% \xB7 10% platform fee", SP.num(f.sponsor) > 0 ? ` · pool ≈ ${(SP.num(f.sponsor) * 0.9).toFixed(4)} ${sym}` : "")) : /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 8
     }
@@ -1517,8 +1517,8 @@ function CreateTournamentModal({
     disabled: busy || !ok,
     onClick: () => act("Create tournament", async () => {
       await SP.sdk.createTournament({
-        buyInEth: sponsored ? 0 : ((parseFloat(f.buyIn) || 0) * 0.9).toFixed(6),
-        feeEth: sponsored ? 0 : ((parseFloat(f.buyIn) || 0) * 0.1).toFixed(6),
+        buyInEth: sponsored ? 0 : (SP.num(f.buyIn) * 0.9).toFixed(6),
+        feeEth: sponsored ? 0 : (SP.num(f.buyIn) * 0.1).toFixed(6),
         maxPlayers: parseInt(f.maxPlayers, 10),
         seatsPerTable: parseInt(f.seatsPerTable || "0", 10),
         startStack: parseInt(f.startStack, 10),

@@ -5,6 +5,7 @@
  * Market creation is curator-only and lives outside this view. */
 
 import { ethers as E } from "/vendor/ethers.bundle.js";
+import { parseAmount } from "./amount.js";
 import { SL, connect } from "./wallet.js";
 
 const CFG = {
@@ -298,7 +299,7 @@ function renderTradePanel(m, labels, pools, now) {
     });
     const amountEl = $("tAmount");
     const recalc = () => {
-      const v = Number(amountEl.value || 0);
+      const v = parseAmount(amountEl.value);
       const stake = v > 0 ? E.parseEther(String(v)) : 0n;
       const per = payoutPerUnit(total, pools[tradeSel], feeBps, stake);
       const perNow = payoutPerUnit(total, pools[tradeSel], feeBps);
@@ -307,11 +308,11 @@ function renderTradePanel(m, labels, pools, now) {
     };
     amountEl.oninput = recalc;
     document.querySelectorAll("[data-add]").forEach((b) => {
-      b.onclick = () => { amountEl.value = (Number(amountEl.value || 0) + Number(b.dataset.add)).toFixed(2); recalc(); };
+      b.onclick = () => { amountEl.value = (parseAmount(amountEl.value) + Number(b.dataset.add)).toFixed(2); recalc(); };
     });
     recalc();
     $("tBet").onclick = async () => {
-      const v = Number(amountEl.value || 0);
+      const v = parseAmount(amountEl.value);
       if (!v || v <= 0) { toast("Enter an amount", "err"); return; }
       await doTx($("tBet"), async () => (await writeContract()).bet(detailId, tradeSel, { value: E.parseEther(String(v)) }), "Bet placed");
       renderDetail(detailId);

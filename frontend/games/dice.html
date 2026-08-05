@@ -185,7 +185,8 @@
   if (!inp) return;
   const LADDER = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100];
   const cap = () => parseFloat(inp.max) || Infinity;
-  const cur = () => parseFloat(inp.value) || 0;
+  // a phone keyboard in a comma locale types "0,2" — read it as 0.2, not 0
+  const cur = () => parseFloat(String(inp.value).replace(',', '.')) || 0;
   const emit = (v) => {
     const max = cap();
     inp.value = String(Math.min(v, max)).replace(/\.?0+$/, '') || '0.01';

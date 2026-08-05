@@ -64,7 +64,7 @@ function CashierModal({ close, addr, bal, refresh }) {
     try { localStorage.setItem("sl.profiles.bump", String(addr).toLowerCase() + ":" + Date.now()); } catch (_) {}
   };
   const stop = (e) => e.stopPropagation();
-  const amtOk = parseFloat(amt) > 0;
+  const amtOk = SP.num(amt) > 0;
   const nickOk = nick.trim().length >= 3;
 
   return (
@@ -144,7 +144,7 @@ function CashierModal({ close, addr, bal, refresh }) {
         <input value={sendTo} onChange={(e) => setSendTo(e.target.value)} placeholder="0x… recipient address" style={{ marginBottom: 6 }} />
         <div style={{ display: "flex", gap: 8 }}>
           <input value={sendAmt} onChange={(e) => setSendAmt(e.target.value)} placeholder={`Amount (${sym})`} style={{ flex: 1 }} />
-          <button className="btn-sm" disabled={busy || !(parseFloat(sendAmt) > 0) || !/^0x[0-9a-fA-F]{40}$/.test(sendTo.trim())} onClick={() => run("Sent", () => SP.sdk.sendNative(sendTo.trim(), sendAmt))}>Send</button>
+          <button className="btn-sm" disabled={busy || !(SP.num(sendAmt) > 0) || !/^0x[0-9a-fA-F]{40}$/.test(sendTo.trim())} onClick={() => run("Sent", () => SP.sdk.sendNative(sendTo.trim(), sendAmt))}>Send</button>
         </div>
 
         {isOwner && (

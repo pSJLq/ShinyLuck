@@ -9,6 +9,7 @@
    ========================================================================== */
 
 import { ethers } from "/vendor/ethers.bundle.js";
+import { parseAmount } from "./amount.js";
 import { SL, connect, signOut, shortAddr } from "/lib/wallet.js";
 import { POKER_CONFIG } from "/poker/poker-config.js";
 import { CONFIG } from "/lib/config.js";
@@ -217,7 +218,7 @@ document.addEventListener("click", async (e) => {
   if (t.closest("[data-wdr-go]")) {
     if (!connected) return;
     const dest = ($("[data-wdr-dest]")?.value || "").trim();
-    const amt = parseFloat($("[data-wdr-amt]")?.value || "0");
+    const amt = parseAmount($("[data-wdr-amt]")?.value);
     if (!ethers.isAddress(dest)) return setMsg("[data-wallet-msg]", "Enter a valid 0x address", false);
     if (!(amt > 0)) return setMsg("[data-wallet-msg]", "Enter an amount", false);
     const btn = t.closest("[data-wdr-go]");
@@ -276,7 +277,7 @@ document.addEventListener("click", async (e) => {
   if (t.closest("[data-poker-dep]") || t.closest("[data-poker-wdr]")) {
     if (!connected) return;
     const dep = !!t.closest("[data-poker-dep]");
-    const amt = parseFloat($("[data-poker-amt]")?.value || "0");
+    const amt = parseAmount($("[data-poker-amt]")?.value);
     if (!(amt > 0)) return setMsg("[data-poker-msg]", "Enter an amount", false);
     const btn = t.closest(dep ? "[data-poker-dep]" : "[data-poker-wdr]");
     btn.disabled = true;

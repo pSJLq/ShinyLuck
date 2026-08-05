@@ -411,8 +411,8 @@ function ActionBar({
     value: fmt(betValue),
     "aria-label": SPT("Raise to"),
     onChange: e => {
-      const v = parseFloat(String(e.target.value).replace(/[^\d.]/g, ""));
-      if (!isNaN(v)) setBetValue(v);
+      const v = SP.num(e.target.value);
+      if (e.target.value.trim()) setBetValue(v);
     }
   })), /*#__PURE__*/React.createElement("div", {
     className: "youhave"

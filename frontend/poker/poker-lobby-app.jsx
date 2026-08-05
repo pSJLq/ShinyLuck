@@ -627,7 +627,7 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
   const splitOk = splitBps.length > 0 && splitBps.reduce((a, b) => a + b, 0) === 10000;
   const startTime = f.schedule === "scheduled" && f.startAt ? Math.floor(new Date(f.startAt).getTime() / 1000) : 0;
   const scheduleOk = f.schedule === "open" || startTime > Math.floor(Date.now() / 1000) + 60;
-  const sponsorOk = !sponsored || parseFloat(f.sponsor) > 0;
+  const sponsorOk = !sponsored || SP.num(f.sponsor) > 0;
   // The action clock is enforced here rather than in the contract (which only
   // defaults a 0 to 30s): tournament #23 shipped with our own 15s default and
   // spent 57% of its turns inside the last ten seconds.
@@ -649,7 +649,7 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
           <div style={{ marginTop: 8 }}>
             <label>Sponsor amount ({sym}) <Hint text="You fund the prize pool; entry is free for everyone else. A flat 10% platform fee applies, the same as buy-in events · 90% becomes the prize pool." /></label>
             <input value={f.sponsor} onChange={set("sponsor")} />
-            <p className="note" style={{ marginTop: 4 }}>Free entry · prize pool gets 90% · 10% platform fee{parseFloat(f.sponsor) > 0 ? ` · pool ≈ ${(parseFloat(f.sponsor) * 0.9).toFixed(4)} ${sym}` : ""}</p>
+            <p className="note" style={{ marginTop: 4 }}>Free entry · prize pool gets 90% · 10% platform fee{SP.num(f.sponsor) > 0 ? ` · pool ≈ ${(SP.num(f.sponsor) * 0.9).toFixed(4)} ${sym}` : ""}</p>
           </div>
         ) : (
           <div style={{ marginTop: 8 }}>
@@ -703,7 +703,7 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
           <button className="pill" onClick={close}>{SPT("Cancel")}</button>
           <button className="pill primary" disabled={busy || !ok} onClick={() => act("Create tournament", async () => {
             await SP.sdk.createTournament({
-              buyInEth: sponsored ? 0 : ((parseFloat(f.buyIn) || 0) * 0.9).toFixed(6), feeEth: sponsored ? 0 : ((parseFloat(f.buyIn) || 0) * 0.1).toFixed(6),
+              buyInEth: sponsored ? 0 : (SP.num(f.buyIn) * 0.9).toFixed(6), feeEth: sponsored ? 0 : (SP.num(f.buyIn) * 0.1).toFixed(6),
               maxPlayers: parseInt(f.maxPlayers, 10), seatsPerTable: parseInt(f.seatsPerTable || "0", 10), startStack: parseInt(f.startStack, 10),
               actionSecs: Math.max(20, parseInt(f.actionSecs || "30", 10)), structure: f.levels,
               startTime, approvalRequired: f.priv, payoutBps: splitBps, sponsorEth: sponsored ? (f.sponsor || 0) : 0,
