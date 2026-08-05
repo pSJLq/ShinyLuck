@@ -69,7 +69,21 @@ async function main() {
     }
     await sleep(1200);
   }
-  await sleep(2500);
+  // keep acting until the hand reaches a showdown — the screen with the most
+  // going on at once (two hands face up, the board, the pot, the verdict)
+  for (let i = 0; i < 40; i++) {
+    const s2 = await snapshotOf(TABLE);
+    if (!s2 || !s2.hand) break;
+    if (Number(s2.hand.street) === 4) { await sleep(4000); await shot("showdown"); break; }
+    const t = tabs[Number(s2.hand.actingSeat)];
+    if (t) {
+      await sleep(700);
+      const btn = t.page.locator(".actionbar .abtn.call").first();
+      if (await btn.count()) await btn.click({ timeout: 4000 }).catch(() => {});
+    }
+    await sleep(900);
+  }
+  await sleep(2000);
   await shot("late");
 
   step("8  the lobby, on the same phone");
@@ -77,7 +91,12 @@ async function main() {
   await sleep(9000);
   await tabs[0].page.screenshot({ path: path.join(OUT, "lobby-p0.png") });
   await tabs[0].page.screenshot({ path: path.join(OUT, "lobby-full.png"), fullPage: true });
-  ok("lobby shot");
+  // the other tab of the lobby, which has never been looked at on a phone
+  const trn = tabs[0].page.frameLocator("#poker-frame").locator(".lobbytabs button", { hasText: /TOURNAMENT/i }).first();
+  await trn.click({ timeout: 8000 }).catch(() => {});
+  await sleep(4000);
+  await tabs[0].page.screenshot({ path: path.join(OUT, "lobby-tournaments.png") });
+  ok("lobby + tournaments shot");
 
   if (!KEEP) await browser.close();
   console.log("\nshots → test/_shots-mobile/");
