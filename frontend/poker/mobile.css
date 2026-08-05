@@ -122,15 +122,46 @@
   .abtn .key { display: none; }
   .lt-toast { bottom: 150px; max-width: 94vw; font-size: 12px; }
 
-  /* ---- cash cards: a list, not a gallery ---------------------------------
-     Each table drew a 132px plan-view felt, so ONE table filled a third of the
-     screen and finding a stake meant scrolling past pictures of tables that
-     all look the same. The felt shrinks to a glance (its job is "how full is
-     it", which the seat dots say), and the numbers that decide where you sit —
-     blinds, seats, pot — come first. */
-  .tcard { margin-bottom: 10px; }
-  .tc-felt { height: 74px; margin: 2px 10px; }
-  .tcard .seatdots { transform: scale(.86); }
+  /* ---- lobby header: 250px of chrome before the first table ---------------
+     Tabs, three stat blocks and two filter rows stacked up to a third of the
+     screen before a single table appeared. Same information, one thumb-width
+     tighter: the stats read as one line, and the two filter rows become one
+     that scrolls sideways (the same pattern the tab strip already uses). */
+  /* nowrap + scroll, NOT wrap: allowing it to wrap put "HANDS IN PLAY"
+     on a line of its own and made the header taller than before. */
+  .statstrip { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none;
+    gap: 0 14px; padding: 7px 10px; }
+  .statstrip::-webkit-scrollbar { display: none; }
+  .statstrip > * { flex-shrink: 0; }
+  .statstrip .stat { gap: 1px; }
+  .statstrip .k, .statstrip .filterlabel { font-size: 9px; letter-spacing: .06em; }
+  .statstrip .v, .statstrip b { font-size: 17px; }
+  .subbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    gap: 6px; padding: 7px 10px; }
+  .subbar::-webkit-scrollbar { display: none; }
+  .subbar > * { flex-shrink: 0; }
+  .lobbyhead { gap: 6px; padding: 8px 10px 0; }
+  .lobbytabs button { font-size: 13px; }
+
+  /* ---- cash tables: a LIST, not a gallery --------------------------------
+     Every table drew a 132px plan-view felt above its numbers, so one table
+     filled a third of the phone and choosing a stake meant scrolling past
+     pictures of tables that all look alike. Same markup, re-laid as a row:
+     the felt shrinks to a thumbnail on the left (its only job here is "how
+     full is it", which the seat dots say), and the things you actually choose
+     by — blinds, size, rake, the button — stack beside it. Two and a half
+     tables per screen became five. */
+  .tcard { display: grid !important; grid-template-columns: 92px minmax(0, 1fr);
+    grid-template-areas: "felt top" "felt bottom"; align-items: center;
+    gap: 3px 11px; padding: 10px 12px; margin-bottom: 9px; }
+  .tcard .tc-top { grid-area: top; }
+  .tcard .tc-felt { grid-area: felt; width: 92px; height: 58px; margin: 0; align-self: center; }
+  .tcard .tc-bottom { grid-area: bottom; }
+  /* "OPEN TABLE" does not fit in a 92px felt and is not news — an empty table
+     is one with no lit seat dots. The live pot moves up to the header row. */
+  .tcard .tc-center { display: none; }
+  .tcard .tc-stakes { font-size: 19px; }
+  .tcard .tc-seat { transform: scale(.8); }
 
   /* ---- the hero panel must not be clipped by the action bar ---- */
   .herozone .heroinfo { padding-bottom: 7px; }
