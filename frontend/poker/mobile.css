@@ -84,10 +84,11 @@
   .board .card .center-suit svg { width: 18px; height: 18px; }
   .pot .v { font-size: 15px; }
   .zkbadge { font-size: 8.5px; padding: 3px 8px; }
-  .hole .card { width: 52px; height: 74px; }
+  .hole .card { width: 48px; height: 68px; }
   .hole .card .rank { font-size: 15px; }
   .hole .card .center-suit svg { width: 22px; height: 22px; }
-  .herozone { bottom: 168px; gap: 5px; }
+  /* the hero sits just above the action bar (≈112px tall now), not behind it */
+  .herozone { bottom: 120px; gap: 4px; }
   .heroinfo { padding: 5px 8px 5px 6px; gap: 8px; }
   .heroinfo .avatar { width: 30px; height: 30px; }
   .heroinfo .meta .stack { font-size: 17px; } /* desktop 21px is too wide here */
@@ -96,19 +97,30 @@
   .actchip { font-size: 9px; padding: 2px 8px; }
 
   /* ---- action bar: column, thumb-sized ---- */
-  .actionbar { right: 0 !important; flex-direction: column; align-items: stretch; gap: 8px;
-    padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .actionbar { right: 0 !important; flex-direction: column; align-items: stretch; gap: 6px;
+    padding: 7px 8px calc(7px + env(safe-area-inset-bottom)); }
   .helpers { flex-direction: row; }
   .helpers .helperchip { height: 26px; font-size: 9.5px; padding: 0 8px; }
   .betcontrols { max-width: none; }
-  .betinput { width: 104px; height: 34px; }
+  /* The sizing row ran off the right edge — "Best / Pot odds / 12s" was
+     clipped mid-word ("BE"). It wraps onto its own line instead: the
+     action clock lives in there, and a clock you cannot see is worse
+     than 16px of bar. */
+  .actrow.sizing { flex-wrap: wrap; }
+  .youhave { width: 100%; justify-content: flex-start; gap: 12px; font-size: 10px; margin-top: 2px; }
+  .youhave b { font-size: 11px; }
+  .betinput { width: 92px; height: 32px; }
   .timebank { position: absolute; right: 10px; top: -58px; }
-  .actions { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 8px; }
-  .abtn { min-width: 0; height: 56px; padding: 0 8px; }
+  /* FOUR buttons, one row. At three columns the All-in wrapped onto a line of
+     its own, and the bar grew to nearly half the screen — it covered the hero
+     panel and pushed the player's own cards up into the middle of the felt.
+     A phone has one thumb and four choices; they fit side by side. */
+  .actions { display: grid; grid-template-columns: 1fr 1fr 1.25fr .85fr; gap: 6px; }
+  .abtn { min-width: 0; height: 48px; padding: 0 6px; }
   .abtn .lbl { font-size: 11.5px; }
   .abtn .amt { font-size: 14px; }
   .abtn .key { display: none; }
-  .lt-toast { bottom: 200px; max-width: 94vw; font-size: 12px; }
+  .lt-toast { bottom: 150px; max-width: 94vw; font-size: 12px; }
 
   /* ---- lobby: rows become wrapped cards ---- */
   /* the .lobby grid's implicit column sizes to the widest item's MIN-CONTENT

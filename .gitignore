@@ -182,3 +182,4 @@ deployments/poker-localhost.json
 # carried in git: binaries this size make every clone and every diff worse, and
 # they never change. Re-cut them with scripts/_cut-music.sh if they are ever lost.
 frontend/assets/music/
+test/_shots-mobile/

@@ -129,7 +129,16 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', release, { once: true });
     else release();
   }
-  setTimeout(() => { dataReady = true; }, 15000);
+  // The splash hides an empty page while the first chain reads land — it must
+  // never hold the site hostage waiting for them. This safety net used to be
+  // FIFTEEN SECONDS, and on a phone that is what it took: the feeds are the
+  // slowest thing on the page, so a visitor sat looking at "Finalizing block
+  // state…" long enough to decide the site was broken and leave. Everything
+  // behind the splash is usable without those numbers — they stream in on
+  // their own — so the page is handed over as soon as it has painted, and the
+  // net is a beat, not a quarter of a minute.
+  window.addEventListener('load', () => { dataReady = true; }, { once: true });
+  setTimeout(() => { dataReady = true; }, 3500);
   // setTimeout (not rAF) so the splash still completes in a background tab.
   const tick = () => {
     const ceiling = dataReady ? 100 : 90;
