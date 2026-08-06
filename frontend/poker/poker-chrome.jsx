@@ -169,7 +169,7 @@ function ActionBar({ action, deckMode, onFold, onCheckCall, onRaise, onAllIn, be
         <div className="actrow actions" data-anno="actions">
           <button className="abtn fold" onClick={onFold}>
             <span className="lbl">{SPT("Fold")}</span></button>
-          <button className="abtn call" onClick={onCheckCall}>
+          <button className={"abtn call" + (canCheck ? " check" : "")} onClick={onCheckCall}>
             <span className="lbl">{canCheck ? SPT("Check") : SPT("Call")}</span>
             {!canCheck && <span className="amt tnum">{fmt(toCall)}</span>}</button>
           <button className="abtn raise" onClick={() => onRaise(betValue)}>

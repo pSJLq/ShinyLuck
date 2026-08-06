@@ -291,8 +291,10 @@ const SP_I18N_RU = {
   "Your chips & action are safe on-chain": "Ваши фишки и действия защищены он-чейн",
   "Pre-action armed · fires instantly on your turn": "Пре-действие взведено · сработает в ваш ход",
   "TOURNAMENT": "ТУРНИР", "Level": "Уровень", "Blinds": "Блайнды", "ante": "анте",
-  "Next level": "След. уровень", "Final level": "Финальный уровень", "Players": "Игроки",
+  "Next level": "След. уровень", "Final level": "финальный уровень", "Players": "Игроки",
   "Prize": "Приз", "Split": "Сплит", "FINISHED": "ЗАВЕРШЁН",
+  // the header's own line, which replaced the tournament strip
+  "left": "в игре", "finished": "завершён", "level up next hand": "уровень со след. руки",
   "Table": "Стол", "Switch to this table": "Перейти к этому столу",
   "Next hand starting…": "Следующая рука вот-вот начнётся…",
   "Level up between hands": "Уровень поднимется между руками",

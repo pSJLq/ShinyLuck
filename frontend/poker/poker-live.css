@@ -15,6 +15,23 @@
 .railclose { display: grid !important; }
 .actionbar { right: 0; }
 
+/* ---- an open chat MOVES the table, it does not sit on top of it ----
+   Sliding a 340px panel over the felt covered two seats and the pot for as
+   long as it was open, so the one player reading the chat could not read the
+   table. On a desktop there is width to spare: the rail takes a column, the
+   felt re-measures into what is left (feltGeom runs off the wrap's own size)
+   and everything stays visible, just narrower. Phones keep the bottom sheet
+   in mobile.css — there is nothing there to give away. */
+@media (min-width: 761px) {
+  .app[data-rail="1"] .mainrow { grid-template-columns: 1fr 340px; }
+  .app[data-rail="1"] .siderail { position: relative; inset: auto; width: auto;
+    transform: none; box-shadow: none; }
+  .app[data-rail="1"] .actionbar { right: 340px; }
+  /* the panel has its own ✕ · a second "open chat" button floating over the
+     felt while the chat is already open is just something else in the way */
+  .app[data-rail="1"] .railfab { display: none; }
+}
+
 /* ---- felt geometry (desktop) ----
    The stage canvas follows the viewport aspect (mountScale), so the design's
    fixed 150px side insets let the oval stretch into a racetrack on 16:9 and
@@ -24,7 +41,16 @@
    SAME numbers, so pods always straddle the rail. The fallback values keep
    the first pre-measure paint on the design shape. */
 @media (min-width: 761px) {
-  .feltwrap .felt { inset: 92px var(--sp-feltside, 150px) 188px; border-radius: var(--sp-feltr, 280px); }
+  /* WHAT SITS BELOW THE CLOTH decides where the cloth ends: the hero's pod,
+     and the action bar under it. That was a fixed 188px against a bar that is
+     140-190px tall depending on what it is asking, so on a full bar the two
+     overlapped and the buttons covered the player's own stack. 188 = 114 + 74
+     is the pre-measure fallback (the design's number); once the bar has been
+     measured (--sp-barmax) this and feltGeom() in poker-live-table.jsx read
+     the SAME value, which is what keeps the oval and the seat ring together. */
+  .feltwrap { --sp-feltbot: calc(var(--sp-barmax, 114px) + 74px); }
+  .feltwrap .felt { inset: 92px var(--sp-feltside, 150px) var(--sp-feltbot); border-radius: var(--sp-feltr, 280px); }
+  .herozone { bottom: calc(var(--sp-barmax, 114px) + 12px); }
 }
 
 /* An empty seat is an invitation, not a competitor for attention: on a six-max
@@ -144,20 +170,21 @@
 /* tournament HUD strip (under the topbar on controlled tables).
    MUST be an absolute overlay: as a static flex child of .app it stretched to
    ~560px tall and shoved the felt half off-screen. */
-/* A dark band with a gold hairline, not a gold wash. This strip sits directly
-   above the felt and ran a tinted gradient the full width of the table, which
-   put a second bright horizontal band in the eye's path to the cards. The
-   information is unchanged; only its volume is. */
-.trn-hud { display: flex; align-items: center; gap: 20px; padding: 9px 18px; flex-wrap: wrap;
-  position: absolute; top: 56px; left: 0; right: 0; z-index: 30;
-  font-family: var(--label); font-size: 12px; font-weight: 500; color: var(--muted, #8F8C85);
-  background: linear-gradient(180deg, rgba(14,16,15,0.96), rgba(9,10,10,0.96));
-  border-bottom: 1px solid rgba(217,185,112,0.22); backdrop-filter: blur(4px); }
-.trn-hud .tag { color: var(--accent-soft, #F4DD9E); letter-spacing: .09em; font-size: 10.5px; font-weight: 700; }
-/* blinds, level and player counts — the numbers people check mid-hand, so they
-   get their own size instead of inheriting the label's */
-.trn-hud b { color: var(--white, #fff); font-family: var(--mono); font-weight: 700; font-size: 14.5px; margin-left: 4px; }
-.trn-hud .done { color: var(--gold, #E9CC85); letter-spacing: .09em; font-weight: 700; }
+/* The tournament strip is GONE (it was `.trn-hud`, a full-width band pinned
+   over the top of the felt). It repeated the blinds that the header already
+   showed, carried three facts that cannot change during a hand — prize, split,
+   event number — and covered the top seat while doing it. Level, level clock
+   and players-left moved onto the header's own sub-line; the table switcher
+   below is the only control it held. */
+.tabsw { display: inline-flex; gap: 6px; align-items: center; margin-left: 4px; }
+.tabsw button { font-family: var(--mono); font-size: 11px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--line-2, rgba(255,255,255,0.14)); background: transparent;
+  color: var(--muted, #8F8C85); cursor: pointer; transition: .15s; }
+.tabsw button:hover { color: var(--text-2, #b9b6ae); border-color: var(--accent-32, rgba(217,185,112,.32)); }
+.tabsw button.on { border-color: var(--accent, #D9B970); background: var(--accent-12, rgba(217,185,112,.12));
+  color: var(--accent-soft, #F4DD9E); cursor: default; }
+/* the level clock in its last half-minute */
+.tableid .sub .hot { color: var(--danger-soft, #FF9E9E); }
 
 /* funding box in the cashier / fund modal */
 .lt-modal .fundbox { margin: 12px 0 4px; padding: 12px; border-radius: 10px; border: 1px solid var(--accent-32, rgba(217,185,112,.32)); background: var(--accent-12, rgba(217,185,112,.1)); }
@@ -244,7 +271,11 @@
    white-on-purple text is unreadable on gold ---- */
 .switcher button.on, .btnmark.bb, .quickchips button.on, .pill.primary,
 .hud .hgroup button.on, .chipset button.on, .cta, .btn-sm.join, .spinbtn, .regbtn { color: var(--accent-ink) !important; }
-.abtn.raise .lbl, .abtn.raise .amt, .abtn.raise .key { color: var(--accent-ink) !important; }
+/* The raise button is no longer a gold SURFACE (styles.css: it is a gold-tinted
+   outline like the other three), so dark ink on it is dark-on-dark. This line
+   survived the change and painted the label at 0.10 luminance — legible in the
+   author's head, invisible on the screen. Caught by the readability check in
+   test/poker-layout-desktop.mjs, which is why that check exists. */
 
 /* fold: the face-down cards fling toward the pot and fade (muck) */
 @keyframes muckFly {

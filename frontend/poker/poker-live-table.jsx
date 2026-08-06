@@ -32,11 +32,30 @@ const POS_M = {
 // are placed ON the measured rail. The JSX publishes --sp-feltside/--sp-feltr
 // and poker-live.css draws the same shape, so the oval and the seat ring can
 // never disagree. POS/POS_M stay as the pre-measure fallback and for phones.
-const FELT_D = { top: 92, bottom: 188, minSide: 150, maxAR: 2.0 };
+// THE BOTTOM INSET IS NOT A CONSTANT. Below the cloth live two things stacked:
+// the hero's own pod, and the action bar under it. The bar was assumed to be
+// ~130px, so on a full-height bar (slider, four buttons, the clock line) it
+// rode UP over the hero's plaque — the player's stack and their last action
+// sat behind the buttons they were about to press. It is measured now
+// (--sp-barmax, published by the bar's ResizeObserver) and both this geometry
+// and the CSS below read the same number, so the oval, the seat ring and the
+// hero can never disagree about where the rail is.
+const FELT_D = { top: 92, bottom: 188, minSide: 150, maxAR: 2.0, heroPod: 74 };
+function barMaxPx() {
+  try {
+    const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--sp-barmax"), 10);
+    return v > 0 ? v : 0;
+  } catch (e) { return 0; }
+}
+function feltBottom() {
+  const bar = barMaxPx();
+  return bar ? bar + FELT_D.heroPod : FELT_D.bottom; // pre-measure: the design's number
+}
 function feltGeom(w, h) {
-  const fh = h - FELT_D.top - FELT_D.bottom;
+  const bottom = feltBottom();
+  const fh = h - FELT_D.top - bottom;
   const side = Math.max(FELT_D.minSide, Math.round((w - FELT_D.maxAR * fh) / 2));
-  return { side, r: fh / 2, fw: w - side * 2, fh, x0: side, y0: FELT_D.top, y1: h - FELT_D.bottom, cx: w / 2, cy: FELT_D.top + fh / 2 };
+  return { side, r: fh / 2, fw: w - side * 2, fh, x0: side, y0: FELT_D.top, y1: h - bottom, cx: w / 2, cy: FELT_D.top + fh / 2 };
 }
 // n seats at equal arc steps along the rail, seat 0 = bottom center (hero),
 // walking the LEFT side first (same order as POS, so view() rotation holds).
@@ -72,6 +91,80 @@ const N = (wei) => Number(SP.fmt(wei, 6));
 let CHIPS = false;
 const NV = (v) => (CHIPS ? Number(v) : Number(SP.fmt(v, 6)));
 const A = SP.ACTION, ST = SP.STREET;
+
+// ---- last-action badges, as a pure diff ----
+// WHY THIS IS NOT A LIVE FEED. The chain pushes nothing, so who-just-did-what
+// is inferred by diffing one snapshot against the last one. That inference has
+// to survive a snapshot that is not internally consistent, and ours routinely
+// is not: `SP.sdk.snapshot` fires getHand and 2×seats reads as separate
+// eth_calls, and on Somnia (100ms blocks, ~190ms for the batch) SIX blocks can
+// pass while they are in flight. A read where the seats are one block newer
+// than the hand is normal, not exotic.
+//
+// That is what made a bet flash on a seat and then turn back into CHECK: the
+// torn read showed the raised committedStreet while actingSeat still pointed at
+// the raiser, so the next (clean) read looked exactly like "their turn passed
+// and they put nothing in" — the signature of a check.
+//
+// THE INVARIANT THAT FIXES IT: on one street, a seat that has already put chips
+// in cannot go back to having checked. Once you bet, call or raise, the only
+// ways the action can return to you are call, raise and fold. So the two
+// branches that infer an action from an ABSENCE of change may never overwrite
+// one that was inferred from chips actually moving.
+const ACT_AGGRO = { bet: 1, raise: 1, call: 1, allin: 1 };
+function actionDiff(prev, cur, existing, now) {
+  const h = cur.hand, acts = {};
+  if (!h.inProgress || !prev.sh) return acts;
+  const sameHand = h.handId === prev.handId;
+  const sameStreet = sameHand && h.street === prev.street;
+  const dk = String(h.dealId);
+  const st = prev.street;
+  // has this seat already been seen committing chips on the street we are
+  // reading? then no "nothing happened" inference may speak for it
+  const committed = (i) => {
+    const e = existing && existing[i];
+    return !!(e && e.deal === dk && e.street === st && ACT_AGGRO[e.kind]);
+  };
+  const stamp = (o) => Object.assign(o, { ts: now, deal: dk, street: st });
+  for (const s of cur.seats) {
+    if (s.empty) continue;
+    const p = prev.sh[s.index];
+    if (!p) continue;
+    if (sameHand && s.folded && !p.folded) acts[s.index] = stamp({ kind: "fold" });
+    else if (sameHand && s.allIn && !p.allIn) acts[s.index] = stamp({ kind: "allin" });
+    else if (sameStreet && s.committedStreet > p.cs)
+      acts[s.index] = stamp({ kind: prev.curBet === 0n ? "bet" : (s.committedStreet > prev.curBet ? "raise" : "call"), amt: NV(s.committedStreet) });
+    else if (sameStreet && prev.actingSeat === s.index && h.actingSeat !== s.index
+             && s.committedStreet === p.cs && !s.folded && !s.allIn && s.inHand && !committed(s.index))
+      acts[s.index] = stamp({ kind: "check" });
+    // THE ACTION THAT CLOSES A STREET.
+    // Every branch above needs the street to still be the same one, because
+    // that is how a bet is recognised: committedStreet went up. But the player
+    // who acts LAST on a street ends it, and by the next poll the street has
+    // advanced and every committedStreet is back to zero — so their action
+    // matched nothing and the badge from their PREVIOUS one stayed on their
+    // seat. Raise the flop, check the turn, and the table still said RAISE for
+    // the rest of the hand: it was announcing a bet that was no longer there,
+    // which is the one thing a badge must never do.
+    // What they did is still readable, from two facts the reset does not erase:
+    // what they owed (prev.curBet), and what LEFT THEIR STACK. Chips can only
+    // leave a stack mid-hand by being committed, so a drop means they paid —
+    // which is how a bet that closed a street (everyone else already all-in)
+    // stops being mistaken for a check.
+    else if (sameHand && !sameStreet && prev.actingSeat === s.index
+             && !s.folded && !s.allIn && s.inHand && !committed(s.index)) {
+      const before = prev.stacks && prev.stacks[s.index];
+      const paid = before != null && before > s.stack ? before - s.stack : 0n;
+      const put = p.cs + paid;
+      acts[s.index] = paid === 0n && p.cs >= prev.curBet
+        ? stamp({ kind: "check" })
+        : stamp({ kind: put > prev.curBet ? (prev.curBet === 0n ? "bet" : "raise") : "call", amt: NV(put > 0n ? put : prev.curBet) });
+    }
+  }
+  return acts;
+}
+// drivable by the badge test without a chain (test/poker-action-badges.mjs)
+if (typeof window !== "undefined") window.SPActionDiff = actionDiff;
 
 // Tiny WebAudio synth · no assets, gated by the sound preference.
 let AC = null;
@@ -182,7 +275,12 @@ function LiveTable() {
   const [reveals, setReveals] = useState({}); // dealId -> { seat: [c0,c1] }
   const [sdWin, setSdWin] = useState(null); // showdown winner computed from reveals, BEFORE on-chain settle
   const [pendingAct, setPendingAct] = useState(null); // optimistic: my action tx sent, waiting for the chain
-  const [lastActs, setLastActs] = useState({}); // seat -> {kind, amt, ts, deal} · action badges
+  const [lastActs, setLastActs] = useState({}); // seat -> {kind, amt, ts, deal, street} · action badges
+  // read by the snapshot diff, which must see what is ALREADY on a seat to
+  // refuse a downgrade · a ref, not the state, so the diff effect keeps its
+  // [snap] deps and cannot run against a render-stale map
+  const lastActsRef = useRef({});
+  useEffect(() => { lastActsRef.current = lastActs; }, [lastActs]);
   const [foldFx, setFoldFx] = useState({}); // seat -> ts · the muck fling, owned by its own timer
   const [leaving, setLeaving] = useState(false); // "get me out" · see startLeave()
   const leaveTxRef = useRef(false);
@@ -240,21 +338,38 @@ function LiveTable() {
   useEffect(() => {
     if (typeof ResizeObserver === "undefined") return;
     const root = document.documentElement;
-    let el = null, ro = null;
-    const write = () => { if (el) root.style.setProperty("--sp-barh", Math.round(el.getBoundingClientRect().height) + "px"); };
+    let el = null, ro = null, max = 0;
+    // TWO numbers, because they answer different questions.
+    // --sp-barh is what the bar measures RIGHT NOW; the phone layout wants
+    // that, so the hero sits directly on top of whichever bar is showing.
+    // --sp-barmax is the tallest it has been at this table, clamped to a sane
+    // band. The desktop felt and the seat ring are drawn from THAT, because a
+    // bar that grows by 30px when it becomes your turn would otherwise resize
+    // the table under your hands twice a hand.
+    const write = () => {
+      if (!el) return;
+      const h = Math.round(el.getBoundingClientRect().height);
+      if (!h) return;
+      root.style.setProperty("--sp-barh", h + "px");
+      if (h > max) {
+        max = Math.min(Math.max(h, 140), 280);
+        root.style.setProperty("--sp-barmax", max + "px");
+        window.dispatchEvent(new Event("resize")); // the felt re-measures off it
+      }
+    };
     const attach = () => {
       const found = document.querySelector(".actionbar");
       if (found === el) return write();
       el = found;
       if (ro) ro.disconnect();
-      if (!el) { root.style.removeProperty("--sp-barh"); ro = null; return; }
+      if (!el) { root.style.removeProperty("--sp-barh"); root.style.removeProperty("--sp-barmax"); max = 0; ro = null; return; }
       ro = new ResizeObserver(write);
       ro.observe(el);
       write();
     };
     attach();
     const iv = setInterval(attach, 600);
-    return () => { clearInterval(iv); if (ro) ro.disconnect(); root.style.removeProperty("--sp-barh"); };
+    return () => { clearInterval(iv); if (ro) ro.disconnect(); root.style.removeProperty("--sp-barh"); root.style.removeProperty("--sp-barmax"); };
   }, []);
 
   // live snapshot poll · the table you're AT polls fast (served from the
@@ -340,16 +455,22 @@ function LiveTable() {
   useEffect(() => {
     const el = feltWrapRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => {
+    let last = "";
+    const measure = () => {
       const w = el.offsetWidth, h = el.offsetHeight;
       if (!w || !h) return;
       const g = feltGeom(w, h);
       el.style.setProperty("--sp-feltside", g.side + "px");
       el.style.setProperty("--sp-feltr", g.r + "px");
-      setWrapBox((p) => (p && p.w === w && p.h === h ? p : { w, h }));
-    });
+      setWrapBox((p) => (p && p.w === w && p.h === h && last === g.side + ":" + g.r ? p : { w, h }));
+      last = g.side + ":" + g.r;
+    };
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    // the wrap does NOT change size when the action bar does, but the felt
+    // inside it does — the bar's observer fires a resize so this runs again
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
   }, [!snap || ctl === undefined]);
 
   // fetch my hole cards once per deal · failed attempts retry on a FAST local
@@ -541,7 +662,7 @@ function LiveTable() {
       dealTimerRef.current = setTimeout(() => setAnim((a) => ({ ...a, dealing: false })), prefs.turbo ? 600 : 1300);
       setPreAct(null); // pre-actions never carry across hands
       setSdWin(null); clearTimeout(sdTimerRef.current);
-      setLastActs({}); // action badges never carry across hands
+      setLastActs({}); lastActsRef.current = {}; // action badges never carry across hands
       // antes are swept straight into the pot on-chain (no bet spot) · show
       // everyone's chips flying to the middle so posting is visible to all
       const hasAnte = trn ? Number(trn.curAnte || 0) > 0 : (snap.cfg.ante || 0n) > 0n;
@@ -566,39 +687,10 @@ function LiveTable() {
     // WHO just did WHAT (fold/check/call/bet/raise/all-in) · the chain has no
     // push feed, so the poll delta is the source of truth
     if (h.inProgress && prev.sh) {
-      const sameHand = h.handId === prev.handId;
-      const sameStreet = sameHand && h.street === prev.street;
-      const acts = {};
-      for (const s of snap.seats) {
-        if (s.empty) continue;
-        const p = prev.sh[s.index];
-        if (!p) continue;
-        // `deal` stamps the badge with the hand it belongs to · the only thing
-        // that may ever clear it is a NEW hand, not a timer
-        const dk = String(h.dealId);
-        if (sameHand && s.folded && !p.folded) acts[s.index] = { kind: "fold", ts: Date.now(), deal: dk };
-        else if (sameHand && s.allIn && !p.allIn) acts[s.index] = { kind: "allin", ts: Date.now(), deal: dk };
-        else if (sameStreet && s.committedStreet > p.cs)
-          acts[s.index] = { kind: prev.curBet === 0n ? "bet" : (s.committedStreet > prev.curBet ? "raise" : "call"), amt: NV(s.committedStreet), ts: Date.now(), deal: dk };
-        else if (sameStreet && prev.actingSeat === s.index && h.actingSeat !== s.index && s.committedStreet === p.cs && !s.folded && !s.allIn && s.inHand)
-          acts[s.index] = { kind: "check", ts: Date.now(), deal: dk };
-        // THE ACTION THAT CLOSES A STREET.
-        // Every branch above needs the street to still be the same one, because
-        // that is how a bet is recognised: committedStreet went up. But the
-        // player who acts LAST on a street ends it, and by the next poll the
-        // street has advanced and every committedStreet is back to zero — so
-        // their action matched nothing and the badge from their PREVIOUS one
-        // stayed on their seat. Raise the flop, check the turn, and the table
-        // still said RAISE for the rest of the hand: it was announcing a bet
-        // that was no longer there, which is the one thing a badge must never
-        // do. What they did is recoverable from the street they just closed —
-        // owing nothing means they checked, owing something means they called
-        // it — and fold/all-in are already caught above.
-        else if (sameHand && !sameStreet && prev.actingSeat === s.index && !s.folded && !s.allIn && s.inHand)
-          acts[s.index] = p.cs >= prev.curBet
-            ? { kind: "check", ts: Date.now(), deal: dk }
-            : { kind: "call", amt: NV(prev.curBet), ts: Date.now(), deal: dk };
-      }
+      // the diff itself is pure and lives at module scope (actionDiff), because
+      // it has to be testable against snapshot sequences a live table only
+      // produces by accident — torn reads above all
+      const acts = actionDiff(prev, snap, lastActsRef.current, Date.now());
       if (Object.keys(acts).length) setLastActs((m) => ({ ...m, ...acts }));
       // THE MUCK.
       // Cards being flung toward the pot is how a table says "that player is
@@ -845,7 +937,7 @@ function LiveTable() {
     if (tid === tableId) return;
     setSnap(null); setCtl(undefined);
     setHoles({}); setReveals({}); setSdWin(null); setPendingAct(null);
-    setLastActs({}); setPotFly(null); setPreAct(null); setBetValue(0);
+    setLastActs({}); lastActsRef.current = {}; setPotFly(null); setPreAct(null); setBetValue(0);
     setAnim({ dealing: false, flipFrom: 99, winnerSeat: -1, won: 0 });
     setMovedTo(null); setModal(null);
     moveRef.current = false; wasSeatedHereRef.current = false;
@@ -1024,7 +1116,7 @@ function LiveTable() {
 
   return (
     <div className="scaler" id="scaler">
-      <div className="app" data-dir={theme} data-deck={deck} data-anim={reducedMo ? "off" : "on"} data-turbo={prefs.turbo ? "1" : "0"} data-bigui={prefs.bigui ? "1" : "0"}>
+      <div className="app" data-dir={theme} data-deck={deck} data-anim={reducedMo ? "off" : "on"} data-turbo={prefs.turbo ? "1" : "0"} data-bigui={prefs.bigui ? "1" : "0"} data-rail={railOpen ? "1" : "0"} data-trn={trn ? "1" : "0"}>
         {/* top bar */}
         <header className="topbar">
           <div className="group">
@@ -1042,13 +1134,54 @@ function LiveTable() {
               by its stakes and says the format underneath; the old row set the
               word BLINDS at the same weight as the numbers and boxed each of
               them, so the eye had to parse three widgets to learn one thing. */}
+          {/* ONE header, not two. A tournament used to get a full-width strip
+              of its own under this line, and six of its eight facts were either
+              already on screen (the blinds, twice) or unchangeable and already
+              known before sitting down (prize, split, event number). What is
+              genuinely live — which level, how long it lasts, how many players
+              are left — costs a few words on the line that was already here.
+              The rest lives on the event page, one click away through the exit
+              button to its right.
+              The blinds MUST come from the tournament clock: the table config
+              is cached per table (poker-sdk getTable) and still holds the
+              opening level hours into an event — the strip was the only thing
+              on this screen telling the truth about them. */}
           <div className="tableid">
             <span className="stakes">
               {CHIPS ? <ChipMark size={14} /> : <SomiCoin size={14} />}
-              <b className="tnum">{CHIPS ? `${fmtChips(NV(cfg.smallBlind))} / ${fmtChips(NV(cfg.bigBlind))}` : `${NV(cfg.smallBlind)} / ${NV(cfg.bigBlind)}`}</b>
+              <b className="tnum">{trn
+                ? `${fmtChips(Number(trn.curSb))} / ${fmtChips(Number(trn.curBb))}${Number(trn.curAnte || 0) ? ` + ${fmtChips(Number(trn.curAnte))}` : ""}`
+                : CHIPS ? `${fmtChips(NV(cfg.smallBlind))} / ${fmtChips(NV(cfg.bigBlind))}` : `${NV(cfg.smallBlind)} / ${NV(cfg.bigBlind)}`}</b>
             </span>
-            <span className="sub">NLHE · {maxSeats}-max · {SPT("Hand")} <span className="tnum">#{hand.handId}</span></span>
+            <span className="sub">
+              {trn ? (() => {
+                const left = trn.nextAt ? Math.max(0, trn.nextAt - Math.floor(nowMs / 1000)) : null;
+                const clock = trn.status !== 1 ? SPT("finished")
+                  : left == null ? SPT("final level")
+                  : left > 0 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`
+                  : SPT("level up next hand");
+                return <React.Fragment>
+                  {SPT("Level")} <b className="tnum">{trn.level + 1}</b> · <span className={left != null && left > 0 && left <= 30 ? "hot" : ""}>{clock}</span>
+                  {" · "}<b className="tnum">{trn.remaining}</b>/{trn.registered} {SPT("left")}
+                </React.Fragment>;
+              })() : `NLHE · ${maxSeats}-max`}
+              {" · "}{SPT("Hand")} <span className="tnum">#{hand.handId}</span>
+            </span>
           </div>
+          {/* MTT: the one part of the old strip that was a control, not a
+              readout — you can watch another table. Kept, next to the identity
+              of the table you are at. */}
+          {trn && trn.tables && trn.tables.length > 1 && (
+            <div className="tabsw">
+              {trn.tables.map((tid, i) => (
+                <button key={tid} className={tid === tableId ? "on" : ""}
+                  title={tid === tableId ? null : SPT("Switch to this table")}
+                  onClick={() => switchTable(tid)}>
+                  {SPT("Table")} {i + 1}{trn.counts && trn.counts[tid] != null ? ` · ${trn.counts[tid]}` : ""}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="spacer" />
           {/* No wallet chip / connect button here: the merged shell's header
               owns balance, nickname, avatar and the cashier (profile drawer),
@@ -1089,41 +1222,6 @@ function LiveTable() {
             } : null}
             session={null} /* Privy-only → always headless; no session key to manage */ />
         )}
-
-        {trn && (() => {
-          const lsb = Number(trn.curSb), lbb = Number(trn.curBb), lante = Number(trn.curAnte || 0);
-          const nextIn = trn.nextAt ? Math.max(0, trn.nextAt - now) : null;
-          const mm = nextIn != null ? Math.floor(nextIn / 60) : 0, ss = nextIn != null ? String(nextIn % 60).padStart(2, "0") : "00";
-          const multi = trn.tables && trn.tables.length > 1;
-          return (
-            <div className="trn-hud">
-              <span className="tag">{SPT("TOURNAMENT")} · {multi ? "MTT" : "SNG"} #{trn.id}</span>
-              <span>{SPT("Level")} <b className="tnum">{trn.level + 1}</b></span>
-              <span>{SPT("Blinds")} <b className="tnum">{fmtChips(lsb)} / {fmtChips(lbb)}{lante ? ` (${SPT("ante")} ${fmtChips(lante)})` : ""}</b></span>
-              {trn.status === 1 && nextIn != null && nextIn > 0 && <span>{SPT("Next level")} <b className="tnum">{mm}:{ss}</b></span>}
-              {trn.status === 1 && nextIn != null && nextIn === 0 && <span className="tag">{SPT("Level up between hands")}</span>}
-              {trn.status === 1 && nextIn == null && <span className="tag">{SPT("Final level")}</span>}
-              <span>{SPT("Players")} <b className="tnum">{trn.remaining}/{trn.registered}</b></span>
-              <span>{SPT("Prize")} <b className="tnum">{Number(SP.fmt(trn.pool, 4))} {SP.NETWORK.currency.symbol}</b></span>
-              <span>{SPT("Split")} <b className="tnum">{trn.payoutBps.map((b) => b / 100 + "%").join(" / ")}</b></span>
-              {multi && (
-                <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-                  {trn.tables.map((tid, i) => (
-                    <button key={tid} onClick={() => switchTable(tid)}
-                      title={tid === tableId ? null : SPT("Switch to this table")}
-                      style={{ cursor: tid === tableId ? "default" : "pointer", fontFamily: "var(--mono)", fontSize: 11, padding: "3px 9px", borderRadius: 999,
-                        border: "1px solid " + (tid === tableId ? "var(--accent, #D9B970)" : "var(--line-2, rgba(255,255,255,0.14))"),
-                        background: tid === tableId ? "var(--accent-12, rgba(217,185,112,.12))" : "transparent",
-                        color: tid === tableId ? "var(--accent-soft, #F4DD9E)" : "var(--muted, #8F8C85)" }}>
-                      {SPT("Table")} {i + 1}{trn.counts && trn.counts[tid] != null ? ` · ${trn.counts[tid]}` : ""}
-                    </button>
-                  ))}
-                </span>
-              )}
-              {trn.status === 2 && <span className="done">{SPT("FINISHED")}</span>}
-            </div>
-          );
-        })()}
 
         <div className="mainrow">
           <div className="feltwrap scanlines" ref={feltWrapRef}>
@@ -1555,7 +1653,7 @@ function LiveTable() {
           <div className="acttimer"><i style={{ width: (pct * 100) + "%" }} /></div>
           <div className="actrow actions">
             <button className="abtn fold" disabled={busy} onClick={onFold}><span className="key">F</span><span className="lbl">{SPT("Fold")}</span></button>
-            <button className="abtn call" disabled={busy} onClick={onCheckCall}><span className="key">C</span><span className="lbl">{canCheck ? SPT("Check") : callIsAllIn ? SPT("All-in") : SPT("Call")}</span>{!canCheck && <span className="amt tnum">{fmtMoney(call)}</span>}</button>
+            <button className={"abtn call" + (canCheck ? " check" : "")} disabled={busy} onClick={onCheckCall}><span className="key">C</span><span className="lbl">{canCheck ? SPT("Check") : callIsAllIn ? SPT("All-in") : SPT("Call")}</span>{!canCheck && <span className="amt tnum">{fmtMoney(call)}</span>}</button>
             {/* short-shove (a stack too small for a legal min-raise) is still a real
                 option · but only when an opponent has chips left to call it, and
                 the amount shown is what can actually be matched, not my whole stack */}

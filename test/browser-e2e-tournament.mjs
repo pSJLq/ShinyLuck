@@ -43,6 +43,8 @@ async function main() {
   const buyIn = ethers.parseEther("0.01"), fee = ethers.parseEther("0.001");
   const preset = shippedStructures()[PRESET];
   if (!preset) throw new Error(`no such preset: ${PRESET}`);
+  // the screen's own abbreviation (fmtChips in poker-seats.jsx): 1000 → "1k"
+  const chipsK = (n) => (n >= 1000 ? (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + "k" : String(n));
   const START_STACK = BigInt(preset.stack);
   const levels = preset.levels.map((l) => ({ sb: BigInt(l.sb), bb: BigInt(l.bb), ante: BigInt(l.ante), durationSecs: LEVEL_SECS }));
 
@@ -91,8 +93,15 @@ async function main() {
     if (seat.occupied) seatOfAddr.set(seat.player.toLowerCase(), s);
   }
   const bySeat = [];
+  // ONE OF THEM IS ON A PHONE. The tournament header carries more than the
+  // cash one (level, its clock, players left) and a phone is where that line
+  // runs out of room first — §29.4 left "the tournament table on a phone" as
+  // the screen nobody had looked at. Now a real player of every event is on
+  // one, and the header check below reads ITS screen.
+  const pw2 = loadPlaywright();
   for (let i = 0; i < PLAYERS; i++) {
-    const tab = await openTable(browser, wallets[i], "p" + i, i, table);
+    const tab = await openTable(browser, wallets[i], "p" + i, i, table,
+      i === 0 ? { device: pw2.devices["iPhone 13"] } : {});
     tab.seat = seatOfAddr.get(wallets[i].address.toLowerCase());
     tabs.push(tab);
     bySeat[tab.seat] = tab;
@@ -118,7 +127,38 @@ async function main() {
     status = Number(info.status);
     if (status >= 2) break;
     const lvl = Number((await trnHost.clock(id)).level);
-    if (lvl > lastLevel) { lastLevel = lvl; ok(`level ${lvl} — blinds up, tables were frozen and released`); }
+    if (lvl > lastLevel) {
+      lastLevel = lvl;
+      ok(`level ${lvl} — blinds up, tables were frozen and released`);
+      // AND THE PLAYER MUST BE TOLD. The blinds in the table header come from
+      // a per-table config the SDK caches and never re-reads, so they used to
+      // freeze at the opening level for the whole event; the tournament strip
+      // (now deleted) was the only place with the live ones. The header reads
+      // them off the tournament clock now — this is that promise, checked.
+      //
+      // Checked against the level the HEADER ITSELF names, not against the one
+      // the chain was on when this fired: these levels are compressed to 30s,
+      // so by the time the poll lands the event has often moved on, and an
+      // assertion racing it would only ever be testing the clock.
+      await sleep(2500);
+      const head = (await felt(tabs[0])).header || "";     // tabs[0] is the phone
+      const shown = Number((head.match(/Level (\d+)/) || [])[1]);
+      const L = preset.levels[shown - 1];
+      if (!L) bad(`header names level ${shown}, which the structure does not have: "${head}"`);
+      else {
+        const want = `${chipsK(L.sb)} / ${chipsK(L.bb)}`;
+        if (head.startsWith(want)) ok(`header follows the level (on the phone): "${head}"`);
+        else bad(`header says level ${shown} but prints blinds "${head.slice(0, 24)}…", expected "${want}"`);
+      }
+      // …and it has to FIT. One line, clipped by CSS, is how a hand number
+      // silently disappears on a 390px screen.
+      const cut = await tabs[0].page.evaluate(() => {
+        const el = document.querySelector(".tableid .sub");
+        return el ? { over: el.scrollWidth - el.clientWidth, text: el.textContent } : null;
+      });
+      if (cut && cut.over > 1) bad(`the header line is clipped on the phone by ${cut.over}px: "${cut.text}"`);
+      else if (cut) ok("the header line fits the phone");
+    }
 
     const snap = await snapshotOf(table);
     if (!snap || !snap.hand || !snap.hand.inProgress) { await sleep(400); continue; }

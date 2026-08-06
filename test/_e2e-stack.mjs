@@ -243,6 +243,12 @@ export async function felt(p) {
       // to read a sentence to find the winner, so the test does not either.
       crowned: [...document.querySelectorAll(".seat.winner, .heroinfo.winner")]
         .map((e) => (e.className.includes("heroinfo") ? "hero" : (txt(e.querySelector(".nm")) || "?"))),
+      // The whole table header: stakes plus, in a tournament, the level, its
+      // clock and how many players are left. It used to be a full-width strip
+      // of its own; the blinds it printed were the only truthful ones on the
+      // screen, because the header's came from a table config that is cached
+      // per table and never refreshed after a level-up.
+      header: txt(document.querySelector(".tableid")),
       actionbar: [...document.querySelectorAll(".actionbar .abtn")].map((b) => b.textContent.replace(/\s+/g, " ").trim()),
       strip: txt(document.querySelector(".actionbar")),
       pills: [...document.querySelectorAll(".topbar .pill, .topbar .group")].map((e) => e.textContent.replace(/\s+/g, " ").trim()),

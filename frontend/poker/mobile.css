@@ -29,10 +29,16 @@
   .wallet .net { display: none; }
   .iconbtn { width: 32px; height: 32px; flex-shrink: 0; }
 
-  /* ---- tournament HUD: swipeable strip ---- */
-  .trn-hud { top: 45px; flex-wrap: nowrap; overflow-x: auto; gap: 14px; padding: 6px 10px;
-    font-size: 11px; white-space: nowrap; scrollbar-width: none; }
-  .trn-hud::-webkit-scrollbar { display: none; }
+  /* The tournament strip is gone (see poker-live.css); its live facts are on
+     the header's sub-line now. On a phone that line has to stay one line: no
+     wrapping, and it may scroll sideways rather than push the felt down. */
+  .tableid { min-width: 0; }
+  .tableid .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
+  /* a tournament's line is longer (level, its clock, players left) and there
+     is room for it: the Top up button does not exist on a tournament table */
+  .app[data-trn="1"] .tableid .sub { font-size: 10px; letter-spacing: 0; max-width: 64vw; }
+  .app[data-trn="1"] .tableid .stakes b { font-size: 15px; }
+  .tabsw { display: none; } /* the MTT switcher: the event page does this better on a phone */
 
   /* ---- table: a PORTRAIT table, not a landscape one squeezed sideways ----
      A phone is tall and a poker felt was wide, so the oval was drawn across
@@ -76,7 +82,7 @@
   .app.app[data-bigui="1"] .heroinfo .meta .stack { font-size: 19px; }
   .app.app[data-bigui="1"] .metapill b { font-size: 13px; }
   .app.app[data-bigui="1"] .metapill { height: 30px; }
-  .app.app[data-bigui="1"] .trn-hud b { font-size: 13px; }
+  .app.app[data-bigui="1"] .tableid .sub b { font-size: 12px; }
   .btnmark { width: 18px; height: 18px; font-size: 8.5px; }
   .board { gap: 4px; }
   .board .card, .board .slot { width: 42px; height: 60px; }

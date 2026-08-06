@@ -183,3 +183,4 @@ deployments/poker-localhost.json
 # they never change. Re-cut them with scripts/_cut-music.sh if they are ever lost.
 frontend/assets/music/
 test/_shots-mobile/
+test/_shots-desktop/

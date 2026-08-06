@@ -431,7 +431,7 @@ function ActionBar({
   }, /*#__PURE__*/React.createElement("span", {
     className: "lbl"
   }, SPT("Fold"))), /*#__PURE__*/React.createElement("button", {
-    className: "abtn call",
+    className: "abtn call" + (canCheck ? " check" : ""),
     onClick: onCheckCall
   }, /*#__PURE__*/React.createElement("span", {
     className: "lbl"
