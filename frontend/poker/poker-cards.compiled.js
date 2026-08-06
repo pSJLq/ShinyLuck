@@ -93,22 +93,29 @@ function avatarColors(seed) {
   };
 }
 
-/* Minimal sparkle mark (card backs, small accents) · single-path currentColor. */
+/* THE HOUSE MARK — the real one.
+   This used to be a hand-drawn path, and what it drew was a sharp crystal: four
+   straight-ish points meeting in a diamond. The brand is not a crystal. It is
+   the spark from /assets/spark.png — a four-pointed star with CONCAVE sides and
+   a fat middle, white core, gold rim, sparkle dust, on its own dark field,
+   tilted. Nobody looking at the felt or a card back should have to wonder
+   whether it is the same logo as the one in the header, so it now IS that
+   file rather than an impression of it. */
 function SparkMark({
   className,
   style
 }) {
-  return /*#__PURE__*/React.createElement("svg", {
+  return /*#__PURE__*/React.createElement("img", {
     className: className,
-    style: style,
-    viewBox: "0 0 64 64",
-    fill: "none",
-    "aria-hidden": "true"
-  }, /*#__PURE__*/React.createElement("path", {
-    d: "M 32 3 Q 36.5 23 47 32 Q 36.5 41 32 61 Q 27.5 41 17 32 Q 27.5 23 32 3 Z",
-    fill: "currentColor",
-    transform: "rotate(26 32 32)"
-  }));
+    style: {
+      objectFit: "contain",
+      ...(style || {})
+    },
+    src: "/assets/spark.png",
+    alt: "",
+    "aria-hidden": "true",
+    draggable: "false"
+  });
 }
 
 /* ShinyPoker brand mark · the "shiny card" sparkle from ShinyPokerDesign/Logo:

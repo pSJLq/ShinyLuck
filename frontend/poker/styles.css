@@ -305,7 +305,7 @@ body {
 .feltmark { position: absolute; left: 50%; top: 54%; transform: translate(-50%,-50%); z-index: 1;
   display: flex; align-items: center; gap: 14px; pointer-events: none; user-select: none;
   opacity: 0.075; white-space: nowrap; }
-.feltmark .fm-spark { width: 52px; height: 52px; color: #F7EFD8; flex-shrink: 0; }
+.feltmark .fm-spark { width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0; }
 .feltmark .fm-word { font-family: var(--label); font-weight: 800; font-size: 34px;
   letter-spacing: 0.17em; color: #F7EFD8; }
 @media (max-width: 760px) {
@@ -431,7 +431,10 @@ body {
 /* the mark sits on its own darker medallion so the lattice never runs through it */
 .card.back .bk::before { content: ""; position: absolute; width: 62%; aspect-ratio: 1; border-radius: 50%;
   background: radial-gradient(circle, rgba(4,16,11,0.92) 55%, transparent 72%); }
-.card.back .mk { position: relative; width: 42%; color: rgba(244,221,158,0.95);
+/* The mark is the real logo file now, and the logo carries its own dark
+   field — round it so that field reads as the logo's disc instead of a
+   black square sitting on the card. */
+.card.back .mk { border-radius: 50%; position: relative; width: 52%; color: rgba(244,221,158,0.95);
   filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6)); }
 
 .card.folded { filter: grayscale(1) brightness(0.5); opacity: 0.5; }

@@ -582,6 +582,22 @@ function LiveTable() {
           acts[s.index] = { kind: prev.curBet === 0n ? "bet" : (s.committedStreet > prev.curBet ? "raise" : "call"), amt: NV(s.committedStreet), ts: Date.now(), deal: dk };
         else if (sameStreet && prev.actingSeat === s.index && h.actingSeat !== s.index && s.committedStreet === p.cs && !s.folded && !s.allIn && s.inHand)
           acts[s.index] = { kind: "check", ts: Date.now(), deal: dk };
+        // THE ACTION THAT CLOSES A STREET.
+        // Every branch above needs the street to still be the same one, because
+        // that is how a bet is recognised: committedStreet went up. But the
+        // player who acts LAST on a street ends it, and by the next poll the
+        // street has advanced and every committedStreet is back to zero — so
+        // their action matched nothing and the badge from their PREVIOUS one
+        // stayed on their seat. Raise the flop, check the turn, and the table
+        // still said RAISE for the rest of the hand: it was announcing a bet
+        // that was no longer there, which is the one thing a badge must never
+        // do. What they did is recoverable from the street they just closed —
+        // owing nothing means they checked, owing something means they called
+        // it — and fold/all-in are already caught above.
+        else if (sameHand && !sameStreet && prev.actingSeat === s.index && !s.folded && !s.allIn && s.inHand)
+          acts[s.index] = p.cs >= prev.curBet
+            ? { kind: "check", ts: Date.now(), deal: dk }
+            : { kind: "call", amt: NV(prev.curBet), ts: Date.now(), deal: dk };
       }
       if (Object.keys(acts).length) setLastActs((m) => ({ ...m, ...acts }));
       // THE MUCK.

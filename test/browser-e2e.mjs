@@ -61,7 +61,7 @@ async function main() {
   // Everything below is pinned to ONE hand. The dealer keeps dealing, so an
   // assertion that waits for "a settle" can land on the next hand (a preflop
   // fold with no board) and report a regression that never happened.
-  let acted = 0, sdHand = null;
+  let acted = 0, sdHand = null, badgeLies = 0, pendingCheck = null, raisedOnce = false;
   const deadline = Date.now() + 240_000;
   while (Date.now() < deadline) {
     const snap = await snapshotOf(TABLE);
@@ -73,17 +73,53 @@ async function main() {
     // the click guard refuses anything landing within 600ms of the bar changing
     // meaning — that IS the fix under test, so wait it out like a player would
     await sleep(800);
+    // THE BADGE MUST SAY WHAT YOU JUST DID. A check that CLOSES a street used
+    // to leave the previous badge up: raise the flop, check the turn, and your
+    // seat announced RAISE for the rest of the hand — a bet that was no longer
+    // on the table.
+    if (pendingCheck) {
+      if (await pendingCheck.page.locator(".actchip.inbar.raise, .actchip.inbar.bet").count()) badgeLies++;
+      pendingCheck = null;
+    }
+    // RAISE ONCE, then play passively. Without a raise in the hand the badge
+    // assertion below can never fail — the bug only shows when a check has an
+    // earlier bet to leave standing. This is the scenario a player reported.
+    if (!raisedOnce) {
+      const rz = t.page.locator(".actionbar .abtn.raise").first();
+      if (await rz.count()) {
+        const rl = (await rz.textContent().catch(() => "")).replace(/\s+/g, " ").trim();
+        await rz.click({ timeout: 5000 }).catch(() => {});
+        raisedOnce = true;
+        ok(`${t.tag} clicked "${rl}" (so a later check has something to clear)`);
+        acted++;
+        await sleep(900);
+        continue;
+      }
+    }
     const btn = t.page.locator(".actionbar .abtn.call").first();
     if (await btn.count()) {
       const label = (await btn.textContent().catch(() => "")).replace(/\s+/g, " ").trim();
       await btn.click({ timeout: 5000 }).catch(() => {});
       if (acted < 3) ok(`${t.tag} clicked "${label}"`);
       acted++;
+      // THE BADGE MUST SAY WHAT YOU JUST DID.
+      // A check that CLOSES a street used to leave the previous badge up:
+      // raise the flop, check the turn, and your seat announced RAISE for the
+      // rest of the hand — a bet that was no longer on the table. The badge is
+      // derived from a poll delta, and the delta that carries a street-closing
+      // action has already reset every commitment, so it matched nothing.
+      // Checked on the NEXT pass, with no waiting here at all. Sleeping in the
+      // acting loop — even 700ms — made it miss the brief moment the snapshot
+      // reports street 4, and the suite started claiming hands never reached a
+      // showdown. The loop's own cadence is the delay.
+      if (/^check/i.test(label)) pendingCheck = t;
     }
     await sleep(900);
   }
   if (acted) ok(`${acted} actions sent by clicking the real buttons`);
   else bad("never managed to act through the UI");
+  if (badgeLies) bad(`${badgeLies}× the seat still showed RAISE/BET after a check`);
+  else ok("every action badge matched the action that was taken");
 
   if (!sdHand) { bad("the hand never reached showdown"); }
   else {
