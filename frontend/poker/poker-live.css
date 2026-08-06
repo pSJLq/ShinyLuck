@@ -48,9 +48,13 @@
      is the pre-measure fallback (the design's number); once the bar has been
      measured (--sp-barmax) this and feltGeom() in poker-live-table.jsx read
      the SAME value, which is what keeps the oval and the seat ring together. */
-  .feltwrap { --sp-feltbot: calc(var(--sp-barmax, 114px) + 74px); }
+  .feltwrap { --sp-feltbot: calc(var(--sp-barmax, 104px) + 84px); }
   .feltwrap .felt { inset: 92px var(--sp-feltside, 150px) var(--sp-feltbot); border-radius: var(--sp-feltr, 280px); }
-  .herozone { bottom: calc(var(--sp-barmax, 114px) + 12px); }
+  /* 22px, not 12: clearing the overlap still left the player's plaque and the
+     card holding their buttons close enough to read as one crowded block. The
+     felt's inset moved by the same amount, so the plaque keeps straddling the
+     rail exactly as before — only the breathing room below it changed. */
+  .herozone { bottom: calc(var(--sp-barmax, 104px) + 22px); }
 }
 
 /* An empty seat is an invitation, not a competitor for attention: on a six-max

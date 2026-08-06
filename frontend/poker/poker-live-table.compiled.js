@@ -152,7 +152,7 @@ const FELT_D = {
   bottom: 188,
   minSide: 150,
   maxAR: 2.0,
-  heroPod: 74
+  heroPod: 84
 };
 function barMaxPx() {
   try {
@@ -604,7 +604,14 @@ function LiveTable() {
     // the table under your hands twice a hand.
     const write = () => {
       if (!el) return;
-      const h = Math.round(el.getBoundingClientRect().height);
+      // offsetHeight, NOT getBoundingClientRect(): the desktop stage is a fixed
+      // canvas under a CSS scale (mountScale), and a rect is measured AFTER the
+      // transform. On a short window (scale ~0.92) that under-reported the bar
+      // by ~14px, and since the number is then used as a LAYOUT length inside
+      // the same scaled canvas, the hero's plaque sat that much lower — which
+      // is exactly how far it crept back toward the buttons on the user's
+      // screen while a 1440x950 rig, scaling at ~1.0, saw nothing wrong.
+      const h = el.offsetHeight;
       if (!h) return;
       root.style.setProperty("--sp-barh", h + "px");
       if (h > max) {

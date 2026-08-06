@@ -109,6 +109,49 @@ async function main() {
   await shot("acting");
 
   await mustNotOverlap(aF, "action bar vs hero panel", ".actbar", ".heroinfo");
+  // NOT TOUCHING IS NOT THE SAME AS BREATHING. Clearing the overlap left the
+  // player's plaque and the card holding their buttons a hairline apart, which
+  // reads as one crowded block; the gap is a number now, not an accident.
+  //
+  // MEASURED AT MORE THAN ONE WINDOW SIZE, and that is the point. The desktop
+  // stage is a fixed canvas under a CSS scale, so a short window scales it
+  // DOWN — and the first version of this measurement read the bar through that
+  // transform and under-reported it, which pulled the plaque back toward the
+  // buttons. At 1440x950 the scale is ~1.0 and the bug is invisible; on the
+  // 1536x792 window the user was actually playing on, it is 14px.
+  const GAP_MIN = 24;
+  const gapAt = async (page, frame, w, h) => {
+    await page.setViewportSize({ width: w, height: h });
+    await sleep(1200);
+    const [pod, card] = [await boxOf(frame, ".heroinfo"), await boxOf(frame, ".actbar")];
+    if (!pod || !card) return console.log(`  · ${w}x${h}: nothing to measure, skipped`);
+    // both boxes come through the same transform, so their ratio is honest;
+    // undo it so the number is comparable to the CSS that produced it
+    const s = await frame.evaluate(() => {
+      const m = new DOMMatrixReadOnly(getComputedStyle(document.querySelector(".app")).transform);
+      return m.a || 1;
+    });
+    const gap = Math.round((card.y - (pod.y + pod.height)) / s);
+    if (gap < GAP_MIN) fail(`${w}x${h} (stage scale ${s.toFixed(2)}): only ${gap}px between the hero's panel and the action card, want ≥${GAP_MIN}`);
+    else ok(`${w}x${h} (stage scale ${s.toFixed(2)}): ${gap}px between the hero's panel and the action card`);
+    // THE INVARIANT UNDER THE GAP: --sp-barmax is a LAYOUT length, used inside
+    // the scaled canvas, so it has to be measured in layout px. Read through
+    // the transform it comes out `scale` times too small, and everything
+    // positioned off it drifts by that much — silently, and only on the window
+    // sizes nobody happened to test.
+    const m = await frame.evaluate(() => ({
+      published: parseInt(getComputedStyle(document.documentElement).getPropertyValue("--sp-barmax"), 10) || 0,
+      layout: (document.querySelector(".actionbar") || {}).offsetHeight || 0,
+    }));
+    if (m.published && Math.abs(m.published - m.layout) > 1)
+      fail(`--sp-barmax is ${m.published}px but the bar lays out at ${m.layout}px — measured through the stage transform`);
+    else if (m.published) ok(`--sp-barmax ${m.published}px = the bar's layout height`);
+  };
+  await gapAt(actor.page, aF, VIEW.width, VIEW.height);
+  await gapAt(actor.page, aF, 1536, 792);   // the window in the user's screenshot
+  await gapAt(actor.page, aF, 1280, 720);
+  await actor.page.setViewportSize(VIEW);
+  await sleep(1000);
   await mustNotOverlap(aF, "action bar vs hero cards", ".actbar", ".herozone .hole");
   await mustNotOverlap(aF, "header vs felt", ".topbar", ".felt");
   await mustNotOverlap(wF, "pre-select bar vs hero panel", ".actbar", ".heroinfo");
