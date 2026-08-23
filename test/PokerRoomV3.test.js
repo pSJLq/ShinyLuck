@@ -98,24 +98,41 @@ describe("PokerRoom v3 — worker operators, idle strikes, penalized cancel, tou
     expect((await poker.getSeat(t, 0)).sittingOut).to.equal(false);
   });
 
-  it("cancelHandPenalized: offender forfeits committed chips to the other seats pro-rata", async function () {
+  it("penalized cancel: accusation + expired rescue window forfeits the offender pro-rata", async function () {
     const { owner, operator, alice, bob, carol, poker } = await loadFixture(setup);
     const t = await makeTable(poker, owner);
     await buyIn(poker, alice, t, 0);
     await buyIn(poker, bob, t, 1);
     await buyIn(poker, carol, t, 2);
+    const ZERO = { x: 0, y: 0 }; // dealer==0 here: ciphertext is not checked (engine-only test)
     await poker.connect(operator).startHand(t);
     // first hand: button seat0, SB seat1 (1), BB seat2 (2), seat0 acts first
 
-    // nothing committed by seat0 yet → penalized cancel is not applicable
-    await expect(poker.connect(operator).cancelHandPenalized(t, 0)).to.be.revertedWithCustomError(poker, "NotIdle");
+    // no accusation → forfeiture cannot fire at all
+    await expect(poker.connect(operator).cancelHandPenalized(t)).to.be.revertedWithCustomError(poker, "NoAccusation");
+    // nothing committed by seat0 yet → accusation is not applicable
+    await expect(poker.connect(operator).accuseAbandon(t, 0, 4, ZERO, ZERO)).to.be.revertedWithCustomError(poker, "NotIdle");
 
     await poker.connect(alice).act(t, RAISE, E(6)); // seat0 commits 6
     await poker.connect(bob).act(t, CALL, 0); // seat1: 1 + 5 = 6
     await poker.connect(carol).act(t, FOLD, 0); // seat2 folded with 2 in
 
-    // seat0's browser "vanishes" mid-hand → penalized cancel
-    const tx = await poker.connect(operator).cancelHandPenalized(t, 0);
+    // seat0's browser "vanishes" mid-hand → the operator ACCUSES it (no chips move)
+    await expect(poker.connect(carol).accuseAbandon(t, 0, 4, ZERO, ZERO)).to.be.revertedWithCustomError(poker, "NotDealerOrOperator");
+    await poker.connect(operator).accuseAbandon(t, 0, 4, ZERO, ZERO);
+    const acc = await poker.accusationOf(t);
+    expect(acc.active).to.equal(true);
+    expect(Number(acc.offenderSeat)).to.equal(0);
+    expect(await seatStack(poker, t, 0)).to.equal(E(94)); // nothing forfeited yet
+
+    // a second accusation can't stack on a live one
+    await expect(poker.connect(operator).accuseAbandon(t, 1, 4, ZERO, ZERO)).to.be.revertedWithCustomError(poker, "AccusationActive");
+    // forfeiture is blocked while the self-rescue window is open
+    await expect(poker.connect(operator).cancelHandPenalized(t)).to.be.revertedWithCustomError(poker, "RescueWindowNotElapsed");
+
+    // window expires un-rescued → the penalty finalizes
+    await time.increase(Number(await poker.rescueWindow()) + 1);
+    const tx = await poker.connect(operator).cancelHandPenalized(t);
     await expect(tx).to.emit(poker, "HandCancelledPenalized").withArgs(t, 1, 0, E(6));
 
     // forfeit 6 split pro-rata over others' committed (bob 6, carol 2 → 8):
@@ -127,7 +144,37 @@ describe("PokerRoom v3 — worker operators, idle strikes, penalized cancel, tou
     // offender is sat out with a strike — repeat offenders become kickable
     expect((await poker.getSeat(t, 0)).sittingOut).to.equal(true);
     expect(Number(await poker.timeoutStreak(t, 0))).to.equal(1);
+    // the finalized accusation is gone
+    expect((await poker.accusationOf(t)).active).to.equal(false);
     // chip conservation: 94 + 104.5 + 101.5 = 300
+  });
+
+  it("an accusation dies with its hand: plain cancel or settle leaves nothing to finalize", async function () {
+    const { owner, operator, alice, bob, poker } = await loadFixture(setup);
+    const t = await makeTable(poker, owner, tableCfg({ maxSeats: 2 }));
+    await buyIn(poker, alice, t, 0);
+    await buyIn(poker, bob, t, 1);
+    const ZERO = { x: 0, y: 0 };
+    await poker.connect(operator).startHand(t);
+    await poker.connect(operator).accuseAbandon(t, 0, 0, ZERO, ZERO); // SB committed 1
+    await poker.connect(operator).cancelHand(t); // refund-everyone escape hatch still works
+    expect((await poker.accusationOf(t)).active).to.equal(false);
+    expect(await seatStack(poker, t, 0)).to.equal(E(100)); // full refund
+    // a finalize attempt against the dead accusation reverts
+    await expect(poker.connect(operator).cancelHandPenalized(t)).to.be.revertedWithCustomError(poker, "NoHandInProgress");
+    // …and it can't leak into the NEXT hand: penalize needs a fresh accusation
+    await poker.connect(operator).startHand(t);
+    await expect(poker.connect(operator).cancelHandPenalized(t)).to.be.revertedWithCustomError(poker, "NoAccusation");
+  });
+
+  it("rescueWindow is owner-set and bounded", async function () {
+    const { owner, operator, poker } = await loadFixture(setup);
+    expect(Number(await poker.rescueWindow())).to.equal(45);
+    await expect(poker.connect(operator).setRescueWindow(60)).to.be.reverted; // not owner
+    await expect(poker.connect(owner).setRescueWindow(5)).to.be.revertedWithCustomError(poker, "BadRescueWindow");
+    await expect(poker.connect(owner).setRescueWindow(3600)).to.be.revertedWithCustomError(poker, "BadRescueWindow");
+    await poker.connect(owner).setRescueWindow(120);
+    expect(Number(await poker.rescueWindow())).to.equal(120);
   });
 
   it("tournament blind-off: a sitting-out seat posts a dead big blind into the pot each hand", async function () {

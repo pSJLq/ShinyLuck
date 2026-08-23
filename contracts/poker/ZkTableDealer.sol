@@ -4,6 +4,32 @@ pragma solidity ^0.8.24;
 import {IPokerDealer} from "./IPokerDealer.sol";
 import {ZkVerify} from "./ZkVerify.sol";
 
+/// @dev Minimal view into PokerRoom's per-hand seat state. The dealer reads a
+///      seat's `inHand` flag so a FOLDED player's own hole cards stay hidden even
+///      at showdown (see {ZkTableDealer.accusationAllowed}). `inHand` is cleared
+///      on fold but stays true for all-in seats, so all-in showdowns are untouched.
+interface IPokerRoomSeatView {
+    struct SeatHand {
+        bool inHand;
+        bool folded;
+        bool allIn;
+        bool hasActed;
+        uint128 committedStreet;
+        uint128 committedTotal;
+    }
+
+    function getSeatHand(uint256 tableId, uint8 seat) external view returns (SeatHand memory);
+}
+
+/// @dev PokerRoom's permissionless settle entry point. The dealer calls it at
+///      the end of the reveal that completes a showdown, so the pot moves in
+///      that same transaction instead of two more blocks later. Being
+///      permissionless is the whole reason this is safe: the call grants this
+///      contract nothing that any address could not do already.
+interface IPokerRoomSettle {
+    function resolveShowdown(uint256 tableId) external;
+}
+
 /// @title ZkTableDealer — the LIVE zkShuffle v2 card layer (IPokerDealer).
 /// @notice A drop-in dealer for PokerRoom where cards are NOT derived from a
 ///         seed a dealer knows (v1) but decrypted from a mentally-shuffled,
@@ -54,6 +80,12 @@ contract ZkTableDealer is IPokerDealer {
         bool showdownReady;
         uint8[5] board;
         uint64 revealedMask; // bit per card value 0..51 — dupe guard
+        // keccak of the FULL Wikström shuffle-proof transcript (every stage's
+        // output deck + its proof of correct permutation+re-encryption). The
+        // deal permanently commits to the proof chain behind its deck: clients
+        // compare their independently computed hash against this, and anyone
+        // holding the transcript can re-verify the shuffle after the fact.
+        bytes32 proofHash;
     }
 
     // dealId => deal
@@ -136,7 +168,8 @@ contract ZkTableDealer is IPokerDealer {
         ZkVerify.G1Point[] calldata R,
         uint256[] calldata s,
         ZkVerify.G1Point[] calldata deckA,
-        ZkVerify.G1Point[] calldata deckB
+        ZkVerify.G1Point[] calldata deckB,
+        bytes32 shuffleProofHash
     ) external onlyCoordinator {
         if (_deal[dealId].exists) revert AlreadyBound();
         uint256 k = pubkeys.length;
@@ -158,6 +191,7 @@ contract ZkTableDealer is IPokerDealer {
         d.tableId = tableId;
         d.handId = handId;
         d.aggKey = agg;
+        d.proofHash = shuffleProofHash;
         _byHand[tableId][handId] = dealId;
         emit DealPrepared(dealId, tableId, uint8(k));
     }
@@ -262,6 +296,9 @@ contract ZkTableDealer is IPokerDealer {
         deal.board[boardSlot] = claimedCard;
         deal.boardCount = boardSlot + 1;
         emit BoardRevealed(dealId, deal.boardCount);
+        // An all-in runout can reveal hole cards before the board finishes, so
+        // the completing card may be a BOARD card. Never assume the order.
+        _finishShowdown(dealId, deal);
     }
 
     /// Reveal a seat's two hole cards at showdown (now that seat's own share is
@@ -290,13 +327,51 @@ contract ZkTableDealer is IPokerDealer {
         _hole[dealId][seatIndex] = cards;
         _holeSet[dealId][seatIndex] = true;
         emit HoleRevealed(dealId, seatIndex);
+        _finishShowdown(dealId, deal);
     }
 
     /// Mark the hand ready to settle once the board is complete and every seat
     /// the room needs has been revealed (coordinator asserts after posting all;
     /// the room independently re-checks every card it reads is 0..51).
+    /// @dev Kept as the fallback for {_finishShowdown}: if the auto-settle below
+    ///      ever declines (out of gas, a room that reverted), the coordinator
+    ///      still drives the hand home exactly as it did before.
     function markShowdownReady(uint256 dealId) external onlyCoordinator {
         _deal[dealId].showdownReady = true;
+    }
+
+    /// @dev Gas kept back so the reveal that triggered the settle can always
+    ///      finish and record its cards, even if the settle itself runs out.
+    uint256 private constant SETTLE_GAS_KEEP = 150_000;
+    /// @dev Below this there is no point trying — leave it to the coordinator.
+    uint256 private constant SETTLE_GAS_MIN = 700_000;
+
+    /// @dev A showdown is complete the moment the board is out and every seat
+    ///      the room STILL counts as in-hand has its cards on chain. Deciding
+    ///      that here, from the room's own seat state, is what lets the last
+    ///      reveal end the hand by itself: the coordinator asserts nothing, so
+    ///      nothing new has to be trusted — this is strictly less trusting than
+    ///      the coordinator-driven `markShowdownReady` it replaces. Folded seats
+    ///      are skipped (`inHand` is false), so their cards stay secret forever,
+    ///      and all-in seats keep `inHand`, so a runout showdown is unaffected.
+    ///      The pot then moves in this same transaction, which is what removes
+    ///      two block confirmations from the tail of every showdown.
+    function _finishShowdown(uint256 dealId, Deal storage deal) private {
+        if (deal.showdownReady || deal.boardCount != 5) return;
+        uint8[] storage seats = _seats[dealId];
+        for (uint256 i = 0; i < seats.length; i++) {
+            uint8 seat = seats[i];
+            if (_holeSet[dealId][seat]) continue;
+            if (IPokerRoomSeatView(room).getSeatHand(deal.tableId, seat).inHand) return; // still owed
+        }
+        deal.showdownReady = true;
+        // Settling is best-effort by design. A revert here must never undo a
+        // valid, proven reveal, so it is swallowed and bounded by an explicit
+        // gas budget; the coordinator's own resolveShowdown remains the path
+        // that guarantees the hand ends.
+        uint256 g = gasleft();
+        if (g < SETTLE_GAS_MIN) return;
+        try IPokerRoomSettle(room).resolveShowdown{gas: g - SETTLE_GAS_KEEP}(deal.tableId) {} catch {}
     }
 
     // ---- IPokerDealer views -------------------------------------------------
@@ -316,6 +391,138 @@ contract ZkTableDealer is IPokerDealer {
         return (h[0], h[1]);
     }
 
+    // ---- abandonment accusations: legitimacy check + on-chain self-rescue ---
+    // PokerRoom's accuse→rescue→penalize flow leans on the dealer for the two
+    // things only the dealer knows: (a) whether the accused share is one the
+    // protocol LEGITIMATELY needs right now — otherwise a malicious operator
+    // could weaponize accusations to force early on-chain disclosure of shares
+    // (own hole cards pre-showdown, future board cards) — and (b) whether a
+    // posted rescue share is genuine. A verified rescue share is STORED so the
+    // coordinator can consume it: self-rescue doesn't just clear the accused,
+    // it delivers the withheld share, so a "rescue then keep stalling" griefer
+    // is simply forced to hand over the shares one accusation at a time.
+
+    struct RescuedShare {
+        bool exists;
+        ZkVerify.G1Point d;
+        ZkVerify.G1Point R1;
+        ZkVerify.G1Point R2;
+        uint256 s;
+    }
+    // dealId => cardIdx => participant => rescued share
+    mapping(uint256 => mapping(uint16 => mapping(uint8 => RescuedShare))) private _rescued;
+
+    event ShareRescued(uint256 indexed dealId, uint16 indexed cardIdx, uint8 participant);
+
+    /// @dev The deal's participant index for a room seat, or NOT_FOUND.
+    uint256 private constant NOT_FOUND = type(uint256).max;
+    function _participantOf(uint256 dealId, uint8 seat) private view returns (uint256) {
+        uint8[] storage seats = _seats[dealId];
+        for (uint256 i = 0; i < seats.length; i++) {
+            if (seats[i] == seat) return i;
+        }
+        return NOT_FOUND;
+    }
+
+    /// @notice Is accusing `seat` of withholding the share for `cardIdx` a
+    ///         legitimate protocol demand at `street` (room's STREET_* value)?
+    ///         - the accuser must supply the REAL ciphertext (A,B) matching the
+    ///           deal's on-chain commitment — the accusation itself then carries
+    ///           everything the accused needs to compute the share and
+    ///           self-rescue (an accuser can never make rescue impossible by
+    ///           withholding the ciphertext);
+    ///         - the seat must be a participant of the deal (a dead-blind seat
+    ///           that was never dealt in owes no shares);
+    ///         - a seat's OWN hole ciphertexts may only be demanded at showdown
+    ///           (street 4) — earlier, forcing them on-chain would expose the
+    ///           player's live cards to everyone;
+    ///         - a board ciphertext may only be demanded once its street closed
+    ///           (slot < dueCount(street)) — otherwise sequential accusations
+    ///           across all seats would decrypt future board cards early;
+    ///         - other players' hole ciphertexts are always fair game (those
+    ///           shares are pre-collected before the hand even starts).
+    function accusationAllowed(
+        uint256 dealId,
+        uint8 seat,
+        uint16 cardIdx,
+        uint8 street,
+        ZkVerify.G1Point calldata A,
+        ZkVerify.G1Point calldata B
+    ) external view returns (bool) {
+        Deal storage deal = _deal[dealId];
+        if (!deal.exists) return false;
+        uint256 k = deal.playerCount;
+        if (cardIdx >= 2 * k + 5) return false;
+        if (_hashCt(A, B) != _ctHash[dealId][cardIdx]) return false;
+        uint256 p = _participantOf(dealId, seat);
+        if (p == NOT_FOUND) return false;
+        if (cardIdx >= 2 * k) {
+            // board slot: due once its street's betting round has closed
+            uint16 slot = cardIdx - uint16(2 * k);
+            uint16 due = street == 1 ? 3 : street == 2 ? 4 : street >= 3 ? 5 : 0;
+            return slot < due;
+        }
+        uint256 ownerP = cardIdx / 2;
+        // own holes: only at showdown AND only once the whole board is already
+        // revealed. Without the boardCount==5 guard, an all-in runout (which
+        // lands the room on street 4 BEFORE the board is dealt out) would let a
+        // malicious operator accuse a seat's own hole card while its client —
+        // which only rescues own holes once the board is complete — refuses to
+        // answer, and steal the all-in stack via cancelHandPenalized.
+        if (ownerP == p) {
+            if (street != 4 || deal.boardCount != 5) return false;
+            // A FOLDED seat's own hole cards must stay hidden even at showdown:
+            // never open an accusation against them. Otherwise a coordinator that
+            // already holds k-1 of that seat's hole shares (pre-collected before
+            // the hand) can coax the seat's client into rescuing the last one and
+            // harvest the folded hand — or force a can't-win cancel on a fold.
+            // `inHand` is cleared on fold but stays true for all-in seats, so a
+            // legitimate all-in showdown is unaffected.
+            return IPokerRoomSeatView(room).getSeatHand(deal.tableId, seat).inHand;
+        }
+        return true; // someone else's holes: pre-collected, nothing new leaks
+    }
+
+    /// @notice Verify and RECORD `seat`'s decryption share for `cardIdx` — the
+    ///         self-rescue path, called by the room's {proveResponsive}. Returns
+    ///         true iff (A,B) matches the deal's ciphertext commitment AND the
+    ///         Chaum–Pedersen proof verifies against the seat's per-hand pubkey.
+    function rescueShare(
+        uint256 dealId,
+        uint8 seat,
+        uint16 cardIdx,
+        ZkVerify.G1Point calldata A,
+        ZkVerify.G1Point calldata B,
+        ZkVerify.G1Point calldata d,
+        ZkVerify.G1Point calldata R1,
+        ZkVerify.G1Point calldata R2,
+        uint256 s
+    ) external onlyRoom returns (bool) {
+        Deal storage deal = _deal[dealId];
+        if (!deal.exists) return false;
+        if (cardIdx >= _ctHash[dealId].length) return false;
+        uint256 p = _participantOf(dealId, seat);
+        if (p == NOT_FOUND) return false;
+        if (_hashCt(A, B) != _ctHash[dealId][cardIdx]) return false;
+        if (!ZkVerify.verifyChaumPedersen(shareDomain(dealId, cardIdx, p), A, _pubkey[dealId][p], d, R1, R2, s)) {
+            return false;
+        }
+        _rescued[dealId][cardIdx][uint8(p)] = RescuedShare(true, d, R1, R2, s);
+        emit ShareRescued(dealId, cardIdx, uint8(p));
+        return true;
+    }
+
+    /// @notice A share posted via self-rescue, for the coordinator to consume
+    ///         (verified on-chain at rescue time).
+    function rescuedShare(uint256 dealId, uint16 cardIdx, uint8 participant)
+        external
+        view
+        returns (bool exists, ZkVerify.G1Point memory d, ZkVerify.G1Point memory R1, ZkVerify.G1Point memory R2, uint256 s)
+    {
+        RescuedShare storage r = _rescued[dealId][cardIdx][participant];
+        return (r.exists, r.d, r.R1, r.R2, r.s);
+    }
+
     // extra views for the coordinator/clients
     function dealIdForHand(uint256 tableId, uint64 handId) external view returns (uint256) {
         return _byHand[tableId][handId];
@@ -327,6 +534,11 @@ contract ZkTableDealer is IPokerDealer {
     ///         relayed deck against these before providing any shares.
     function ctHash(uint256 dealId, uint16 cardIdx) external view returns (bytes32) {
         return _ctHash[dealId][cardIdx];
+    }
+    /// @notice Commitment to the deal's full shuffle-proof transcript — clients
+    ///         compare the hash they computed from the chain they verified.
+    function proofHash(uint256 dealId) external view returns (bytes32) {
+        return _deal[dealId].proofHash;
     }
     function dealInfo(uint256 dealId)
         external

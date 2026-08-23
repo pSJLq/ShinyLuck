@@ -1,0 +1,85 @@
+/* InfoFi view - Somnia X-mindshare treemap. Tokens come from v2.css.
+ *
+ * NOTHING here may use vh/dvh. The shell sizes this iframe from the height the
+ * page reports, so a viewport unit inside the frame reads its own output back
+ * in and the frame creeps a few pixels every second. Same rule as
+ * games/sugar/styles.css, and it has been broken twice before.
+ *
+ * The two group colours are measured, not chosen: against this page's #0A0A0B
+ * surface the old gold/green pair separated by only dE 13.0 (normal vision) and
+ * dE 5.0 (protanopia), under the dE 15 / dE 8 floors. See lib/infofi.js. */
+
+.iw { max-width: 1240px; margin: 0 auto; padding: 18px 16px 70px; }
+.if-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.if-title { font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: var(--fg-faint); }
+.if-title b { color: var(--gold-mid); font-weight: 600; }
+.if-meta { font-family: var(--mono); font-size: 11px; color: var(--fg-faint); }
+
+/* Filter row above the chart, legend on the same line. */
+.if-controls { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin: 14px 0 8px; }
+.if-seg { display: flex; gap: 6px; }
+.if-legend { display: flex; gap: 16px; flex-wrap: wrap; }
+.if-key { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--fg-faint); }
+.if-key .sw { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+.if-key .sw.project { background: rgba(166,130,47,.34); border: 1.5px solid #A6822F; }
+.if-key .sw.voice { background: rgba(42,155,181,.30); border: 1.5px solid #2A9BB5; }
+
+/* A filtered treemap still fills its whole box, so it can look like the entire
+   pie when it is a sixteenth of one. This line carries the denominator. */
+.if-context { font-family: var(--mono); font-size: 10.5px; color: var(--fg-ghost); letter-spacing: .04em; margin-bottom: 10px; min-height: 14px; }
+
+#tmap { width: 100%; display: block; border-radius: 14px; }
+.tile { cursor: default; transition: opacity .15s; }
+.tile:hover { opacity: .88; }
+/* The avatar is the tile's texture. Held back a little so the label stays first
+   to read, but not so far that the board goes back to looking like flat blocks. */
+.tl-av { opacity: .72; }
+/* paint-order:stroke draws the halo BEHIND the glyph, so text stays legible over
+   whatever photograph happens to be underneath it. */
+.tl-name { font-weight: 700; fill: var(--fg-strong); paint-order: stroke; stroke: rgba(0,0,0,.55); stroke-width: 3px; stroke-linejoin: round; }
+.tl-share { font-family: var(--mono); fill: #E4E0D8; paint-order: stroke; stroke: rgba(0,0,0,.5); stroke-width: 3px; stroke-linejoin: round; }
+.tl-rank { font-weight: 800; fill: var(--gold-hi); paint-order: stroke; stroke: rgba(0,0,0,.55); stroke-width: 3px; stroke-linejoin: round; }
+.tl-kind { font-family: var(--mono); font-size: 9px; fill: #B9B5AD; letter-spacing: .1em; }
+/* Monogram for accounts with no mirrored avatar. Deliberately the GROUP colour,
+   not a per-account generated hue: identity here is carried by the picture, and
+   inventing hues would compete with the two-colour group encoding. */
+.tl-mono { font-weight: 800; font-family: var(--sans); text-anchor: middle; dominant-baseline: central; opacity: .55; }
+
+.if-tip {
+  position: fixed; display: none; z-index: 60; min-width: 210px; pointer-events: none;
+  background: var(--panel-3); border: 1px solid var(--bd-2); border-radius: 12px;
+  padding: 10px 12px; font-size: 12px; box-shadow: 0 10px 34px rgba(0,0,0,.55);
+}
+.if-tip b { color: var(--gold-hi); }
+.if-tip .row { display: flex; justify-content: space-between; gap: 14px; padding: 1.5px 0; color: var(--fg-dim); }
+.if-tip .row span:last-child { font-family: var(--mono); color: var(--fg); }
+.if-tip .row .up { color: var(--green); }
+.if-tip .row .down { color: var(--red); }
+
+.if-scroll { overflow-x: auto; margin-top: 18px; }
+table.if { width: 100%; min-width: 820px; border-collapse: collapse; font-size: 12.5px; }
+table.if th { text-align: right; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--fg-faint); padding: 8px 10px; border-bottom: 1px solid var(--line-3); }
+table.if th:first-child, table.if td:first-child { text-align: left; }
+table.if td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: right; font-family: var(--mono); color: var(--fg-dim); }
+table.if td.acc { font-family: var(--sans); color: var(--fg); font-weight: 600; }
+table.if td.acc .h { color: var(--fg-mute); font-weight: 400; font-size: 11px; margin-left: 6px; }
+table.if tr:hover td { background: rgba(217,185,112,.03); }
+.kbadge { font-size: 9px; font-family: var(--mono); letter-spacing: .1em; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--bd-2); margin-left: 8px; vertical-align: middle; }
+.kbadge.project { color: var(--gold-mid); border-color: var(--gold-dark); }
+.kbadge.voice { color: #6FC4DA; border-color: rgba(42,155,181,.55); }
+.if-note { font-size: 11.5px; color: var(--fg-faint); line-height: 1.6; margin-top: 14px; }
+.if-note code { font-family: var(--mono); color: var(--gold-mid); background: rgba(217,185,112,.06); padding: 1px 5px; border-radius: 5px; }
+.if-empty { text-align: center; color: var(--fg-faint); padding: 60px 0; }
+
+/* split leaderboards */
+.if-board {
+  margin: 26px 0 2px; font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--gold-mid); display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+}
+.if-board.voice { color: #6FC4DA; }
+.if-board span { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0; text-transform: none; color: var(--fg-faint); }
+
+@media (max-width: 620px) {
+  .if-controls { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .if-seg .bw-tab { height: 32px; padding: 0 12px; }
+}

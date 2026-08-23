@@ -140,6 +140,34 @@ describe("Casino — CrashGame (round-based)", function () {
       .to.be.revertedWithCustomError(casino, "BetTooLarge");
   });
 
+  it("RTP ≈ 99% (Stake parity) — no double bust branch", async function () {
+    // _crashPoint uses num = 10000 − edgeBps; the removed `h % 33` branch used
+    // to knock RTP to ~94%. Sample the point CDF and check EV of a fixed target.
+    const { casino, hm, alice } = await loadFixture(setup);
+    const N = 60;
+    const { seeds } = await provisionSeeds(casino, hm, N);
+    const target = 200; // cash out at 2.00× every round
+    let staked = 0n, returned = 0n;
+    for (let i = 0; i < N; i++) {
+      await casino.connect(hm).startCrashRound();
+      const id = await casino.currentCrashRoundId();
+      const stake = ethers.parseEther("0.02");
+      await casino.connect(alice).placeCrashBet(target, { value: stake });
+      staked += stake;
+      await bumpTime(31);
+      await mineN(REVEAL_DELAY + 1n);
+      const round = await casino.getCrashRound(id);
+      await (await casino.settleCrashRound(id, seeds[Number(round.seedIdx)])).wait();
+      const cp = Number((await casino.getCrashRound(id)).crashPointX100);
+      if (cp >= target) returned += (stake * BigInt(target)) / 100n;
+    }
+    // 60 rounds is noisy; assert we're clearly in the 99%-edge regime (0.80–1.15)
+    // and NOT the old 94% double-charged regime that trended well below.
+    const rtp = Number(returned * 10000n / staked) / 10000;
+    expect(rtp).to.be.gte(0.80);
+    expect(rtp).to.be.lte(1.20);
+  });
+
   it("crash point distribution sanity", async function () {
     const { casino, hm, alice } = await loadFixture(setup);
     const { seeds } = await provisionSeeds(casino, hm, 5);

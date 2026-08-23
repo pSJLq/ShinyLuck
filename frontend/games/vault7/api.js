@@ -205,7 +205,7 @@ export class Vault7Slot {
       <p class="lede">Five reels, twenty paylines, ×2 free-spin multiplier. Wilds substitute, scatters pay anywhere. Every reel position signed by the contract.</p>
     </div>
     <div class="hero-meta">
-      <div class="m">RTP<b class="cyan" data-sl="rtp" data-game="slots">92.00%</b></div>
+      <div class="m">RTP<b class="cyan" data-sl="rtp" data-game="slots">…</b></div>
       <div class="m">Volatility<b class="purple">HIGH</b></div>
       <div class="m">Max Win<b class="gold">10,000×</b></div>
       <div class="m">Mechanic<b class="purple">20 LINES · CLASSIC</b></div>
@@ -294,6 +294,7 @@ export class Vault7Slot {
           <div class="l">CLIENT SEED</div><div class="v cyan" data-fair-client>${this._clientSeed}</div>
           <div class="l">SERVER SEED · HASH</div><div class="v purple" data-fair-server>${this._serverSeed.slice(0,8)}…${this._serverSeed.slice(-6)}</div>
           <div class="l">NONCE / BET ID</div><div class="v" data-fair-nonce>000000</div>
+          <a class="v" data-fair-page href="#" target="_blank" rel="noopener" style="display:none;font-size:11px;letter-spacing:1.5px;color:var(--cyan);text-transform:uppercase;margin-top:6px">verify this spin \u2197</a>
         </div>
       </div>
     </aside>
@@ -382,7 +383,7 @@ export class Vault7Slot {
     $('[data-total-bet]', c).textContent = this.stakeStt.toFixed(2);
     $('[data-line-bet]', c).textContent = (this.stakeStt / 20).toFixed(4);
     $('[data-buy-price]', c).textContent = (this.stakeStt * 75).toFixed(2);
-    $('[data-fair-nonce]', c).textContent = String(this._nonce).padStart(6, '0');
+    { const fn = $('[data-fair-nonce]', c); if (fn && !fn.dataset.pinned) fn.textContent = String(this._nonce).padStart(6, '0'); }
     const evWei = -(this.stakeWei * 800n) / 10000n;
     $('[data-ev]', c).textContent = fmtStt(evWei, 4) + ' STT (−8.00%)';
     const fsBadge = $('[data-fs-badge]', c);

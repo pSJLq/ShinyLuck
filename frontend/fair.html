@@ -4,145 +4,146 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Provably Fair · ShinyLuck</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css">
-<script src="lib/console-filter.js"></script>
-<script src="partials.js" defer></script>
-<script src="vendor/privy.bundle.js"></script>
-<script type="module" src="lib/wallet.js"></script>
-<script type="module" src="lib/livedata.js"></script>
-<script type="module" src="lib/fair.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/v2.css">
+<script src="/lib/console-filter.js"></script>
+<script src="/partials.js" defer></script>
+<script src="/vendor/privy.bundle.js"></script>
+<script type="module" src="/lib/wallet.js"></script>
+<script type="module" src="/lib/livedata.js"></script>
+<script type="module" src="/lib/fair.js"></script>
+  <script type="module" src="/lib/i18n.js"></script>
 </head>
 <body data-active-page="fair">
 <div data-page-shell>
 <div data-mount="nav"></div>
 
-<section class="fair-hero">
-  <div class="container">
-    <div class="eyebrow"><span class="dot"></span> PROVABLY FAIR · v0.7.4</div>
-    <h1>Every roll, every flip, every<br/>spin is <span class="accent">verifiable</span>.</h1>
-    <p class="lede">No "trust the dealer". No black-box RNG. Every outcome on ShinyLuck is the keccak256 of three values you can audit yourself - server seed, client seed, and a monotonic nonce. We commit to the server seed before you bet, and reveal it after.</p>
-  </div>
-</section>
+<div style="display:flex;align-items:flex-start">
+  <div data-mount="side"></div>
 
-<section class="fair-flow">
-  <div class="container">
-    <div class="flow-grid">
-      <div class="flow-step">
-        <div class="step-num">01</div>
-        <h3>Commit</h3>
-        <p>The House Manager Agent pre-commits 200 server-seed hashes at a time. Each hash is keccak256(serverSeed) - published <b>before</b> any bet binds to it. The seed itself stays sealed until reveal.</p>
-        <div class="code-line">hash · <span class="cyan" data-sl-fair-hash>-</span></div>
-      </div>
-      <div class="flow-arrow">→</div>
-      <div class="flow-step">
-        <div class="step-num">02</div>
-        <h3>Bet</h3>
-        <p>You sign your bet with your own 32-byte client seed. Pick anything - we suggest random bytes. Stake + seed + chosen slot is binding the moment the tx confirms.</p>
-        <div class="code-line">client · <span class="cyan" data-sl-fair-client>-</span></div>
-      </div>
-      <div class="flow-arrow">→</div>
-      <div class="flow-step">
-        <div class="step-num">03</div>
-        <h3>Agent quorum</h3>
-        <p>Randomness is computed on-chain via keccak256(serverSeed‖clientSeed‖blockhash‖nonce). Four Somnia agents independently re-derive it as a redundancy check - money never depends on this signal; it tracks agent health.</p>
-        <div class="code-line">redundancy · <span class="green" data-sl-quorum-latest>-</span></div>
-      </div>
-      <div class="flow-arrow">→</div>
-      <div class="flow-step">
-        <div class="step-num">04</div>
-        <h3>Reveal</h3>
-        <p>Server seed becomes public on settlement. Anyone can re-hash and verify - there is no version of the seed that could have produced a different outcome.</p>
-        <div class="code-line">tx · <a class="cyan" data-sl-fair-tx href="#" target="_blank" rel="noopener">-</a></div>
-      </div>
-    </div>
-  </div>
-</section>
+  <main data-r-padb-m style="flex:1;min-width:0">
+    <section style="max-width:1180px;margin:0 auto;padding:30px 36px 0" data-r-pad-m>
 
-<section class="fair-receipt">
-  <div class="container">
-    <div class="receipt-shell">
-      <div class="receipt-head">
-        <span class="live-pill"><span class="dot"></span> <span data-sl-receipt-title>RECEIPT - latest settled bet</span></span>
-        <span class="rh-meta" data-sl-receipt-meta>-</span>
+      <div class="page-head" style="animation:sl-up .5s both">
+        <span class="spark-eyebrow"><svg width="14" height="14" viewBox="0 0 24 24" style="flex:none;color:var(--gold)"><path d="M12 1.7c.72 5.85 3.58 8.7 9.4 9.4-5.82.7-8.68 3.55-9.4 9.4-.72-5.85-3.58-8.7-9.4-9.4 5.82-.7 8.68-3.55 9.4-9.4Z" fill="currentColor"></path></svg><span class="k-eyebrow">Provably fair</span></span>
+        <h1 style="font-size:44px;line-height:1.06;max-width:640px">Trust is the luxury.</h1>
+        <p class="sub">Every casino outcome on ShinyLuck is the keccak256 of values you can audit yourself · server seed, your client seed, a block hash and a nonce. The server seed's hash is committed on-chain <b style="color:var(--fg)">before</b> you bet and revealed after settlement. Recompute it here, straight from chain data.</p>
       </div>
-      <div data-sl-quorum-banner style="padding: 10px 16px; margin: 0 0 8px; font-family: var(--mono); font-size: 12px; letter-spacing: 1px; border-left: 3px solid var(--fg-mute); display:none;">
-        <span data-sl-quorum-status>-</span>
-        <span style="color: var(--fg-mute); margin-left: 12px;">Randomness verified on-chain via blockhash. Agent quorum is a redundancy check.</span>
-      </div>
-      <pre class="receipt" data-sl-receipt><span class="dim">loading latest receipt…</span></pre>
-      <div class="receipt-actions">
-        <button data-hover data-sl-fair-copy>copy receipt</button>
-        <a data-hover data-sl-fair-explorer href="#" target="_blank" rel="noopener" style="display:inline-block;">view on explorer ↗</a>
-        <button data-hover data-sl-fair-verify>verify in browser</button>
-      </div>
-    </div>
 
-    <!-- VERIFY MODAL -->
-    <div data-sl-verify-modal style="display:none; position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,0.78); backdrop-filter: blur(8px); align-items:center; justify-content:center; padding:24px;">
-      <div style="background: var(--bg-1); border: 1px solid var(--line); max-width: 760px; width: 100%; padding: 28px; font-family: var(--mono); font-size: 12px; max-height: 88vh; overflow-y:auto;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
-          <h3 style="margin:0; font-size: 13px; letter-spacing: 2px; color: var(--cyan);">VERIFY IN BROWSER</h3>
-          <button data-sl-verify-close style="background:none; border:1px solid var(--line); color:var(--fg-mute); padding: 4px 10px;">close ✕</button>
+      <!-- ============ 4 STEPS ============ -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:30px;animation:sl-up .55s .06s both" data-r-grid-t2>
+        <div class="card2" style="padding:20px 20px 18px">
+          <div style="font:600 30px var(--sans);color:var(--gold-mid)">01</div>
+          <div style="margin-top:10px;font:600 15.5px var(--sans);color:var(--fg)">Commit</div>
+          <p style="margin:7px 0 0;font:400 13px/1.6 var(--sans);color:var(--fg-mute)">The house pre-commits batches of server-seed hashes to the Vault. Each is keccak256 of a sealed seed · published before any bet binds to it, and the pool tops itself up so no game ever stalls for want of one.</p>
+          <div style="margin-top:12px;font:400 9.5px var(--mono);color:var(--fg-ghost);word-break:break-all">pool · <span style="color:var(--gold)" data-sl-seed-pool>-</span></div>
+          <div style="margin-top:4px;font:400 9.5px var(--mono);color:var(--fg-ghost);word-break:break-all">hash · <span style="color:var(--gold)" data-sl-fair-hash>-</span></div>
         </div>
-        <div style="border-left: 2px solid var(--cyan); padding-left: 12px; margin-bottom: 16px;">
-          <div style="color:var(--cyan); margin-bottom: 6px;">STEP 1 · INPUTS</div>
-          <pre data-sl-verify-inputs style="font-size:11px; white-space:pre-wrap; word-break:break-all; color:var(--fg);">-</pre>
+        <div class="card2" style="padding:20px 20px 18px">
+          <div style="font:600 30px var(--sans);color:var(--gold-mid)">02</div>
+          <div style="margin-top:10px;font:600 15.5px var(--sans);color:var(--fg)">Bet</div>
+          <p style="margin:7px 0 0;font:400 13px/1.6 var(--sans);color:var(--fg-mute)">Your browser generates a fresh 32-byte client seed for every bet. Stake + seed bind on-chain the moment your transaction confirms.</p>
+          <div style="margin-top:12px;font:400 9.5px var(--mono);color:var(--fg-ghost);word-break:break-all">client · <span style="color:var(--gold)" data-sl-fair-client>-</span></div>
         </div>
-        <div style="border-left: 2px solid var(--purple-2); padding-left: 12px; margin-bottom: 16px;">
-          <div style="color:var(--purple-2); margin-bottom: 6px;">STEP 2 · RE-DERIVE LOCALLY</div>
-          <div style="margin-bottom:6px;">expected = keccak256(serverSeed ‖ clientSeed ‖ blockHash ‖ nonce)</div>
-          <pre data-sl-verify-expected style="font-size:11px; white-space:pre-wrap; word-break:break-all; color:var(--purple-2);">-</pre>
+        <div class="card2" style="padding:20px 20px 18px">
+          <div style="font:600 30px var(--sans);color:var(--gold-mid)">03</div>
+          <div style="margin-top:10px;font:600 15.5px var(--sans);color:var(--fg)">Draw</div>
+          <p style="margin:7px 0 0;font:400 13px/1.6 var(--sans);color:var(--fg-mute)">Randomness is derived fully on-chain and mixes in the hash of the block <b>after</b> yours, so at bet time neither side knows the outcome.</p>
+          <div style="margin-top:12px;font:400 9.5px var(--mono);color:var(--fg-ghost)">keccak256(seed ‖ client ‖ blockhash(commit+1) ‖ nonce)</div>
         </div>
-        <div style="border-left: 2px solid var(--green); padding-left: 12px; margin-bottom: 16px;">
-          <div style="color:var(--green); margin-bottom: 6px;">STEP 3 · COMPARE WITH ON-CHAIN</div>
-          <pre data-sl-verify-onchain style="font-size:11px; white-space:pre-wrap; word-break:break-all; color:var(--green);">-</pre>
-          <div data-sl-verify-match style="margin-top: 8px;">-</div>
+        <div class="card2" style="padding:20px 20px 18px">
+          <div style="font:600 30px var(--sans);color:var(--gold-mid)">04</div>
+          <div style="margin-top:10px;font:600 15.5px var(--sans);color:var(--fg)">Reveal &amp; verify</div>
+          <p style="margin:7px 0 0;font:400 13px/1.6 var(--sans);color:var(--fg-mute)">The seed goes public at settlement. Re-hash it below · no other seed could have produced a different outcome.</p>
+          <div style="margin-top:12px;font:400 9.5px var(--mono);color:var(--fg-ghost);word-break:break-all">tx · <a style="color:var(--gold)" data-sl-fair-tx href="#" target="_blank" rel="noopener">-</a></div>
         </div>
       </div>
-    </div>
-  </div>
-</section>
 
-<section class="fair-faq">
-  <div class="container">
-    <h2>Frequently asked, plainly answered.</h2>
-    <div class="faq-grid">
-      <div class="faq-card">
-        <h4>How is randomness generated?</h4>
-        <p>For each bet the casino derives <span class="mono cyan">keccak256(serverSeed ‖ clientSeed ‖ blockhash(commitBlock+3) ‖ nonce)</span>. No LLM is in the money path - Somnia agents only re-derive the same hash off-chain as a redundancy check.</p>
+      <!-- ============ LIVE RECEIPT + VERIFIER ============ -->
+      <div class="card2" style="margin-top:14px;overflow:hidden;animation:sl-up .6s .1s both">
+        <div style="display:flex;align-items:center;gap:10px;padding:15px 20px 12px;flex-wrap:wrap">
+          <span class="live-pill ready"><span class="dot"></span> <span data-sl-receipt-title>RECEIPT · latest settled bet</span></span>
+          <span style="font:400 10px var(--mono);color:var(--fg-ghost)" data-sl-receipt-meta>-</span>
+        </div>
+        <pre data-sl-receipt style="margin:0;padding:16px 20px;background:#07070A;border-top:1px solid var(--line);font:400 11.5px/1.7 var(--mono);color:#C8C6BE;overflow-x:auto"><span style="color:var(--fg-ghost)">loading latest receipt…</span></pre>
+        <div style="display:flex;gap:8px;padding:14px 20px;border-top:1px solid var(--line);flex-wrap:wrap">
+          <button class="btn2 btn2-line" style="height:36px;padding:0 14px;font:600 11px var(--mono)" data-sl-fair-copy>copy receipt</button>
+          <a class="btn2 btn2-line" style="height:36px;padding:0 14px;font:600 11px var(--mono);text-decoration:none" data-sl-fair-explorer href="#" target="_blank" rel="noopener">view on explorer ↗</a>
+          <button class="btn2 btn2-gold" style="height:36px;padding:0 16px;font:600 11px var(--mono)" data-sl-fair-verify>verify in browser</button>
+        </div>
+        <div style="padding:0 20px 16px;font:400 11.5px/1.6 var(--sans);color:var(--fg-ghost);max-width:720px">
+          Scope, stated plainly: the receipt above and the browser verifier read <b style="color:var(--fg-mute)">Dice</b> and <b style="color:var(--fg-mute)">Plinko</b>, the two games that settle in the Vault itself. VAULT.7, SUGAR.LAB, Mines, Crash and Roulette settle inside their own module contracts and keep the same seed commitment and the same formula, but re-deriving them in this tab is not built yet · their receipts, seeds and randomness are all on the explorer.
+        </div>
       </div>
-      <div class="faq-card">
-        <h4>Can the operator cheat?</h4>
-        <p>No - keccak256(serverSeed) is committed on-chain <b>before</b> any bet binds to that slot. A different revealed seed would produce a different hash, which the contract rejects.</p>
-      </div>
-      <div class="faq-card">
-        <h4>What is the agent quorum?</h4>
-        <p>A 3-of-4 redundancy check across the LLM Inference Agent's workers. Even if one signer drops, three must agree; <b>money does not depend on this signal</b> - it's a liveness/health indicator for the agent layer.</p>
-      </div>
-      <div class="faq-card">
-        <h4>What happens if the seed is never revealed?</h4>
-        <p>The blockhash window is 256 blocks. If reveal is missed, anyone (including the player) can call <span class="mono cyan">refundExpired(betId)</span> and the stake is credited back via pull-payment.</p>
-      </div>
-      <div class="faq-card">
-        <h4>Can I change my client seed?</h4>
-        <p>Yes - every bet generates a fresh 32-byte client seed in your browser. You can also supply your own via the SDK.</p>
-      </div>
-      <div class="faq-card">
-        <h4>Where's the source?</h4>
-        <p>Solidity contracts are verified on the explorer; addresses below are clickable. The browser-side verifier above re-implements <span class="mono cyan">deriveRandomness</span> exactly as the contract does.</p>
-      </div>
-    </div>
-    <div class="contracts">
-      <div class="ct"><span class="l">Casino.sol</span><span class="a" data-sl-contract="casino">-</span></div>
-      <div class="ct"><span class="l">HouseManager.sol</span><span class="a" data-sl-contract="hm">-</span></div>
-      <div class="ct"><span class="l">PlayerAgentRegistry.sol</span><span class="a" data-sl-contract="registry">-</span></div>
-      <div class="ct"><span class="l">AgentQuorumVerifier.sol</span><span class="a" data-sl-contract="verifier">-</span></div>
-    </div>
-  </div>
-</section>
 
-<div data-mount="footer"></div>
+      <!-- VERIFY MODAL -->
+      <div data-sl-verify-modal style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(5,5,6,.78);backdrop-filter:blur(8px);align-items:center;justify-content:center;padding:24px">
+        <div style="background:#0B0B0E;border:1px solid var(--line-3);border-radius:18px;max-width:760px;width:100%;padding:28px;font:400 12px var(--mono);max-height:88vh;overflow-y:auto">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+            <h3 style="margin:0;font:600 13px var(--mono);letter-spacing:2px;color:var(--gold)">VERIFY IN BROWSER</h3>
+            <button data-sl-verify-close style="background:none;border:1px solid var(--bd);border-radius:8px;color:var(--fg-mute);padding:4px 10px;cursor:pointer">close ✕</button>
+          </div>
+          <div style="border-left:2px solid var(--gold);padding-left:12px;margin-bottom:16px">
+            <div style="color:var(--gold);margin-bottom:6px">STEP 1 · INPUTS</div>
+            <pre data-sl-verify-inputs style="font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--fg)">-</pre>
+          </div>
+          <div style="border-left:2px solid var(--gold-mid);padding-left:12px;margin-bottom:16px">
+            <div style="color:var(--gold-mid);margin-bottom:6px">STEP 2 · RE-DERIVE LOCALLY</div>
+            <div style="margin-bottom:6px">expected = keccak256(serverSeed ‖ clientSeed ‖ blockHash ‖ nonce)</div>
+            <pre data-sl-verify-expected style="font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--gold-mid)">-</pre>
+          </div>
+          <div style="border-left:2px solid var(--green);padding-left:12px;margin-bottom:16px">
+            <div style="color:var(--green);margin-bottom:6px">STEP 3 · COMPARE WITH ON-CHAIN</div>
+            <pre data-sl-verify-onchain style="font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--green)">-</pre>
+            <div data-sl-verify-match style="margin-top:8px">-</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ FAQ ============ -->
+      <div style="margin-top:44px;animation:sl-up .65s .14s both">
+        <h2 style="margin:0 0 18px;font:600 24px var(--sans);color:var(--fg-strong)">Frequently asked, plainly answered.</h2>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px" data-r-grid-m1>
+          <div class="card2" style="padding:18px 20px">
+            <h4 style="margin:0 0 8px;font:600 14px var(--sans);color:var(--fg)">How is randomness generated?</h4>
+            <p style="margin:0;font:400 12.5px/1.65 var(--sans);color:var(--fg-mute)">For each bet the contract derives <span style="font-family:var(--mono);font-size:11px;color:var(--gold)">keccak256(serverSeed ‖ clientSeed ‖ blockhash(commitBlock + 1) ‖ nonce)</span>. Everything happens on-chain; the settlement bot only reveals the pre-committed seed.</p>
+          </div>
+          <div class="card2" style="padding:18px 20px">
+            <h4 style="margin:0 0 8px;font:600 14px var(--sans);color:var(--fg)">Can the operator cheat?</h4>
+            <p style="margin:0;font:400 12.5px/1.65 var(--sans);color:var(--fg-mute)">No · keccak256(serverSeed) is committed on-chain <b>before</b> any bet binds to that slot, and a different revealed seed hashes differently, which the contract rejects. The block hash is what stops the other direction: the house cannot pick which bets to settle, because at bet time it does not know the outcome either.</p>
+          </div>
+          <div class="card2" style="padding:18px 20px">
+            <h4 style="margin:0 0 8px;font:600 14px var(--sans);color:var(--fg)">What if the seed is never revealed?</h4>
+            <p style="margin:0;font:400 12.5px/1.65 var(--sans);color:var(--fg-mute)">The blockhash window is 256 blocks. Past it the stake comes back, and anyone (including you) can trigger it: <span style="font-family:var(--mono);font-size:11px;color:var(--gold)">refundExpired(betId)</span> on the Vault (Dice, Plinko) or on the slot module, <span style="font-family:var(--mono);font-size:11px;color:var(--gold)">refundRound(roundId)</span> on Crash and Roulette, <span style="font-family:var(--mono);font-size:11px;color:var(--gold)">cancelPick(betId)</span> on Mines.</p>
+          </div>
+          <div class="card2" style="padding:18px 20px">
+            <h4 style="margin:0 0 8px;font:600 14px var(--sans);color:var(--fg)">Can I change my client seed?</h4>
+            <p style="margin:0;font:400 12.5px/1.65 var(--sans);color:var(--fg-mute)">Yes · every bet generates a fresh 32-byte client seed in your browser, and it is a plain argument to <span style="font-family:var(--mono);font-size:11px;color:var(--gold)">placeBet</span>, so you can supply your own.</p>
+          </div>
+          <div class="card2" style="padding:18px 20px">
+            <h4 style="margin:0 0 8px;font:600 14px var(--sans);color:var(--fg)">What about poker?</h4>
+            <p style="margin:0;font:400 12.5px/1.65 var(--sans);color:var(--fg-mute)">Poker does not use this scheme at all. Cards come from mental poker (zkShuffle v2): players jointly shuffle an encrypted deck in the browser, every shuffle carries a zero-knowledge proof and the contract verifies every decryption share. Watch it run in the <a style="color:var(--gold)" href="/zk-lab" data-link>ZK Lab</a>.</p>
+          </div>
+          <div class="card2" style="padding:18px 20px">
+            <h4 style="margin:0 0 8px;font:600 14px var(--sans);color:var(--fg)">Where's the source?</h4>
+            <p style="margin:0;font:400 12.5px/1.65 var(--sans);color:var(--fg-mute)">On <a style="color:var(--gold)" href="https://github.com/pSJLq/ShinyLuck" target="_blank" rel="noopener">GitHub</a>. The sources are not submitted to Shannon Explorer yet, so the explorer shows bytecode. The browser verifier above re-implements <span style="font-family:var(--mono);font-size:11px;color:var(--gold)">deriveRandomness</span> exactly as the contract does.</p>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin:24px 0 0;max-width:720px">
+          <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:#08080A" data-r-wrap-m><span style="font:600 10px var(--mono);letter-spacing:.14em;color:var(--fg-faint);width:150px;flex:none">CASINOVAULT.SOL</span><a href="https://shannon-explorer.somnia.network/address/0x6497D80cCd713F0BD4d8B22CE96Eae0F92EC7Cca" target="_blank" rel="noopener" style="font:400 11px var(--mono);color:var(--gold);word-break:break-all;text-decoration:none">0x6497D80cCd713F0BD4d8B22CE96Eae0F92EC7Cca</a></div>
+          <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:#08080A" data-r-wrap-m><span style="font:600 10px var(--mono);letter-spacing:.14em;color:var(--fg-faint);width:150px;flex:none">POKERROOM.SOL</span><a href="https://shannon-explorer.somnia.network/address/0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24" target="_blank" rel="noopener" style="font:400 11px var(--mono);color:var(--gold);word-break:break-all;text-decoration:none">0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24</a></div>
+          <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:#08080A" data-r-wrap-m><span style="font:600 10px var(--mono);letter-spacing:.14em;color:var(--fg-faint);width:150px;flex:none">ZKTABLEDEALER.SOL</span><a href="https://shannon-explorer.somnia.network/address/0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8" target="_blank" rel="noopener" style="font:400 11px var(--mono);color:var(--gold);word-break:break-all;text-decoration:none">0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8</a></div>
+          <p style="margin:6px 0 0;font:400 11.5px var(--sans);color:var(--fg-ghost)">Every game module has its own address · the full list is in the <a style="color:var(--gold)" href="/docs#contracts" data-link>docs</a>.</p>
+        </div>
+      </div>
+
+    </section>
+    <div data-mount="footer"></div>
+  </main>
+</div>
 </div>
 </body>
 </html>

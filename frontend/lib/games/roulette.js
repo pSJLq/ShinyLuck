@@ -4,21 +4,24 @@
 // state and NEVER touches the chain. This module is the host glue:
 //   - getRound()       : read the live on-chain round → open it in the UI
 //   - onPlaceBets(norm): map UI bets → Casino.placeRouletteBets (one tx)
-//   - RouletteRoundSettled → resolveRound(n): spin the wheel onto the EXACT
+//   - RoundSettled → resolveRound(n): spin the wheel onto the EXACT
 //     chain-drawn number (the only source of an outcome - no client RNG)
-//   - RouletteRoundStarted → setRound(): roll the UI to the next open round
+//   - RoundStarted → setRound(): roll the UI to the next open round
 //
-// Round lifecycle is driven entirely by the reveal-bot (ROUND_KEEPALIVE):
-// it keeps one roulette round open at all times and settles each once its
-// bet window + REVEAL_DELAY blocks have passed. So the wheel is continuous
-// and synchronized for everyone - this page just observes + bets.
+// Round lifecycle (on-demand since 2026-07-14): the wheel no longer burns gas
+// while empty. startRound() is permissionless, so when a CONNECTED
+// player is at the table and no round is open, this page opens the next one
+// itself (maybeStartRound below). While rounds keep receiving bets the house
+// bot chains them (ROUND_ON_DEMAND) and settles every round as before.
 
 import { ethers } from "/vendor/ethers.bundle.js";
 import { RouletteGame } from "./roulette-ui.js";
 import { SL, connect } from "../wallet.js";
 import { CONFIG } from "../config.js";
+import { CONFIG_V15 } from "../config-v15.js";
 import { CHAINS } from "../shinyluck-sdk.js";
 import { provider, fetchRecentLogs } from "../rpc.js";
+import { whenAuthSettled } from "../auth-gate.js";
 
 // Shannon Explorer base for verify-links (same source the per-bet games use).
 function explorerTxUrl(hash) {
@@ -38,19 +41,20 @@ const KIND = {
 const KIND_LABEL = ["STRAIGHT", "RED", "BLACK", "EVEN", "ODD", "LOW", "HIGH", "DOZEN", "DOZEN", "DOZEN"];
 
 const ABI = [
-  "function currentRouletteRoundId() view returns (uint256)",
-  "function totalRouletteRounds() view returns (uint256)",
-  "function getRouletteRound(uint256) view returns (uint64 id,uint64 betWindowEnd,uint64 commitBlock,uint32 seedIdx,bool settled,uint8 resultNumber,bytes32 serverSeed,uint256 bettorCount)",
-  "function bonusModeActive() view returns (bool)",
-  "event RouletteRoundStarted(uint256 indexed roundId,uint256 betWindowEnd,uint256 commitBlock,uint256 seedIdx)",
-  "event RouletteRoundSettled(uint256 indexed roundId,uint8 resultNumber,bytes32 serverSeed,bytes32 randomness)",
-  "event RouletteBetPlaced(uint256 indexed roundId,address indexed player,uint8 kind,uint8 number,uint256 amount)",
-  "event BonusModeActivated(uint256 until,string reasoning)",
+  "function currentRoundId() view returns (uint256)",
+  "function totalRounds() view returns (uint256)",
+  "function getRound(uint256) view returns (uint64 id,uint64 betWindowEnd,uint64 commitBlock,uint32 seedIdx,bool settled,uint8 resultNumber,bytes32 serverSeed,uint256 bettorCount)",
+  "event RoundStarted(uint256 indexed roundId,uint256 betWindowEnd,uint256 commitBlock,uint256 seedIdx)",
+  "event RoundSettled(uint256 indexed roundId,uint8 resultNumber,bytes32 serverSeed,bytes32 randomness)",
+  "event BetPlaced(uint256 indexed roundId,address indexed player,uint8 kind,uint8 number,uint256 amount)",
 ];
+
+/// v15: roulette is its own module contract.
+const ROULETTE_ADDR = (CONFIG_V15.games || []).find((g) => g.name === "roulette")?.module;
 
 let ro = null;
 function casino() {
-  if (!ro) ro = new ethers.Contract(CONFIG.casino, ABI, provider());
+  if (!ro) ro = new ethers.Contract(ROULETTE_ADDR, ABI, provider());
   return ro;
 }
 
@@ -61,20 +65,27 @@ async function toast(msg, opts) {
   try { const { toast } = await import("../ui.js"); toast(msg, opts); } catch (_) {}
 }
 
-// Map a component bet ({type, numbers, amount}) → contract {kind, number, amountSTT}.
-// The component encodes a "00" straight as numbers:[-1].
+// Map a component bet ({type, numbers, amount}) → the SDK shape
+// {kind, number, amount}. The component encodes a "00" straight as numbers:[-1].
+//
+// This said `amountSTT` until now, while SL.placeRoulette reads `amount` — so
+// every bet reached ethers as parseEther(String(undefined)) and died with
+// "invalid FixedNumber string value". Roulette could not take a bet at all.
 function mapBet(b) {
+  if (b.amount === undefined || b.amount === null || b.amount === "") {
+    throw new Error("bet is missing an amount");
+  }
   const amountSTT = String(b.amount);
   const first = (b.numbers && b.numbers.length) ? Number(b.numbers[0]) : 0;
   switch (b.type) {
-    case "straight": return { kind: KIND.STRAIGHT, number: first === -1 ? 37 : first, amountSTT };
-    case "red":      return { kind: KIND.RED,   number: 0, amountSTT };
-    case "black":    return { kind: KIND.BLACK, number: 0, amountSTT };
-    case "even":     return { kind: KIND.EVEN,  number: 0, amountSTT };
-    case "odd":      return { kind: KIND.ODD,   number: 0, amountSTT };
-    case "low":      return { kind: KIND.LOW,   number: 0, amountSTT };
-    case "high":     return { kind: KIND.HIGH,  number: 0, amountSTT };
-    case "dozen":    return { kind: first <= 12 ? KIND.DOZEN_1 : (first <= 24 ? KIND.DOZEN_2 : KIND.DOZEN_3), number: 0, amountSTT };
+    case "straight": return { kind: KIND.STRAIGHT, number: first === -1 ? 37 : first, amount: amountSTT };
+    case "red":      return { kind: KIND.RED,   number: 0, amount: amountSTT };
+    case "black":    return { kind: KIND.BLACK, number: 0, amount: amountSTT };
+    case "even":     return { kind: KIND.EVEN,  number: 0, amount: amountSTT };
+    case "odd":      return { kind: KIND.ODD,   number: 0, amount: amountSTT };
+    case "low":      return { kind: KIND.LOW,   number: 0, amount: amountSTT };
+    case "high":     return { kind: KIND.HIGH,  number: 0, amount: amountSTT };
+    case "dozen":    return { kind: first <= 12 ? KIND.DOZEN_1 : (first <= 24 ? KIND.DOZEN_2 : KIND.DOZEN_3), number: 0, amount: amountSTT };
     default: throw new Error("Unsupported bet type: " + b.type);
   }
 }
@@ -111,10 +122,10 @@ function bettingDeadlineMs(betWindowEndSec) {
 
 async function readCurrentRound() {
   const c = casino();
-  const total = Number(await c.totalRouletteRounds());
+  const total = Number(await c.totalRounds());
   if (total === 0) return null;
-  const id = Number(await c.currentRouletteRoundId());
-  const r = await c.getRouletteRound(id);
+  const id = Number(await c.currentRoundId());
+  const r = await c.getRound(id);
   return {
     id,
     betWindowEnd: Number(r.betWindowEnd ?? r[1]),
@@ -126,7 +137,7 @@ async function readCurrentRound() {
 
 async function fetchRecent(limit = 15) {
   try {
-    const evs = await fetchRecentLogs(casino(), "RouletteRoundSettled", { minCount: limit, maxLookback: 20_000 });
+    const evs = await fetchRecentLogs(casino(), "RoundSettled", { minCount: limit, maxLookback: 20_000 });
     // fetchRecentLogs returns newest-first; the component wants oldest-first.
     return evs.slice(0, limit).reverse().map((e) => ({
       roundId: Number(e.args.roundId), number: displayResult(e.args.resultNumber),
@@ -159,10 +170,19 @@ const placedRounds = new Set();// rounds where the local player placed a bet
 // catch the next round instead of firing a doomed tx.
 const PLACE_CUTOFF_MS = 3000;
 
+// The gate must never FLASH at a signed-in player while Privy restores the
+// session · it only appears once auth has actually settled as signed-out.
+let gateArmed = false;
 function setGate(connected) {
   const g = document.getElementById("roulette-gate");
-  if (g) g.style.display = connected ? "none" : "flex";
+  if (!g) return;
+  if (connected) { g.style.display = "none"; return; }
+  if (gateArmed) g.style.display = "flex";
 }
+whenAuthSettled().then((authed) => {
+  gateArmed = true;
+  setGate(authed || Boolean(SL.address));
+});
 
 async function refreshBalance() {
   try {
@@ -177,8 +197,9 @@ async function refreshBalance() {
 let bonusShown = false;
 async function refreshBonus() {
   try {
-    const on = await casino().bonusModeActive();
-    if (on !== bonusShown) { bonusShown = on; if (game) game.setBonusMode(on); }
+    // v15 dropped the agent-driven Bonus Mode; the wheel stays in its normal
+    // skin. Kept as a no-op so the render path is unchanged.
+    if (bonusShown) { bonusShown = false; if (game) game.setBonusMode(false); }
   } catch (_) {}
 }
 
@@ -198,7 +219,7 @@ async function onSettled(id, resultNumber, fair) {
   awaitingResult = false;       // result is in; the spin now plays
   try { await game.resolveRound(displayResult(resultNumber)); } catch (_) {}
   // Provably-fair: show the REAL revealed server seed + randomness from the
-  // RouletteRoundSettled event, with a Shannon Explorer link to verify.
+  // RoundSettled event, with a Shannon Explorer link to verify.
   try {
     game.setFair({
       roundId: id,
@@ -225,7 +246,7 @@ async function onSettled(id, resultNumber, fair) {
 // (which only reads the round struct, not the event's randomness field).
 async function fetchFair(roundId) {
   try {
-    const evs = await fetchRecentLogs(casino(), "RouletteRoundSettled", {
+    const evs = await fetchRecentLogs(casino(), "RoundSettled", {
       minCount: 1, maxLookback: 50_000,
       filter: (e) => Number(e.args.roundId) === Number(roundId),
     });
@@ -236,6 +257,34 @@ async function fetchFair(roundId) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// On-demand round opener: with the house bot no longer idling the wheel, a
+// connected player at the table opens the next round when none is open. The
+// tx is tiny; races between two players are harmless (one lands, the other
+// reverts RoundClosed and we just reconcile).
+// ---------------------------------------------------------------------------
+let startingRound = false;
+let lastStartAttempt = 0;
+async function maybeStartRound() {
+  if (!game || resolving || awaitingResult) return;
+  if (!SL.address || !SL.signer) return;       // only a signed-in player can open
+  if (document.hidden) return;                 // and only while actually watching
+  if (startingRound || Date.now() - lastStartAttempt < 12_000) return;
+  startingRound = true;
+  try {
+    const cur = await readCurrentRound();
+    const stillOpen = cur && !cur.settled && Date.now() < bettingDeadlineMs(cur.betWindowEnd);
+    if (!stillOpen) {
+      lastStartAttempt = Date.now();
+      const c = new ethers.Contract(ROULETTE_ADDR, ["function startRound()"], SL.signer);
+      const tx = await c.startRound();
+      await tx.wait();
+      tick();
+    }
+  } catch (_) { /* lost the open race / game paused · reconcile on next tick */ }
+  finally { startingRound = false; }
+}
+
 // One reconcile pass: (1) if the round we're showing has settled, spin it;
 // (2) otherwise roll the UI to the latest open round. Event-triggered AND
 // polled so we never miss a settle even if the WS/poll drops one.
@@ -243,7 +292,7 @@ async function tick() {
   if (!game || resolving) return;
   try {
     if (uiRoundId >= 0 && !resolvedRounds.has(uiRoundId)) {
-      const r = await casino().getRouletteRound(uiRoundId);
+      const r = await casino().getRound(uiRoundId);
       if (Boolean(r.settled ?? r[4])) {
         const fair = await fetchFair(uiRoundId);
         await onSettled(uiRoundId, Number(r.resultNumber ?? r[5]), fair || { serverSeed: r.serverSeed ?? r[6] });
@@ -296,7 +345,7 @@ function mount() {
         return { roundId: cur.id, betWindowEndMs: deadlineMs, isOpen: true, bettorCount: cur.bettorCount, recentResults };
       }
       // No open round yet (between settle + next open) - seed history only and
-      // sit in the idle "waiting for round" state. RouletteRoundStarted (or the
+      // sit in the idle "waiting for round" state. RoundStarted (or the
       // poll in tick()) opens the next one. Returning WITHOUT roundId/
       // betWindowEndMs makes setRound show "waiting" instead of a fake lock.
       return { recentResults };
@@ -335,7 +384,7 @@ function mount() {
   // live chain subscriptions (read-only provider). tick() reconciles state.
   try {
     const c = casino();
-    c.on("RouletteRoundSettled", (roundId, resultNumber, serverSeed, randomness, ev) => {
+    c.on("RoundSettled", (roundId, resultNumber, serverSeed, randomness, ev) => {
       const txHash = ev && (ev.log ? ev.log.transactionHash : ev.transactionHash);
       onSettled(Number(roundId), Number(resultNumber), { serverSeed, randomness, txHash });
     });
@@ -346,7 +395,7 @@ function mount() {
     // that reset the countdown to "10 / BETTING OPEN" on top of the PAYOUT
     // wheel and froze the timer. If we're mid-spin, just let onSettled's
     // trailing tick() open the next round once the animation finishes.
-    c.on("RouletteRoundStarted", (roundId, betWindowEnd, commitBlock, seedIdx, ev) => {
+    c.on("RoundStarted", (roundId, betWindowEnd, commitBlock, seedIdx, ev) => {
       try {
         // Hold while a spin is playing OR while we still owe the shown round its
         // result. The chain opens this next round the instant the current
@@ -365,7 +414,7 @@ function mount() {
       } catch (_) {}
       if (!resolving && !awaitingResult) tick();
     });
-    c.on("RouletteBetPlaced", (roundId, player, kind, number, amount) => {
+    c.on("BetPlaced", (roundId, player, kind, number, amount) => {
       // Surface OTHER players' bets in the live feed (our own already show).
       try {
         if (SL.address && player && player.toLowerCase() === SL.address.toLowerCase()) return;
@@ -376,6 +425,8 @@ function mount() {
 
   // Poll fallback - keeps the wheel honest if a push is dropped.
   setInterval(tick, 3000);
+  // On-demand opener: kicks the wheel awake while a connected player watches.
+  setInterval(() => { maybeStartRound().catch(() => {}); }, 5000);
   // Keep the chain-clock skew fresh (clocks drift); cheap one-block read.
   refreshChainSkew();
   setInterval(refreshChainSkew, 15000);

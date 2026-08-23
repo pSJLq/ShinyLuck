@@ -33,7 +33,7 @@ export async function showDepositModal({ address, provider, minBalance, network 
         <button class="sl-dep-copy" data-copy>Copy</button>
       </div>
       <div class="sl-dep-qr" data-qr-mount></div>
-      <p class="sl-dep-hint">Get testnet STT from Somnia faucet · transfer from another wallet · network: <b>${escape(network?.chainName || "Somnia Testnet")}</b></p>
+      <p class="sl-dep-hint">Send STT to this address from any wallet or exchange · network: <b>${escape(network?.chainName || "Somnia Testnet")}</b></p>
       <div class="sl-dep-bal">
         <span class="lbl">Balance</span>
         <span class="val" data-bal>-</span>

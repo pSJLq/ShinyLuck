@@ -3,48 +3,72 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ShinyPoker — zkShuffle v2 Lab (experimental)</title>
-<link rel="icon" type="image/svg+xml" href="logo.svg">
-<link rel="stylesheet" href="styles.css" />
-<link rel="stylesheet" href="marketing.css" />
+<title>ZK Lab · ShinyLuck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/v2.css" />
+<script src="/lib/console-filter.js"></script>
+<script src="/partials.js" defer></script>
 <style>
-  .lab { border: 1px solid var(--line, #2c2c36); border-radius: 14px; padding: 18px; margin: 16px 0;
-    background: rgba(255,255,255,0.02); }
+  /* The lab keeps its own widget styling; headings/text follow the merged
+     design system so it stops looking like a page from another site. */
+  .legal h1 { font: 600 40px/1.08 var(--sans); color: var(--fg-strong); margin: 12px 0 0; }
+  .legal h2 { font: 600 24px var(--sans); color: var(--fg-strong); margin: 38px 0 0; }
+  .legal p, .legal li { font: 400 14.5px/1.75 var(--sans); color: var(--fg-dim); }
+  .legal .eyebrow { font: 600 9px var(--mono); letter-spacing: .22em; color: var(--gold); text-transform: uppercase; }
+  .legal .lupd { font: 400 14.5px/1.7 var(--sans); color: var(--fg-mute); margin-top: 12px; max-width: 720px; }
+  .legal code { font-family: var(--mono); font-size: 12px; color: var(--gold-mid); }
+  .legal a { color: var(--gold); }
+  .lab { border: 1px solid var(--line-3); border-radius: 14px; padding: 18px; margin: 16px 0;
+    background: var(--panel-2); }
+  /* the lab's own buttons (marketing.css is gone · v2 tokens instead) */
+  .legal .btn { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px;
+    border-radius: 10px; cursor: pointer; font: 600 12.5px var(--sans); border: 1px solid var(--bd-3);
+    background: transparent; color: #EDEAE0; transition: all .2s; }
+  .legal .btn:hover { border-color: rgba(217,185,112,.6); color: var(--gold-hi); }
+  .legal .btn.primary { background: var(--gold); color: var(--ink); border-color: transparent; }
+  .legal .btn.primary:hover { filter: brightness(1.07); color: var(--ink); }
+  .legal .btn:disabled { opacity: .45; cursor: default; }
   .lab .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
   .players { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 12px 0; }
   .pl { border: 1px solid var(--line, #2c2c36); border-radius: 10px; padding: 12px; }
-  .pl h4 { margin: 0 0 8px; font-family: "IBM Plex Mono", monospace; font-size: 13px; color: #f2d78a; }
-  .pl .know { font-size: 11px; color: var(--muted, #9a9aa8); line-height: 1.6; }
+  .pl h4 { margin: 0 0 8px; font-family: var(--code, "JetBrains Mono", ui-monospace, monospace); font-size: 13px; color: #F4DD9E; }
+  .pl .know { font-size: 11px; color: var(--muted, #8F8C85); line-height: 1.6; }
   .pcards { display: flex; gap: 6px; margin: 8px 0; min-height: 34px; }
   .pc { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 34px;
-    padding: 0 5px; border-radius: 6px; background: #16161c; border: 1px solid #3a3a48;
-    font-family: "IBM Plex Mono", monospace; font-size: 14px; font-weight: 700; color: #e6e6ee; }
+    padding: 0 5px; border-radius: 6px; background: #16161c; border: 1px solid rgba(255,255,255,0.14);
+    font-family: var(--code, "JetBrains Mono", ui-monospace, monospace); font-size: 14px; font-weight: 700; color: #e6e6ee; }
   .pc.red { color: #ff8d9d; }
   .pc.hidden { color: #5a5a66; border-style: dashed; font-size: 11px; }
   .boardrow2 { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
   .lablog { background: #000; border: 1px solid var(--line, #2c2c36); border-radius: 10px; padding: 12px;
-    font-family: "IBM Plex Mono", monospace; font-size: 11.5px; line-height: 1.75; color: #c9c9d4;
+    font-family: var(--code, "JetBrains Mono", ui-monospace, monospace); font-size: 11.5px; line-height: 1.75; color: #c9c9d4;
     max-height: 340px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
-  .lablog .ok { color: #57d9a3; } .lablog .bad { color: #ef5a6f; } .lablog .head { color: #f2d78a; }
+  .lablog .ok { color: #57d9a3; } .lablog .bad { color: #ef5a6f; } .lablog .head { color: #F4DD9E; }
   .expbanner { border: 1px solid rgba(232,193,90,.4); background: rgba(232,193,90,.08); border-radius: 10px;
     padding: 12px 14px; font-size: 13px; line-height: 1.6; color: #e6e6ee; margin: 14px 0; }
 </style>
 </head>
-<body class="marketing">
-  <canvas id="mkt-bg"></canvas>
-  <div class="mkt-wrap">
-    <div id="site-header"></div>
-    <div class="legal">
+<body data-active-page="zk-lab">
+<div data-page-shell>
+<div data-mount="nav"></div>
+<div style="display:flex;align-items:flex-start">
+  <div data-mount="side"></div>
+  <main data-r-padb-m style="flex:1;min-width:0">
+    <div class="legal" style="max-width:1000px;margin:0 auto;padding:30px 36px 0" data-r-pad-m>
       <div class="lhead">
         <span class="eyebrow">Research lab · v2</span>
-        <h1>zkShuffle v2 — mental poker, live in your browser</h1>
-        <div class="lupd">The next trust model: nobody — not our dealer, not the host, not other players — can see your cards during a hand. This page runs the REAL cryptography (not a mock) right here, and lets you try to cheat it.</div>
+        <h1>zkShuffle v2 · mental poker, live in your browser</h1>
+        <div class="lupd">The trust model our tables actually run: nobody · not our dealer, not the host, not other players · can see your cards during a hand. This page runs the REAL cryptography (not a mock) right here, and lets you try to cheat it.</div>
       </div>
 
-      <div class="expbanner">⚗️ <b>Experimental — but really on-chain.</b> This runs the v2 protocol core client-side on <b>BN254</b> (the curve the EVM has native precompiles for), and every Schnorr key proof and Chaum–Pedersen decryption-share proof below is <b>verified by a deployed contract</b> (<code>ZkDealerV2</code> on Somnia testnet) via a zero-gas <code>eth_call</code> — you're watching the actual chain accept or reject each proof. It is NOT yet wired to live tables and has NOT been externally audited — the current tables run the honest commit-reveal v1 on the <a href="provably-fair" style="color:#f2d78a">provably-fair page</a>. Roadmap: <code>docs/ZKSHUFFLE-V2-SPEC.md</code>.</div>
+      <div class="expbanner">⚗️ <b>Really on-chain · and really live.</b> This page runs the v2 protocol core client-side on <b>BN254</b> (the curve the EVM has native precompiles for), and every Schnorr key proof and Chaum–Pedersen decryption-share proof below is <b>verified by a deployed contract</b> · <code>ZkDealerV2</code> at <a href="https://shannon-explorer.somnia.network/address/0x292Ef0e15fC62613B00c55b0eEAC38279Efdb67D" target="_blank" rel="noopener">0x292E…b67D</a> · through a zero-gas <code>eth_call</code>. You are watching the actual chain accept or reject each proof. Live cash tables and tournaments run the <b>same</b> protocol, same curve, same Fiat–Shamir domains and the same verifier library; there the on-chain checks live in the room's card layer, <code>ZkTableDealer</code> at <a href="https://shannon-explorer.somnia.network/address/0x3fD6dfe201cf217A27c41878FE41faCd98B43fe8" target="_blank" rel="noopener">0x3fD6…3fe8</a>. Not audited by a third party yet.</div>
 
       <h2>How it works, in one hand</h2>
-      <p>Three players (simulated below, each with its own secret key your browser never shares between them): they aggregate a table key, each one <b>shuffles and re-encrypts the deck themselves</b>, then each hole card is decrypted <b>only by its owner</b> using the other players' decryption shares — and each of those shares is proven correct and <b>checked by the contract on-chain</b>. After the hand, everyone opens their shuffle — any tampering is caught, attributed, and provable on-chain (<code>ZkDealerV2.checkStage</code>). Watch the log: no party other than the owner ever holds a readable card.</p>
+      <p>Three players (simulated below, each with its own secret key your browser never shares between them): they aggregate a table key, each one <b>shuffles and re-encrypts the deck themselves</b>, then each hole card is decrypted <b>only by its owner</b> using the other players' decryption shares · and each of those shares is proven correct and <b>checked by the contract on-chain</b>. Watch the log: no party other than the owner ever holds a readable card.</p>
+      <p>The last step of the lab is the <b>post-hoc audit</b>: every player opens their permutation and randomness, the whole chain is recomputed and any tampering is attributed to the exact stage that did it. Press the cheat button and watch it happen. At a live table that audit is the belt, not the braces · see the next section for what actually guards a real hand.</p>
 
       <div class="lab">
         <div class="btns">
@@ -52,22 +76,28 @@
           <button id="btn-cheat" class="btn ghost">😈 Let player 2 try to cheat</button>
         </div>
         <div class="players" id="players"></div>
-        <div class="boardrow2"><span style="font-size:11px;letter-spacing:.1em;color:#9a9aa8">BOARD</span><span class="pcards" id="board"></span></div>
+        <div class="boardrow2"><span style="font-size:11px;letter-spacing:.1em;color:#8F8C85">BOARD</span><span class="pcards" id="board"></span></div>
         <div class="lablog" id="log">Press “Play an honest hand”.</div>
       </div>
 
-      <h2>What this stage does and doesn't prove</h2>
+      <h2>What a real hand proves, and where</h2>
       <ul>
-        <li><b>Does, on-chain:</b> the aggregate table key (each player's Schnorr proof is verified by the contract), and every decryption share (Chaum–Pedersen, verified by the contract — a forged share is rejected by the chain). In-hand secrecy: your cards are ElGamal-encrypted under everyone's keys, so only you can complete the decryption. Cheat detection is deterministic and attributable, and the shuffle audit is re-derivable on-chain (<code>checkStage</code>).</li>
-        <li><b>Doesn't yet:</b> zero-knowledge shuffle arguments (verifying each shuffle DURING the hand with nothing opened after) — stage R2 of the spec, replacing the optimistic audit; escrow slashing wired to the room; and an external audit. Deck storage on-chain is also currently heavy (~0.26 STT/hand) and will move to a hash-commit + calldata-verify model.</li>
+        <li><b>Verified by the contract, during the hand:</b> every player's Schnorr key proof (a rogue key cannot join and the aggregate table key is formed on-chain); every Chaum–Pedersen decryption share, checked against the committed ciphertext and that seat's per-hand key; and that the shares decrypt to <i>exactly</i> the card being claimed · <code>B − Σd == (card+1)·G</code>. A forged share or a lied-about card reverts, so the coordinator cannot put a card on the felt that the cryptography did not produce. A per-deal bitmask also rejects the same card value appearing twice.</li>
+        <li><b>Verified by every client, during the hand:</b> the shuffles. Each player's shuffle carries a <b>Wikström zero-knowledge proof</b> that the output deck is a permutation plus re-encryption of the input, with nothing opened afterwards. Every other client fetches the whole transcript and checks all of it (and pins its own stage inside it) <i>before</i> it will hand over a single decryption share, and the deal commits the keccak of that transcript on-chain, so anyone holding it can re-verify the shuffle forever. That is stage R2 of the spec, and it is live · the "at least one honest shuffler" assumption is no longer load-bearing.</li>
+        <li><b>Enforced on-chain when someone vanishes:</b> a missing decryption share becomes an on-chain accusation naming the exact card. The accused client can answer it within a rescue window, which also delivers the withheld share; only an unanswered accusation forfeits that player's committed chips, pro-rata to the other players in the hand and never to the operator.</li>
+        <li><b>Not done:</b> the shuffle argument itself is verified by clients and by the coordinator, not inside a contract · the chain holds its commitment, not its verification. There is no third-party audit yet. And undealt cards are never decrypted at all: only the 2k + 5 ciphertexts actually in play are committed, as hashes with the points passed in calldata, which is what keeps the coordinator's gas at roughly <b>0.086 STT</b> per completed heads-up hand and <b>0.14–0.16 STT</b> at four players (measured on Somnia at its fixed 6 gwei base fee; a player's own action costs about 0.001 STT).</li>
       </ul>
 
-      <div style="margin-top:36px"><a class="btn primary" href="lobby">Play (v1 tables)</a> <a class="btn ghost" href="provably-fair" style="margin-left:8px">Provably fair — v1 model</a></div>
+      <div style="margin-top:36px;display:flex;gap:10px;flex-wrap:wrap">
+        <a class="btn2 btn2-gold" href="/poker" data-link style="height:42px;padding:0 20px;text-decoration:none">Play poker</a>
+        <a class="btn2 btn2-line" href="/docs#poker" data-link style="height:42px;padding:0 18px;text-decoration:none">Read the docs</a>
+        <a class="btn2 btn2-line" href="https://github.com/pSJLq/ShinyLuck" target="_blank" rel="noopener" style="height:42px;padding:0 18px;text-decoration:none">Source ↗</a>
+      </div>
     </div>
-    <div id="site-footer"></div>
-  </div>
-  <script src="poker-grid.js"></script>
-  <script src="marketing.js"></script>
-  <script type="module" src="zk-lab.js"></script>
+    <div data-mount="footer"></div>
+  </main>
+</div>
+</div>
+  <script type="module" src="/poker/zk-lab.js"></script>
 </body>
 </html>

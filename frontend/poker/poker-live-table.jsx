@@ -1,31 +1,185 @@
-/* ShinyPoker — LIVE table. Reuses the design's visual components (Card, Seat,
+/* ShinyPoker · LIVE table. Reuses the design's visual components (Card, Seat,
    Board, Pot, grid felt) but every value is read from the on-chain snapshot via
    window.SP (poker-bridge.js). No hardcoded SCENES. */
 const { useState, useEffect, useRef } = React;
 
 // Seat ring positions per table size (index 0 = bottom = hero), % of the felt.
+// Top seats sit at ≥12% so they clear the tournament HUD strip even on the
+// compact "larger interface" canvas.
 const POS = {
-  2: [{ x: 50, y: 84 }, { x: 50, y: 10 }],
+  2: [{ x: 50, y: 84 }, { x: 50, y: 12 }],
   6: [{ x: 50, y: 83 }, { x: 15, y: 65 }, { x: 15, y: 27 }, { x: 50, y: 12 }, { x: 85, y: 27 }, { x: 85, y: 65 }],
   9: [{ x: 50, y: 87 }, { x: 18, y: 80 }, { x: 6, y: 52 }, { x: 14, y: 22 }, { x: 38, y: 8 }, { x: 62, y: 8 }, { x: 86, y: 22 }, { x: 94, y: 52 }, { x: 82, y: 80 }],
 };
+// Phones: a PORTRAIT table. The felt is a tall stadium (mobile.css: inset 5%
+// / 15% / 20%), so the seats ring that shape rather than the old landscape
+// oval — which is why the bottom seats used to sit on the black background
+// under the table instead of at it. x=15/85 puts the side pods ON the rail,
+// seat 0 stays bottom-centre (the hero, under the board), and the top seat
+// clears the tournament HUD.
+const POS_M = {
+  2: [{ x: 50, y: 76 }, { x: 50, y: 12 }],
+  6: [{ x: 50, y: 76 }, { x: 15, y: 62 }, { x: 15, y: 30 }, { x: 50, y: 11 }, { x: 85, y: 30 }, { x: 85, y: 62 }],
+  9: [{ x: 50, y: 78 }, { x: 20, y: 70 }, { x: 13, y: 50 }, { x: 20, y: 30 }, { x: 38, y: 12 }, { x: 62, y: 12 }, { x: 80, y: 30 }, { x: 87, y: 50 }, { x: 80, y: 70 }],
+};
+
+// ---- desktop felt geometry ----
+// The stage canvas follows the viewport aspect (mountScale), so the fixed POS
+// percentages drifted off the rail on wide screens: the oval stretched into a
+// racetrack and the side seats floated mid-felt. On desktop the felt is now a
+// stadium (half-circle ends) capped at a real poker-table proportion (~2:1) —
+// leftover width becomes margin the seat pods straddle into — and the seats
+// are placed ON the measured rail. The JSX publishes --sp-feltside/--sp-feltr
+// and poker-live.css draws the same shape, so the oval and the seat ring can
+// never disagree. POS/POS_M stay as the pre-measure fallback and for phones.
+// THE BOTTOM INSET IS NOT A CONSTANT. Below the cloth live two things stacked:
+// the hero's own pod, and the action bar under it. The bar was assumed to be
+// ~130px, so on a full-height bar (slider, four buttons, the clock line) it
+// rode UP over the hero's plaque — the player's stack and their last action
+// sat behind the buttons they were about to press. It is measured now
+// (--sp-barmax, published by the bar's ResizeObserver) and both this geometry
+// and the CSS below read the same number, so the oval, the seat ring and the
+// hero can never disagree about where the rail is.
+const FELT_D = { top: 92, bottom: 188, minSide: 150, maxAR: 2.0, heroPod: 84 };
+function barMaxPx() {
+  try {
+    const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--sp-barmax"), 10);
+    return v > 0 ? v : 0;
+  } catch (e) { return 0; }
+}
+function feltBottom() {
+  const bar = barMaxPx();
+  return bar ? bar + FELT_D.heroPod : FELT_D.bottom; // pre-measure: the design's number
+}
+function feltGeom(w, h) {
+  const bottom = feltBottom();
+  const fh = h - FELT_D.top - bottom;
+  const side = Math.max(FELT_D.minSide, Math.round((w - FELT_D.maxAR * fh) / 2));
+  return { side, r: fh / 2, fw: w - side * 2, fh, x0: side, y0: FELT_D.top, y1: h - bottom, cx: w / 2, cy: FELT_D.top + fh / 2 };
+}
+// n seats at equal arc steps along the rail, seat 0 = bottom center (hero),
+// walking the LEFT side first (same order as POS, so view() rotation holds).
+function seatRing(n, w, h) {
+  const g = feltGeom(w, h);
+  if (g.fh <= 120 || g.fw <= 2 * g.r) return null;
+  const straight = g.fw - 2 * g.r, arc = Math.PI * g.r;
+  const P = 2 * straight + 2 * arc;
+  const pt = (s) => {
+    if (s <= straight / 2) return { x: g.cx - s, y: g.y1 };            // bottom rail, walking left
+    s -= straight / 2;
+    if (s <= arc) { const a = s / g.r; return { x: g.x0 + g.r * (1 - Math.sin(a)), y: g.cy + g.r * Math.cos(a) }; } // left cap, upward
+    s -= arc;
+    if (s <= straight) return { x: g.x0 + g.r + s, y: g.y0 };          // top rail, walking right
+    s -= straight;
+    if (s <= arc) { const a = s / g.r; return { x: g.x0 + g.fw - g.r * (1 - Math.sin(a)), y: g.cy - g.r * Math.cos(a) }; } // right cap, downward
+    s -= arc;
+    return { x: g.x0 + g.fw - g.r - s, y: g.y1 };                      // bottom rail, back to center
+  };
+  const ring = [];
+  for (let i = 0; i < n; i++) {
+    const p = pt((i / n) * P);
+    if (i === 0) p.y += 22; // hero anchor straddles outward, toward the herozone
+    ring.push({ x: (p.x / w) * 100, y: (p.y / h) * 100 });
+  }
+  return ring;
+}
 
 const short = (a) => (a && a !== "0x0000000000000000000000000000000000000000" ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const N = (wei) => Number(SP.fmt(wei, 6));
 // Tournament tables play in plain CHIP units (1500 chips, blinds 10/20), not
-// wei — NV switches the whole table's value formatting per mode.
+// wei · NV switches the whole table's value formatting per mode.
 let CHIPS = false;
 const NV = (v) => (CHIPS ? Number(v) : Number(SP.fmt(v, 6)));
 const A = SP.ACTION, ST = SP.STREET;
 
-// Tiny WebAudio synth — no assets, gated by the sound preference.
+// ---- last-action badges, as a pure diff ----
+// WHY THIS IS NOT A LIVE FEED. The chain pushes nothing, so who-just-did-what
+// is inferred by diffing one snapshot against the last one. That inference has
+// to survive a snapshot that is not internally consistent, and ours routinely
+// is not: `SP.sdk.snapshot` fires getHand and 2×seats reads as separate
+// eth_calls, and on Somnia (100ms blocks, ~190ms for the batch) SIX blocks can
+// pass while they are in flight. A read where the seats are one block newer
+// than the hand is normal, not exotic.
+//
+// That is what made a bet flash on a seat and then turn back into CHECK: the
+// torn read showed the raised committedStreet while actingSeat still pointed at
+// the raiser, so the next (clean) read looked exactly like "their turn passed
+// and they put nothing in" — the signature of a check.
+//
+// THE INVARIANT THAT FIXES IT: on one street, a seat that has already put chips
+// in cannot go back to having checked. Once you bet, call or raise, the only
+// ways the action can return to you are call, raise and fold. So the two
+// branches that infer an action from an ABSENCE of change may never overwrite
+// one that was inferred from chips actually moving.
+const ACT_AGGRO = { bet: 1, raise: 1, call: 1, allin: 1 };
+function actionDiff(prev, cur, existing, now) {
+  const h = cur.hand, acts = {};
+  if (!h.inProgress || !prev.sh) return acts;
+  const sameHand = h.handId === prev.handId;
+  const sameStreet = sameHand && h.street === prev.street;
+  const dk = String(h.dealId);
+  const st = prev.street;
+  // has this seat already been seen committing chips on the street we are
+  // reading? then no "nothing happened" inference may speak for it
+  const committed = (i) => {
+    const e = existing && existing[i];
+    return !!(e && e.deal === dk && e.street === st && ACT_AGGRO[e.kind]);
+  };
+  const stamp = (o) => Object.assign(o, { ts: now, deal: dk, street: st });
+  for (const s of cur.seats) {
+    if (s.empty) continue;
+    const p = prev.sh[s.index];
+    if (!p) continue;
+    if (sameHand && s.folded && !p.folded) acts[s.index] = stamp({ kind: "fold" });
+    else if (sameHand && s.allIn && !p.allIn) acts[s.index] = stamp({ kind: "allin" });
+    else if (sameStreet && s.committedStreet > p.cs)
+      acts[s.index] = stamp({ kind: prev.curBet === 0n ? "bet" : (s.committedStreet > prev.curBet ? "raise" : "call"), amt: NV(s.committedStreet) });
+    else if (sameStreet && prev.actingSeat === s.index && h.actingSeat !== s.index
+             && s.committedStreet === p.cs && !s.folded && !s.allIn && s.inHand && !committed(s.index))
+      acts[s.index] = stamp({ kind: "check" });
+    // THE ACTION THAT CLOSES A STREET.
+    // Every branch above needs the street to still be the same one, because
+    // that is how a bet is recognised: committedStreet went up. But the player
+    // who acts LAST on a street ends it, and by the next poll the street has
+    // advanced and every committedStreet is back to zero — so their action
+    // matched nothing and the badge from their PREVIOUS one stayed on their
+    // seat. Raise the flop, check the turn, and the table still said RAISE for
+    // the rest of the hand: it was announcing a bet that was no longer there,
+    // which is the one thing a badge must never do.
+    // What they did is still readable, from two facts the reset does not erase:
+    // what they owed (prev.curBet), and what LEFT THEIR STACK. Chips can only
+    // leave a stack mid-hand by being committed, so a drop means they paid —
+    // which is how a bet that closed a street (everyone else already all-in)
+    // stops being mistaken for a check.
+    else if (sameHand && !sameStreet && prev.actingSeat === s.index
+             && !s.folded && !s.allIn && s.inHand && !committed(s.index)) {
+      const before = prev.stacks && prev.stacks[s.index];
+      const paid = before != null && before > s.stack ? before - s.stack : 0n;
+      const put = p.cs + paid;
+      acts[s.index] = paid === 0n && p.cs >= prev.curBet
+        ? stamp({ kind: "check" })
+        : stamp({ kind: put > prev.curBet ? (prev.curBet === 0n ? "bet" : "raise") : "call", amt: NV(put > 0n ? put : prev.curBet) });
+    }
+  }
+  return acts;
+}
+// drivable by the badge test without a chain (test/poker-action-badges.mjs)
+if (typeof window !== "undefined") window.SPActionDiff = actionDiff;
+
+// Tiny WebAudio synth · no assets, gated by the sound preference.
 let AC = null;
 function sfx(kind, on) {
   if (!on) return;
+  // …and obey the casino's Settings slider, not just its on/off switch. These
+  // sounds used to ignore the volume control entirely: turning it down did
+  // nothing at the table, which made the setting look broken.
+  const vol = window.SPMusic ? window.SPMusic.fx() : 1;
+  if (vol <= 0) return;
   try {
     AC = AC || new (window.AudioContext || window.webkitAudioContext)();
     const t0 = AC.currentTime;
-    const tone = (f, start, dur, g = 0.05, type = "sine") => {
+    const tone = (f, start, dur, g0 = 0.05, type = "sine") => {
+      const g = g0 * vol;
       const o = AC.createOscillator(), ga = AC.createGain();
       o.type = type; o.frequency.value = f;
       ga.gain.setValueAtTime(g, t0 + start);
@@ -58,7 +212,7 @@ function FlyChips({ wrapRef, toX, toY }) {
   );
 }
 
-// the reverse: chips fly FROM a seat / bet spot INTO the pot — antes at the
+// the reverse: chips fly FROM a seat / bet spot INTO the pot · antes at the
 // deal and each street's bets being collected. Every client renders this from
 // the same snapshot diff, so everyone sees everyone posting.
 function FlyToPot({ wrapRef, fromX, fromY, delay = 0 }) {
@@ -84,12 +238,19 @@ function LiveTable() {
   const [addr, setAddr] = useState(null);
   const [bal, setBal] = useState(0);
   const [holes, setHoles] = useState({}); // dealId -> [strA,strB]
-  const [theme, setTheme] = useState(() => localStorage.getItem("sp_theme") || "b");
-  const [lang, setLangState] = useState(() => window.__SPLANG || "en");
-  const setLang = (l) => { window.SPLangSet(l); setLangState(l); }; // re-render → SPT() picks up the new language everywhere
-  // persisted table preferences — every toggle here actually works
+  // guarded: a framed WKWebView can THROW on storage and blank the table (§26)
+  const [theme, setTheme] = useState(() => { try { return localStorage.getItem("sp_theme") || "b"; } catch (e) { return "b"; } });
+  // Language lives in the casino's Settings now · we only listen, so SPT() at
+  // this table repaints the moment the player switches it out there.
+  const [, setLangState] = useState(() => window.__SPLANG || "en");
+  useEffect(() => {
+    const on = (e) => setLangState((e && e.detail && e.detail.lang) || window.__SPLANG || "en");
+    window.addEventListener("sp-lang-changed", on);
+    return () => window.removeEventListener("sp-lang-changed", on);
+  }, []);
+  // persisted table preferences · every toggle here actually works
   const [prefs, setPrefs] = useState(() => {
-    const d = { sound: true, deck: "4", turbo: false, reduced: false, bbstacks: false };
+    const d = { sound: true, deck: "4", turbo: false, reduced: false, bbstacks: false, bigui: false };
     try { return Object.assign(d, JSON.parse(localStorage.getItem("sp_prefs") || "{}")); } catch { return d; }
   });
   const setPref = (k, v) => setPrefs((p) => { const n = { ...p, [k]: v }; try { localStorage.setItem("sp_prefs", JSON.stringify(n)); } catch {} return n; });
@@ -98,7 +259,13 @@ function LiveTable() {
   const preActRef = useRef({ key: null });
   const [showSettings, setShowSettings] = useState(false);
   const [railOpen, setRailOpen] = useState(false); // mobile: side rail as a bottom sheet
+  // 0 means "not chosen" · renderBar() falls back to the legal minimum raise.
+  // It is reset on every new turn (see the turnKey effect below): a slider left
+  // at 40 big blinds from the hand before is not a preference, it is a trap —
+  // the bar would come back pre-loaded with an amount the player picked in a
+  // completely different spot, and the raise button says only "Raise to".
   const [betValue, setBetValue] = useState(0);
+  const betTurnRef = useRef(null);
   const [modal, setModal] = useState(null); // {type, seat}
   const [toast, setToast] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -108,8 +275,16 @@ function LiveTable() {
   const [reveals, setReveals] = useState({}); // dealId -> { seat: [c0,c1] }
   const [sdWin, setSdWin] = useState(null); // showdown winner computed from reveals, BEFORE on-chain settle
   const [pendingAct, setPendingAct] = useState(null); // optimistic: my action tx sent, waiting for the chain
-  const [lastActs, setLastActs] = useState({}); // seat -> {kind, amt, ts} — floating action badges
-  const [potFly, setPotFly] = useState(null); // {ts, kind: "ante"|"sweep", idxs} — chips flying into the pot
+  const [lastActs, setLastActs] = useState({}); // seat -> {kind, amt, ts, deal, street} · action badges
+  // read by the snapshot diff, which must see what is ALREADY on a seat to
+  // refuse a downgrade · a ref, not the state, so the diff effect keeps its
+  // [snap] deps and cannot run against a render-stale map
+  const lastActsRef = useRef({});
+  useEffect(() => { lastActsRef.current = lastActs; }, [lastActs]);
+  const [foldFx, setFoldFx] = useState({}); // seat -> ts · the muck fling, owned by its own timer
+  const [leaving, setLeaving] = useState(false); // "get me out" · see startLeave()
+  const leaveTxRef = useRef(false);
+  const [potFly, setPotFly] = useState(null); // {ts, kind: "ante"|"sweep", idxs} · chips flying into the pot
   const [trn, setTrn] = useState(null); // tournament info+clock when this table is controlled
   const [movedTo, setMovedTo] = useState(null); // MTT rebalance: my seat is now at this table
   const [bustHidden, setBustHidden] = useState(false); // bust screen dismissed → observe
@@ -127,27 +302,125 @@ function LiveTable() {
   const sdTimerRef = useRef(null);
   const potFlyRef = useRef(null);
   const sdWinRef = useRef(null);
+  const boardsRef = useRef({}); // dealId -> last non-empty board (combo display survives the post-settle board clear)
   const holeRetryRef = useRef(null);
   const gotHolesRef = useRef({}); // dealId -> true once holes landed (retry-timer guard)
   const dealIdRef = useRef("0");
   const balSeqRef = useRef(0);
   const feltWrapRef = useRef(null);
+  // What the action bar MEANT when it last changed, and when that was. A click
+  // is only honoured once the player has had time to see the bar it landed on
+  // (see the guard in renderBar).
+  const barGuardRef = useRef({ turn: "", meaning: "", since: 0 });
+  const [wrapBox, setWrapBox] = useState(null); // feltwrap layout box (offset px · immune to the stage scale transform)
   const reducedMo = prefs.reduced || !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
   const [tableId, setTableId] = useState(SP.tableId); // switchable WITHOUT a page reload (LePoker-style)
   const [ctl, setCtl] = useState(undefined); // table controller: undefined = not resolved yet, zero = cash, else = tournament
   const ZERO_CTL = "0x0000000000000000000000000000000000000000";
-  const canvasRef = useRef(null);
-  const fieldRef = useRef(null);
 
-  useEffect(() => { localStorage.setItem("sp_theme", theme); }, [theme]);
+  useEffect(() => { try { localStorage.setItem("sp_theme", theme); } catch (e) {} }, [theme]);
 
-  // live snapshot poll — the table you're AT polls fast (served from the
-  // dealer's HTTP cache, cheap) so actions and reveals feel near-instant.
-  useEffect(() => SP.sdk.watch(tableId, setSnap, 900), [tableId]);
+  // WHERE THE ACTION BAR ENDS, THE HERO BEGINS.
+  // On a phone the bar is a different height depending on what it is asking:
+  // taller when it is your turn (slider + four buttons + the clock row),
+  // shorter while you are only pre-selecting. The hero zone used to clear it
+  // with a magic number, so one state clipped the player's own stack and the
+  // other floated the cards up over the pot. Publish the measured height and
+  // let CSS position against the truth.
+  //
+  // Deps are EMPTY on purpose. Keying this on the hand state read `snap` from
+  // the line above its own declaration — a temporal-dead-zone ReferenceError
+  // in the component body, which does not throw a red console line, it just
+  // stops the table from mounting at all (caught by the phone rig: a blank
+  // frame and the boot panel). The bar is found by polling and re-observed if
+  // React swaps it, so nothing has to be listed here.
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    let el = null, ro = null, max = 0;
+    // TWO numbers, because they answer different questions.
+    // --sp-barh is what the bar measures RIGHT NOW; the phone layout wants
+    // that, so the hero sits directly on top of whichever bar is showing.
+    // --sp-barmax is the tallest it has been at this table, clamped to a sane
+    // band. The desktop felt and the seat ring are drawn from THAT, because a
+    // bar that grows by 30px when it becomes your turn would otherwise resize
+    // the table under your hands twice a hand.
+    const write = () => {
+      if (!el) return;
+      // offsetHeight, NOT getBoundingClientRect(): the desktop stage is a fixed
+      // canvas under a CSS scale (mountScale), and a rect is measured AFTER the
+      // transform. On a short window (scale ~0.92) that under-reported the bar
+      // by ~14px, and since the number is then used as a LAYOUT length inside
+      // the same scaled canvas, the hero's plaque sat that much lower — which
+      // is exactly how far it crept back toward the buttons on the user's
+      // screen while a 1440x950 rig, scaling at ~1.0, saw nothing wrong.
+      const h = el.offsetHeight;
+      if (!h) return;
+      root.style.setProperty("--sp-barh", h + "px");
+      if (h > max) {
+        max = Math.min(Math.max(h, 140), 280);
+        root.style.setProperty("--sp-barmax", max + "px");
+        window.dispatchEvent(new Event("resize")); // the felt re-measures off it
+      }
+    };
+    const attach = () => {
+      const found = document.querySelector(".actionbar");
+      if (found === el) return write();
+      el = found;
+      if (ro) ro.disconnect();
+      if (!el) { root.style.removeProperty("--sp-barh"); root.style.removeProperty("--sp-barmax"); max = 0; ro = null; return; }
+      ro = new ResizeObserver(write);
+      ro.observe(el);
+      write();
+    };
+    attach();
+    const iv = setInterval(attach, 600);
+    return () => { clearInterval(iv); if (ro) ro.disconnect(); root.style.removeProperty("--sp-barh"); root.style.removeProperty("--sp-barmax"); };
+  }, []);
+
+  // live snapshot poll · the table you're AT polls fast (served from the
+  // dealer's HTTP cache, cheap — the bot also rebuilds that cache the moment
+  // it reveals a card, so 600ms here is the real reveal→pixels latency).
+  useEffect(() => SP.sdk.watch(tableId, setSnap, 600), [tableId]);
+
+  // Closing the TAB mid-hand is not the same as refreshing it. This hand's
+  // decryption secret lives in sessionStorage, which dies with the tab: without
+  // it the player cannot hand over their share, the hand stalls into an
+  // accusation, the rescue window expires, and the contract forfeits the chips
+  // they had already put in. That is the right answer to a ragequit and a cruel
+  // one to a mis-click, so warn while a hand is actually running. Leaving the
+  // page also stops answering for the OTHERS at the table, which is reason
+  // enough on its own. Between hands there is nothing to lose and no prompt.
+  useEffect(() => {
+    const on = (e) => {
+      if (!snap || !snap.hand.inProgress || snap.mySeat < 0) return;
+      const me = snap.seats[snap.mySeat];
+      if (!me || !me.occupied) return;
+      e.preventDefault();
+      e.returnValue = ""; // required by Chrome/Safari to show the dialog
+      return "";
+    };
+    window.addEventListener("beforeunload", on);
+    return () => window.removeEventListener("beforeunload", on);
+  }, [snap]);
+
+  // A community card opened locally by the zk agent arrives on its own event,
+  // not on a snapshot — without this the card would sit in memory until the
+  // next poll and the whole point (showing it before the chain does) is lost.
+  const [zkTick, setZkTick] = useState(0);
+  useEffect(() => {
+    const on = () => setZkTick((n) => n + 1);
+    window.addEventListener("shinypoker:zk-board", on);
+    window.addEventListener("shinypoker:zk-showdown", on); // opened hands, same deal
+    return () => {
+      window.removeEventListener("shinypoker:zk-board", on);
+      window.removeEventListener("shinypoker:zk-showdown", on);
+    };
+  }, []);
 
   // The controller decides the whole render mode (chip formatting, seats
-  // managed by a tournament vs open sit-down). Resolve it BEFORE first paint —
+  // managed by a tournament vs open sit-down). Resolve it BEFORE first paint -
   // tournament tables used to flash cash-table UI ("+ Sit" seats, wei-formatted
   // blinds) for a second until the slower tournament poll landed.
   useEffect(() => {
@@ -158,7 +431,7 @@ function LiveTable() {
     return () => { stop = true; };
   }, [tableId]);
 
-  // auto-restore an existing email (Privy) session — now and whenever Privy boots
+  // auto-restore an existing email (Privy) session · now and whenever Privy boots
   useEffect(() => {
     const restore = () => SP.sdk.tryRestorePrivy().then((a) => { if (a) { setAddr(a); setConnected(true); refreshBal(); } }).catch(() => {});
     restore();
@@ -167,7 +440,7 @@ function LiveTable() {
     return () => document.removeEventListener("shinyluck:auth-state", on);
   }, []);
 
-  // wallet balance refresh — sequence-guarded so a slow stale response can't
+  // wallet balance refresh · sequence-guarded so a slow stale response can't
   // overwrite a newer value (the header briefly "jumping" between balances)
   async function refreshBal() {
     if (!SP.sdk.address) return;
@@ -176,30 +449,55 @@ function LiveTable() {
   }
   useEffect(() => { if (connected) { refreshBal(); const id = setInterval(refreshBal, 4000); return () => clearInterval(id); } }, [connected]);
 
-  // LED grid background on the felt canvas (design motion engine)
-  useEffect(() => {
-    if (!canvasRef.current || !window.GridField) return;
-    if (fieldRef.current) fieldRef.current.destroy();
-    const cfg = {
-      a: { cell: 15, gap: 4, speed: 0.7, density: 0.5, accent: "#d9ab4a", maxAlpha: 0.55, minBright: 0.02, shape: "square" },
-      b: { cell: 17, gap: 6, speed: 0.55, density: 0.42, accent: "#d9ab4a", accent2: "#f2d78a", maxAlpha: 0.5, minBright: 0.015, shape: "dot" },
-      c: { cell: 13, gap: 3, speed: 0.6, density: 0.45, accent: "#d9ab4a", maxAlpha: 0.42, minBright: 0.02, shape: "square" },
-    }[theme];
-    const f = new GridField(canvasRef.current, cfg);
-    fieldRef.current = f; f.start();
-    // GridField sizes its buffer at construction, before the scaler finishes
-    // layout — re-measure a couple of times so the felt grid fills the oval.
-    const r1 = setTimeout(() => f._resize(), 160);
-    const r2 = setTimeout(() => f._resize(), 650);
-    return () => { clearTimeout(r1); clearTimeout(r2); f.destroy(); };
-    // Re-run once the first snapshot arrives — until then the felt canvas isn't
-    // mounted (loading state), so the grid had nothing to attach to.
-  }, [theme, snap ? 1 : 0]);
+  // The felt used to run a GridField LED canvas here (plus a scramble wave on
+  // each deal and a flash on wins) — a steady per-frame CPU/GPU cost competing
+  // with the zk crypto during hands, and the "waves" kept reappearing with
+  // every theme change. Gone entirely: the page-wide sp-dust sparks
+  // (poker-dust.js, same as the casino menu) are the only ambient motion now.
 
-  // fetch my hole cards once per deal — failed attempts retry on a FAST local
+  // Measure the feltwrap in LAYOUT px (offset*, unaffected by the stage scale
+  // transform) and feed the felt shape + seat ring from it. The wrap mounts
+  // together with the main tree, so re-attach once loading finishes; resizes
+  // (window, bigui toggle) come in through the ResizeObserver.
+  useEffect(() => {
+    const el = feltWrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let last = "";
+    const measure = () => {
+      const w = el.offsetWidth, h = el.offsetHeight;
+      if (!w || !h) return;
+      const g = feltGeom(w, h);
+      el.style.setProperty("--sp-feltside", g.side + "px");
+      el.style.setProperty("--sp-feltr", g.r + "px");
+      setWrapBox((p) => (p && p.w === w && p.h === h && last === g.side + ":" + g.r ? p : { w, h }));
+      last = g.side + ":" + g.r;
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    // the wrap does NOT change size when the action bar does, but the felt
+    // inside it does — the bar's observer fires a resize so this runs again
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, [!snap || ctl === undefined]);
+
+  // fetch my hole cards once per deal · failed attempts retry on a FAST local
   // timer (dealer is still locking entropy) instead of waiting for the next
   // snapshot poll, so the cards land the moment they're available
   useEffect(() => { if (snap) dealIdRef.current = String(snap.hand.dealId); }, [snap]);
+
+  // The bet slider is a per-DECISION control, not a table setting. It used to
+  // be one useState for the whole session, so an amount dragged on the flop
+  // came back pre-selected on the turn, on the next hand, and every hand after
+  // that — the raise button reads "Raise to" with a figure beside it, and the
+  // figure was one the player chose in a spot that no longer exists. Clearing
+  // it on every new turn hands the decision back to the legal minimum, which
+  // is what an untouched slider is supposed to mean.
+  useEffect(() => {
+    if (!snap) return;
+    const h = snap.hand;
+    const key = `${h.dealId}:${h.street}:${h.actingSeat}:${h.actingDeadline}`;
+    if (betTurnRef.current !== key) { betTurnRef.current = key; setBetValue(0); }
+  }, [snap]);
   useEffect(() => {
     if (!snap || !connected) return;
     const h = snap.hand;
@@ -215,7 +513,7 @@ function LiveTable() {
     fetchingRef.current = true;
     try {
       // Sign once per hand; reuse the signature on retries while the dealer
-      // finishes locking entropy — so only ONE wallet popup per hand.
+      // finishes locking entropy · so only ONE wallet popup per hand.
       if (!sigCacheRef.current[key]) sigCacheRef.current[key] = await SP.sdk.signHoles(tableId, dealId);
       const r = await SP.sdk.myHoleCards(tableId, dealId, sigCacheRef.current[key]);
       gotHolesRef.current[key] = true;
@@ -266,14 +564,14 @@ function LiveTable() {
       if (!localStorage.getItem("sp_hint_dealer")) {
         localStorage.setItem("sp_hint_dealer", "1");
         flash(window.__SPLANG === "ru"
-          ? "Метка D — баттон (дилер): от него идёт раздача и порядок ходов, каждую руку он сдвигается. SB/BB — малый и большой блайнды."
-          : "The D chip marks the dealer button — dealing & betting order rotate from it each hand. SB/BB are the small & big blinds.", 9000);
+          ? "Метка D · баттон (дилер): от него идёт раздача и порядок ходов, каждую руку он сдвигается. SB/BB · малый и большой блайнды."
+          : "The D chip marks the dealer button · dealing & betting order rotate from it each hand. SB/BB are the small & big blinds.", 9000);
       }
     } catch {}
   }, [snap && snap.hand.inProgress]);
 
   // tournament HUD: if this table is controlled by a tournament, poll its state
-  // (clock + my registration/seat + finishing places — feeds the HUD, the MTT
+  // (clock + my registration/seat + finishing places · feeds the HUD, the MTT
   // table switcher, the move-redirect, the bust screen and the final standings)
   useEffect(() => {
     if (!SP.sdk.hasTournaments()) return;
@@ -338,7 +636,7 @@ function LiveTable() {
   // MTT rebalance: the tournament moved my seat to another table → tell me and
   // take me there (the table in ?t=N is fixed at page load, so without this the
   // player is stranded watching a table they no longer sit at). Auto-follow
-  // ONLY if I actually held a seat HERE this session — a registered player
+  // ONLY if I actually held a seat HERE this session · a registered player
   // spying on a sibling table via the switcher must not get yanked away.
   const wasSeatedHereRef = useRef(false);
   useEffect(() => { if (snap && snap.mySeat >= 0) wasSeatedHereRef.current = true; }, [snap && snap.mySeat]);
@@ -348,7 +646,7 @@ function LiveTable() {
       moveRef.current = true;
       setMovedTo(trn.myTable);
       const dest = trn.myTable;
-      setTimeout(() => switchTable(dest), 2600); // in-place switch — no reload
+      setTimeout(() => switchTable(dest), 2600); // in-place switch · no reload
     }
   }, [trn]);
 
@@ -357,16 +655,22 @@ function LiveTable() {
     if (!snap) return;
     const prev = prevRef.current;
     const h = snap.hand;
-    const boardLen = snap.board.length;
+    // Count the cards actually ON SCREEN, which includes any this tab opened
+    // itself ahead of the chain — otherwise the flip animation would fire late,
+    // when the on-chain reveal caught up to a card the player already saw.
+    let boardLen = snap.board.length;
+    {
+      const e = window.__SPZK && window.__SPZK.board ? window.__SPZK.board[String(h.dealId)] : null;
+      if (e) while (e[boardLen] !== undefined) boardLen++;
+    }
     if (h.inProgress && h.handId !== prev.handId && h.handId > 0) {
-      if (fieldRef.current && !reducedMo) fieldRef.current.scramble(900);
       setAnim((a) => ({ ...a, dealing: !reducedMo, flipFrom: 99, winnerSeat: -1 }));
       clearTimeout(dealTimerRef.current);
       dealTimerRef.current = setTimeout(() => setAnim((a) => ({ ...a, dealing: false })), prefs.turbo ? 600 : 1300);
       setPreAct(null); // pre-actions never carry across hands
       setSdWin(null); clearTimeout(sdTimerRef.current);
-      setLastActs({}); // action badges never carry across hands
-      // antes are swept straight into the pot on-chain (no bet spot) — show
+      setLastActs({}); lastActsRef.current = {}; // action badges never carry across hands
+      // antes are swept straight into the pot on-chain (no bet spot) · show
       // everyone's chips flying to the middle so posting is visible to all
       const hasAnte = trn ? Number(trn.curAnte || 0) > 0 : (snap.cfg.ante || 0n) > 0n;
       if (hasAnte && !reducedMo) {
@@ -387,32 +691,36 @@ function LiveTable() {
       }
     }
     // last-action badges: diff this snapshot against the previous one to see
-    // WHO just did WHAT (fold/check/call/bet/raise/all-in) — the chain has no
+    // WHO just did WHAT (fold/check/call/bet/raise/all-in) · the chain has no
     // push feed, so the poll delta is the source of truth
     if (h.inProgress && prev.sh) {
-      const sameHand = h.handId === prev.handId;
-      const sameStreet = sameHand && h.street === prev.street;
-      const acts = {};
-      for (const s of snap.seats) {
-        if (s.empty) continue;
-        const p = prev.sh[s.index];
-        if (!p) continue;
-        if (sameHand && s.folded && !p.folded) acts[s.index] = { kind: "fold", ts: Date.now() };
-        else if (sameHand && s.allIn && !p.allIn) acts[s.index] = { kind: "allin", ts: Date.now() };
-        else if (sameStreet && s.committedStreet > p.cs)
-          acts[s.index] = { kind: prev.curBet === 0n ? "bet" : (s.committedStreet > prev.curBet ? "raise" : "call"), amt: NV(s.committedStreet), ts: Date.now() };
-        else if (sameStreet && prev.actingSeat === s.index && h.actingSeat !== s.index && s.committedStreet === p.cs && !s.folded && !s.allIn && s.inHand)
-          acts[s.index] = { kind: "check", ts: Date.now() };
-      }
+      // the diff itself is pure and lives at module scope (actionDiff), because
+      // it has to be testable against snapshot sequences a live table only
+      // produces by accident — torn reads above all
+      const acts = actionDiff(prev, snap, lastActsRef.current, Date.now());
       if (Object.keys(acts).length) setLastActs((m) => ({ ...m, ...acts }));
+      // THE MUCK.
+      // Cards being flung toward the pot is how a table says "that player is
+      // out of this hand" without anyone reading anything. It existed, but it
+      // was gated on `nowMs - fold.ts < 1400` and `nowMs` only ticks once a
+      // second — so whether you saw it depended on where the fold landed
+      // inside that second, and often it never rendered at all. Its own timer
+      // now owns it, and the hero gets one too (folding your own hand used to
+      // just delete the cards).
+      const justFolded = Object.keys(acts).filter((i) => acts[i].kind === "fold").map(Number);
+      if (justFolded.length && !reducedMo) {
+        setFoldFx((f) => { const n = { ...f }; for (const i of justFolded) n[i] = Date.now(); return n; });
+        setTimeout(() => setFoldFx((f) => {
+          const n = { ...f }; for (const i of justFolded) delete n[i]; return n;
+        }), 760);
+      }
     }
     if (boardLen > prev.boardLen) setAnim((a) => ({ ...a, flipFrom: prev.boardLen }));
     if (!h.inProgress && prev.inProgress) {
       let winner = -1, best = 0n;
       for (const s of snap.seats) { const d = s.stack - (prev.stacks[s.index] || 0n); if (d > best) { best = d; winner = s.index; } }
-      if (fieldRef.current) fieldRef.current.flash();
       // EVERY client gets the winner + amount (banner). Only the chip-flight
-      // motion itself respects reduced-motion — before, that flag silently
+      // motion itself respects reduced-motion · before, that flag silently
       // swallowed the whole payout announcement.
       if (winner >= 0) {
         setAnim((a) => ({ ...a, winnerSeat: winner, won: NV(best) }));
@@ -428,54 +736,127 @@ function LiveTable() {
     const stacks = {}, sh = {};
     snap.seats.forEach((s) => { stacks[s.index] = s.stack; if (!s.empty) sh[s.index] = { cs: s.committedStreet, folded: s.folded, allIn: s.allIn }; });
     prevRef.current = { handId: h.handId, boardLen, inProgress: h.inProgress, street: h.street, curBet: h.currentBet, actingSeat: h.actingSeat, stacks, sh };
-  }, [snap]);
+  }, [snap, zkTick]); // zkTick: a locally-opened board card is a transition too
 
-  // at showdown, fetch opponents' revealed hole cards (public once the seed is revealed)
+  // At showdown, fetch opponents' revealed hole cards (public once every share
+  // is in). Two things this has to survive, both of which cost us a whole
+  // tournament's worth of showdowns:
+  //   1. The cards only become readable when the dealer's markShowdownReady
+  //      lands — one of the LAST transactions before the settle — so the first
+  //      few attempts legitimately come back "not ready".
+  //   2. A slow client can still be fetching when the hand ends. Keying the
+  //      fetch off the LIVE hand meant that once the pot moved, the request was
+  //      abandoned and the seats never opened at all.
+  // So the target deal (and who was in it — `inHand` is cleared by the settle)
+  // is remembered and retried for a few seconds past the end of the hand.
+  const sdTargetRef = useRef(null);
+  const sdFetchRef = useRef(false);
   useEffect(() => {
     if (!snap || !SP.sdk.dealerRead) return;
     const h = snap.hand;
-    if (!h.inProgress || h.street !== ST.SHOWDOWN) return;
-    const key = String(h.dealId);
-    if (reveals[key]) return;
+    if (h.inProgress && h.street === ST.SHOWDOWN) {
+      const key = String(h.dealId);
+      if (!sdTargetRef.current || sdTargetRef.current.key !== key) {
+        sdTargetRef.current = {
+          key, dealId: h.dealId,
+          seats: snap.seats.filter((s) => !s.empty && s.inHand).map((s) => s.index),
+          until: Date.now() + 15000,
+        };
+      }
+    }
+    const tgt = sdTargetRef.current;
+    if (!tgt || sdFetchRef.current || reveals[tgt.key] || Date.now() > tgt.until) return;
+    sdFetchRef.current = true;
     (async () => {
       try {
-        if (!(await SP.sdk.dealerRead.isShowdownReady(h.dealId))) return;
+        if (!(await SP.sdk.dealerRead.isShowdownReady(tgt.dealId))) return;
         const out = {};
-        for (const s of snap.seats) { if (!s.empty && s.inHand) out[s.index] = await SP.sdk.revealedHole(h.dealId, s.index); }
-        setReveals((m) => ({ ...m, [key]: out }));
+        for (const i of tgt.seats) out[i] = await SP.sdk.revealedHole(tgt.dealId, i);
+        setReveals((m) => ({ ...m, [tgt.key]: out }));
       } catch {}
+      finally { sdFetchRef.current = false; }
     })();
   }, [snap]);
 
   // the instant reveals arrive at showdown, rank the hands CLIENT-side and
-  // announce the winner — on-chain settlement lands a few seconds later, and
+  // announce the winner · on-chain settlement lands a few seconds later, and
   // before this the table just sat silent with open cards
   useEffect(() => { sdWinRef.current = sdWin; }, [sdWin]);
   useEffect(() => {
     if (!snap) return;
     const h = snap.hand;
-    if (!h.inProgress || h.street !== ST.SHOWDOWN || snap.board.length < 5) return;
+    if (!h.inProgress || h.street !== ST.SHOWDOWN) return;
     const key = String(h.dealId);
-    const rv = reveals[key];
-    if (!rv || (sdWin && sdWin.dealId === key)) return;
+    // Same two sources as the felt: hands this tab opened from the relayed
+    // shares, and the chain's copy. Whichever is there first announces the
+    // winner — waiting for the chain is what left the table silent with the
+    // hand already decided.
+    const local = (window.__SPZK && window.__SPZK.theirs && window.__SPZK.theirs[key]) || null;
+    const rv = {};
+    if (local) for (const k of Object.keys(local)) rv[Number(k)] = local[k].cards;
+    // MY OWN HAND IS PART OF THE SHOWDOWN.
+    // `theirs` is, by name and by construction, the OPPONENTS' hands — the
+    // hero's cards never travel through the relay, they are fetched privately.
+    // Ranking `rv` alone therefore ranked the table with the hero missing from
+    // it and announced the best OPPONENT as the winner: a player holding a
+    // straight was told the pair across the table had won, and stayed told it
+    // for the two seconds the chain's own reveal took to arrive and silently
+    // correct the banner. Announcing the wrong winner of a real pot is the
+    // worst thing this screen can do, so the hero goes in with everyone else.
+    const mine = holes[key];
+    const meSeat = snap.mySeat;
+    if (mine && Array.isArray(mine.cards) && meSeat >= 0) {
+      const me = snap.seats[meSeat];
+      if (me && me.inHand && !me.folded) rv[meSeat] = mine.cards;
+    }
+    if (reveals[key]) for (const k of Object.keys(reveals[key])) rv[Number(k)] = reveals[key][k];
+    // the board may also be ahead of the snapshot (locally opened cards)
+    const bd = snap.board.slice();
+    const eb = (window.__SPZK && window.__SPZK.board) ? window.__SPZK.board[key] : null;
+    if (eb) for (let i = bd.length; i < 5 && eb[i] !== undefined; i++) bd.push(eb[i]);
+    if (bd.length < 5 || !Object.keys(rv).length || (sdWin && sdWin.dealId === key)) return;
+    // A VERDICT OVER A PARTIAL TABLE IS A GUESS.
+    // Hands arrive one at a time — the hero's are already in hand, each
+    // opponent's lands as its shares are relayed — and ranking whoever has
+    // shown up so far crowns the wrong player for as long as it takes the rest
+    // to appear. Both directions of that were real: with the hero missing, the
+    // best opponent was announced over a straight; with only the hero present,
+    // the hero "won" against nobody. So wait until every seat still in the hand
+    // has its cards, and if one never comes, say nothing and let the chain's
+    // own settle announce it a beat later.
+    const liveSeats = snap.seats.filter((s) => !s.empty && s.inHand && !s.folded).map((s) => s.index);
+    if (!liveSeats.length || liveSeats.some((i) => !rv[i])) return;
     let seat = -1, best = -1, tie = false;
     for (const k of Object.keys(rv)) {
-      const ev = SP.handEval(rv[k].concat(snap.board));
+      const ev = SP.handEval(rv[k].concat(bd));
       if (!ev) continue;
       if (ev.score > best) { best = ev.score; seat = Number(k); tie = false; }
       else if (ev.score === best) tie = true;
     }
     if (seat < 0) return;
-    setSdWin({ dealId: key, seat, tie, comboEn: SP.handName(rv[seat].concat(snap.board)) });
+    setSdWin({ dealId: key, seat, tie, comboEn: SP.handName(rv[seat].concat(bd)) });
     if (seat === snap.mySeat) sfx("win", prefs.sound);
-  }, [snap, reveals]);
+    // `holes`: my own cards can land AFTER the showdown opens (the private
+    // fetch retries), and the verdict must be recomputed when they do.
+  }, [snap, reveals, zkTick, holes]); // zkTick: a locally opened hand decides the winner too
 
   function flash(msg, ms = 3000) { setToast(msg); setTimeout(() => setToast(null), ms); }
   async function tx(label, fn) {
+    // the clicked button owns the spinner until this settles
+    const done = SPPress.claim();
     setBusy(true);
-    try { await fn(); flash(label + " ✓"); await refreshBal(); return true; }
-    catch (e) { flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 80), 5000); console.error(e); return false; }
-    finally { setBusy(false); }
+    try {
+      await fn();
+      // NO SUCCESS TOAST. Every one of these actions already shows its own
+      // result: the badge on your seat, the seat you now occupy, the stack
+      // that grew, the lobby you land in. A tick floating over the felt after
+      // each of them was the most-seen and least-useful thing on the screen.
+      // Failures still speak — those are the ones you cannot see.
+      await refreshBal();
+      return true;
+    }
+    catch (e) { flash(label + " ✗ " + SP.pokerError(e), 5000); console.error(e); return false; }
+    finally { setBusy(false); done(); }
   }
 
   // optimistic action bar: cleared as soon as the chain hands the turn onward
@@ -488,15 +869,15 @@ function LiveTable() {
 
   async function connect() {
     try {
-      const a = await SP.sdk.connect(); setAddr(a); setConnected(true); refreshBal(); flash("Connected ✓");
-      // brand-new email wallets start empty — guide funding so they can play
+      const a = await SP.sdk.connect(); setAddr(a); setConnected(true); refreshBal();
+      // brand-new email wallets start empty · guide funding so they can play
       try { if ((await SP.sdk.walletBalance()) < SP.parseEther("0.02")) setModal({ type: "fund" }); } catch {}
     }
     catch (e) { if (e && e.message !== "cancelled") flash(e.message || "connect failed", 5000); }
   }
   const act = async (action, amount = 0) => {
     sfx("chip", prefs.sound);
-    // optimistic: swap the buttons for a "sent" strip immediately — the tx is
+    // optimistic: swap the buttons for a "sent" strip immediately · the tx is
     // headless and Somnia confirms fast, so waiting on the snapshot felt laggy
     if (snap && snap.hand.inProgress) setPendingAct({ dealId: String(snap.hand.dealId), street: snap.hand.street });
     const ok = await tx(["Fold", "Check", "Call", "Bet", "Raise", "All-in"][action], () => SP.sdk.act(tableId, action, amount, !!trn));
@@ -504,18 +885,71 @@ function LiveTable() {
     return ok;
   };
 
-  /// LePoker-style: move to another table of the event IN PLACE — no page
+  /// LEAVING HAS TO BE ONE DECISION, NOT A RACE.
+  /// The contract will not let you stand up while you are in a hand (it would
+  /// erase the chips that hand has already committed), and pre-deal starts the
+  /// next one a second or two after the pot moves — so a player pressing Leave
+  /// between hands kept missing the window and the table simply never let them
+  /// out. The honest way out was closing the tab, which is worse for everyone:
+  /// the seat then squats until the dealer's idle sweep reclaims it.
+  ///
+  /// So Leave now states an INTENTION and the client carries it out:
+  ///   1. sit out at once — whatever else happens, no new hand deals you in;
+  ///   2. fold the moment it is your turn, so the hand you are in ends for you;
+  ///   3. stand up as soon as the contract allows it, and go back to the lobby.
+  /// Not in a hand? Then it is a single transaction and you are gone.
+  async function startLeave() {
+    if (trn) return; // tournament seats belong to the tournament
+    const me = seats[mySeat];
+    const inHandNow = hand.inProgress && me && (me.inHand || me.folded || me.committedStreet > 0n);
+    if (!inHandNow) {
+      const ok = await tx("Leave", () => SP.sdk.leave(tableId));
+      if (ok) location.href = "lobby";
+      return;
+    }
+    setLeaving(true);
+    flash(SPT("Leaving · you'll be folded and stood up when this hand ends"), 5000);
+    if (me && !me.sittingOut) await tx("Sit out", () => SP.sdk.sitOut(tableId, true));
+  }
+  function cancelLeave() {
+    setLeaving(false);
+    leaveTxRef.current = false;
+    flash(SPT("Staying at the table"), 2500);
+  }
+  // …and the part that actually carries it out, on every snapshot.
+  useEffect(() => {
+    if (!leaving || !snap || snap.mySeat < 0 || trn) return;
+    const h = snap.hand, me = snap.seats[snap.mySeat];
+    if (!me) return;
+    const stillIn = h.inProgress && (me.inHand || me.folded || me.committedStreet > 0n);
+    if (stillIn) {
+      // fold as soon as the turn is ours · nothing else can end our part of it
+      if (h.inProgress && h.actingSeat === snap.mySeat && h.street <= ST.RIVER && !busy && !leaveTxRef.current) {
+        leaveTxRef.current = true;
+        act(A.FOLD).finally(() => { leaveTxRef.current = false; });
+      }
+      return;
+    }
+    if (leaveTxRef.current || busy) return;
+    leaveTxRef.current = true;
+    tx("Leave", () => SP.sdk.leave(tableId))
+      .then((ok) => { if (ok) location.href = "lobby"; else leaveTxRef.current = false; })
+      .catch(() => { leaveTxRef.current = false; });
+  }, [snap, leaving]);
+
+  /// LePoker-style: move to another table of the event IN PLACE · no page
   /// reload. Resets every per-table piece of state; the pollers re-key off
   /// tableId; the URL stays shareable via replaceState.
   function switchTable(tid) {
     if (tid === tableId) return;
     setSnap(null); setCtl(undefined);
     setHoles({}); setReveals({}); setSdWin(null); setPendingAct(null);
-    setLastActs({}); setPotFly(null); setPreAct(null); setBetValue(0);
+    setLastActs({}); lastActsRef.current = {}; setPotFly(null); setPreAct(null); setBetValue(0);
     setAnim({ dealing: false, flipFrom: 99, winnerSeat: -1, won: 0 });
     setMovedTo(null); setModal(null);
     moveRef.current = false; wasSeatedHereRef.current = false;
     gotHolesRef.current = {};
+    boardsRef.current = {};
     prevRef.current = { handId: 0, boardLen: 0, inProgress: false, stacks: {} };
     [dealTimerRef, winTimerRef, sdTimerRef, potFlyRef, holeRetryRef].forEach((r) => clearTimeout(r.current));
     try { history.replaceState(null, "", "table?t=" + tid); } catch {}
@@ -526,14 +960,94 @@ function LiveTable() {
 
   const { cfg, hand, seats, mySeat } = snap;
   const maxSeats = cfg.maxSeats;
-  const board = snap.board.map(SP.intToCardStr);
   const dealKey = String(hand.dealId);
-  const myHoleObj = hand.inProgress ? holes[dealKey] : null;
+  // freeze the last non-empty board per deal: after settle the live board
+  // empties while revealed cards + the winner banner are still on screen -
+  // recomputing combos against an empty board briefly showed nonsense
+  // ("High Card" right after "Two Pair" won)
+  if (snap.board.length) boardsRef.current = { [dealKey]: snap.board };
+  const sdBoard = snap.board.length ? snap.board : (boardsRef.current[dealKey] || snap.board);
+  // THE REVEAL HAS TO OUTLIVE THE SETTLE. `hand.inProgress` goes false the
+  // instant the pot is awarded, and every open card was gated on it — so the
+  // showdown was wiped at exactly the moment the winner banner appeared, and a
+  // hand ended with an empty felt and money moving for no visible reason. The
+  // banner itself is already held through the settle beat (sdWin, 6s / winner
+  // glow, 3.2s) and the board is frozen above for the same reason; the cards
+  // now ride that same beat. A new hand resets both, so nothing leaks forward.
+  const settleHold = anim.winnerSeat >= 0 || !!(sdWin && sdWin.dealId === dealKey);
+  // Opened hands, from whichever source got there first. This tab decrypts them
+  // from the relayed shares the moment the showdown starts (zk-agent), and the
+  // chain's own copy lands a beat later; both are checked against the same
+  // on-chain ciphertext commitments, so either is authoritative. Merging is what
+  // stops a showdown from depending on a per-seat chain read that can simply
+  // fail — which is how a hand used to end with no cards and no winner at all.
+  const sdCards = (() => {
+    const local = (window.__SPZK && window.__SPZK.theirs && window.__SPZK.theirs[dealKey]) || null;
+    const chain = reveals[dealKey] || null;
+    if (!local && !chain) return null;
+    const okc = (c) => Array.isArray(c) && c.length === 2 && c.every((n) => Number.isInteger(n) && n >= 0 && n < 52);
+    const out = {};
+    if (local) for (const k of Object.keys(local)) { if (okc(local[k].cards)) out[Number(k)] = local[k].cards; }
+    // …and the hero, for the same reason as the verdict above: this map is what
+    // `winUsed` reads to work out WHICH five cards won, so without it the
+    // highlight had nothing of the hero's to highlight.
+    const meObj = holes[dealKey];
+    if (meObj && okc(meObj.cards) && snap.mySeat >= 0) {
+      const me = snap.seats[snap.mySeat];
+      if (me && me.inHand && !me.folded) out[snap.mySeat] = meObj.cards;
+    }
+    if (chain) for (const k of Object.keys(chain)) { if (okc(chain[k])) out[Number(k)] = chain[k]; }
+    return Object.keys(out).length ? out : null;
+  })();
+  const sdHold = settleHold && !!sdCards;
+  // WHO WON — one answer, computed once, used by every part of the screen.
+  // It used to be re-derived inline in four places and only ONE of them checked
+  // that the verdict belonged to the hand on screen, so a stale winner from the
+  // previous hand could keep a seat lit. The deal check is part of the answer.
+  const winSeat = anim.winnerSeat >= 0 ? anim.winnerSeat
+    : (sdWin && sdWin.dealId === dealKey ? sdWin.seat : -1);
+  const winAmt = anim.winnerSeat >= 0 && anim.won > 0
+    ? (CHIPS ? fmtChips(anim.won) : fmtMoney(anim.won)) : null;
+  // the winning combination's exact five cards · the UI highlights them and
+  // dims everything else (board cards and winner holes that play no part)
+  const winUsed = (() => {
+    if (winSeat < 0 || !sdCards || !sdCards[winSeat]) return null;
+    const ev = SP.handEval(sdCards[winSeat].concat(sdBoard));
+    return ev && ev.used ? { seat: winSeat, set: new Set(ev.used) } : null;
+  })();
+  const myHoleObj = hand.inProgress || settleHold ? holes[dealKey] : null;
   const myHole = myHoleObj ? myHoleObj.cardsStr : null;
-  // combo label only from the flop — preflop "High Card" is pure noise for a
+  // How many board cards this street owes, and whether any are still in flight.
+  // The cards are decrypted co-operatively by the players and proven on-chain,
+  // so there is a real (small) window where the street has opened and the card
+  // has not landed. Naming that window is the difference between "the site is
+  // broken" and "it is dealing".
+  const boardDue = hand.inProgress ? (hand.street === ST.FLOP ? 3 : hand.street === ST.TURN ? 4 : hand.street >= ST.RIVER ? 5 : 0) : 0;
+  // Cards this tab already opened itself from the relayed shares (zk-agent.js),
+  // ahead of the on-chain reveal. Each was checked against the on-chain
+  // ciphertext commitment and every share against its sender's key, so this is
+  // the same card the chain is about to publish — just ~5 blocks sooner. The
+  // chain's copy always wins once it lands.
+  const early = (hand.inProgress && window.__SPZK && window.__SPZK.board) ? (window.__SPZK.board[dealKey] || null) : null;
+  const shownBoard = snap.board.slice();
+  if (early) {
+    for (let i = shownBoard.length; i < boardDue; i++) {
+      if (early[i] === undefined) break; // contiguous only — never a gap in the row
+      shownBoard.push(early[i]);
+    }
+  }
+  // The LIVE board empties the instant the pot is awarded — so the winner used
+  // to be announced over a bare felt, with the hand that won it already gone.
+  // The frozen copy (sdBoard) rides the settle beat, like the open cards do.
+  if (!shownBoard.length && settleHold && sdBoard.length) shownBoard.push(...sdBoard);
+  const revealing = boardDue > shownBoard.length;
+  const board = shownBoard.map(SP.intToCardStr);
+  // combo label only from the flop · preflop "High Card" is pure noise for a
   // beginner ("why does it say ten-high before any cards are open?")
-  const bestHand = myHoleObj && snap.board.length >= 3 ? SP.handName(myHoleObj.cards.concat(snap.board)) : "";
-  const heroEval = bestHand ? SP.handEval(myHoleObj.cards.concat(snap.board)) : null;
+  // reads shownBoard, so the combo label appears together with the cards
+  // instead of a beat later when the chain catches up
+  const bestHand = myHoleObj && shownBoard.length >= 3 ? SP.handName(myHoleObj.cards.concat(shownBoard)) : "";
+  const heroEval = bestHand ? SP.handEval(myHoleObj.cards.concat(shownBoard)) : null;
 
   // Blind-position markers (like the D button): HU → the button IS the small
   // blind; multiway → SB/BB are the next in-hand seats clockwise of the button.
@@ -557,14 +1071,18 @@ function LiveTable() {
   };
   // rotate so my seat sits at the bottom
   CHIPS = !!trn || ctl !== ZERO_CTL; // controller ≠ zero → chip units, even before the trn poll lands
-  const positions = POS[maxSeats] || (maxSeats < 6 ? POS[6] : POS[9]);
+  const mobileUI = window.innerWidth <= 760; // nowMs re-render keeps this fresh across rotations
+  const POSSET = mobileUI ? POS_M : POS;
+  const positions = (!mobileUI && wrapBox && seatRing(maxSeats, wrapBox.w, wrapBox.h)) // desktop: seats ON the measured rail
+    || POSSET[maxSeats] || (maxSeats < 6 ? POSSET[6] : POSSET[9]);
   const view = (i) => (mySeat >= 0 ? (i - mySeat + maxSeats) % maxSeats : i % maxSeats);
   const seatPos = (i) => positions[view(i)] || positions[0];
   const now = Math.floor(nowMs / 1000);
   const showdown = hand.inProgress && hand.street === ST.SHOWDOWN;
+  const showdownView = showdown || sdHold; // reveals stay up through the settle
 
   // live big blind: tournament levels raise it mid-game while the table cfg is
-  // cached — bb-counts must follow the CURRENT level, not the opening one
+  // cached · bb-counts must follow the CURRENT level, not the opening one
   const curBB = trn ? Number(trn.curBb) : NV(cfg.bigBlind);
   const bbOf = (stack) => (curBB > 0 ? Math.round((NV(stack) / curBB) * 10) / 10 : null);
 
@@ -582,24 +1100,30 @@ function LiveTable() {
   const iWonTrn = !!(trn && trn.res && trn.res.winner && myAddrLc && trn.res.winner.player.toLowerCase() === myAddrLc);
   const ordinal = (n) => { const s = ["th", "st", "nd", "rd"], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
   const medal = (p) => (p === 1 ? "🥇" : p === 2 ? "🥈" : p === 3 ? "🥉" : null);
-  // dismissals persist per tournament for the tab session — the screens must
+  // dismissals persist per tournament for the tab session · the screens must
   // not re-pop on every sibling table the player opens afterwards
   const seen = (k) => { try { return trn && sessionStorage.getItem(`sp_${k}seen_${trn.id}`) === "1"; } catch { return false; } };
   const markSeen = (k) => { try { if (trn) sessionStorage.setItem(`sp_${k}seen_${trn.id}`, "1"); } catch {} };
 
-  // floating action badges: fold sticks for the whole hand, the rest fade after ~3s
+  // WHAT EVERYONE DID, FOR AS LONG AS IT MATTERS.
+  // The badges used to evaporate after three seconds, which is shorter than a
+  // single decision: by the time the action came back round to you, the felt
+  // had forgotten that the player to your right had raised. A hand is the
+  // natural life of this information — it is exactly what you are reading the
+  // table for — so the last action stays on its seat until the next hand
+  // begins, the way a live dealer leaves the bet in front of you.
   const ACT_LBL = { fold: "Fold", check: "Check", call: "Call", bet: "Bet", raise: "Raise", allin: "All-in" };
   const actFor = (idx) => {
     const a = lastActs[idx];
-    if (!a) return null;
-    if (a.kind === "fold") return hand.inProgress && seats[idx] && seats[idx].folded ? a : null;
-    return nowMs - a.ts < 3000 ? a : null;
+    if (!a || a.deal !== dealKey) return null; // never carry an action into the next hand
+    if (a.kind === "fold") return (hand.inProgress || settleHold) && seats[idx] && seats[idx].folded ? a : null;
+    return hand.inProgress || settleHold ? a : null;
   };
-  const actLabel = (a) => SPT(ACT_LBL[a.kind]) + (a.amt ? " " + (CHIPS ? a.amt : a.amt.toFixed(2)) : "");
+  const actLabel = (a) => SPT(ACT_LBL[a.kind]) + (a.amt ? " " + (CHIPS ? fmtChips(a.amt) : fmtMoney(a.amt)) : "");
 
   return (
     <div className="scaler" id="scaler">
-      <div className="app" data-dir={theme} data-deck={deck} data-anim={reducedMo ? "off" : "on"} data-turbo={prefs.turbo ? "1" : "0"}>
+      <div className="app" data-dir={theme} data-deck={deck} data-anim={reducedMo ? "off" : "on"} data-turbo={prefs.turbo ? "1" : "0"} data-bigui={prefs.bigui ? "1" : "0"} data-rail={railOpen ? "1" : "0"} data-trn={trn ? "1" : "0"}>
         {/* top bar */}
         <header className="topbar">
           <div className="group">
@@ -613,117 +1137,146 @@ function LiveTable() {
             <button className="on"><span className="dot" />Poker</button>
           </div>
           <div className="sep" />
-          <div className="group">
-            <span className="metapill"><span className="k">NLHE</span><b>{maxSeats}-MAX</b></span>
-            <span className="metapill"><span className="k">{SPT("Blinds")}</span><b>{CHIPS ? `${fmtChips(NV(cfg.smallBlind))} / ${fmtChips(NV(cfg.bigBlind))}` : `${NV(cfg.smallBlind)} / ${NV(cfg.bigBlind)}`}</b></span>
-            <span className="metapill"><span className="k">{SPT("Hand")}</span><b>#{hand.handId}</b></span>
+          {/* Table identity, not three bordered chips. A real room names a table
+              by its stakes and says the format underneath; the old row set the
+              word BLINDS at the same weight as the numbers and boxed each of
+              them, so the eye had to parse three widgets to learn one thing. */}
+          {/* ONE header, not two. A tournament used to get a full-width strip
+              of its own under this line, and six of its eight facts were either
+              already on screen (the blinds, twice) or unchangeable and already
+              known before sitting down (prize, split, event number). What is
+              genuinely live — which level, how long it lasts, how many players
+              are left — costs a few words on the line that was already here.
+              The rest lives on the event page, one click away through the exit
+              button to its right.
+              The blinds MUST come from the tournament clock: the table config
+              is cached per table (poker-sdk getTable) and still holds the
+              opening level hours into an event — the strip was the only thing
+              on this screen telling the truth about them. */}
+          <div className="tableid">
+            <span className="stakes">
+              {CHIPS ? <ChipMark size={14} /> : <SomiCoin size={14} />}
+              <b className="tnum">{trn
+                ? `${fmtChips(Number(trn.curSb))} / ${fmtChips(Number(trn.curBb))}${Number(trn.curAnte || 0) ? ` + ${fmtChips(Number(trn.curAnte))}` : ""}`
+                : CHIPS ? `${fmtChips(NV(cfg.smallBlind))} / ${fmtChips(NV(cfg.bigBlind))}` : `${NV(cfg.smallBlind)} / ${NV(cfg.bigBlind)}`}</b>
+            </span>
+            <span className="sub">
+              {trn ? (() => {
+                const left = trn.nextAt ? Math.max(0, trn.nextAt - Math.floor(nowMs / 1000)) : null;
+                const clock = trn.status !== 1 ? SPT("finished")
+                  : left == null ? SPT("final level")
+                  : left > 0 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`
+                  : SPT("level up next hand");
+                return <React.Fragment>
+                  {SPT("Level")} <b className="tnum">{trn.level + 1}</b> · <span className={left != null && left > 0 && left <= 30 ? "hot" : ""}>{clock}</span>
+                  {" · "}<b className="tnum">{trn.remaining}</b>/{trn.registered} {SPT("left")}
+                </React.Fragment>;
+              })() : `NLHE · ${maxSeats}-max`}
+              {" · "}{SPT("Hand")} <span className="tnum">#{hand.handId}</span>
+            </span>
           </div>
-          <div className="spacer" />
-          {connected ? (
-            <>
-              <button className="metapill" style={{ cursor: "pointer" }} onClick={() => setModal({ type: "cashier" })}>
-                <span className="k">{SPT("Cashier")}</span><b>{bal.toFixed(2)}</b>
-              </button>
-              {mySeat >= 0 && sessionOn && (
-                <div className="session" title="Table session active — acting without a wallet popup">
-                  <span className="pulse" /><span className="lock">{ChromeIcons.lock}</span><span>session</span>
-                </div>
-              )}
-              <div className="wallet"><BraceLogo size={16} /><span className="bal tnum">{bal.toFixed(1)}</span><span className="net">{short(addr)}</span></div>
-            </>
-          ) : (
-            <button className="metapill" style={{ cursor: "pointer", color: "var(--accent-soft)", borderColor: "var(--accent-32)", background: "var(--accent-12)" }} onClick={connect}>{SPT("Connect Wallet")}</button>
+          {/* MTT: the one part of the old strip that was a control, not a
+              readout — you can watch another table. Kept, next to the identity
+              of the table you are at. */}
+          {trn && trn.tables && trn.tables.length > 1 && (
+            <div className="tabsw">
+              {trn.tables.map((tid, i) => (
+                <button key={tid} className={tid === tableId ? "on" : ""}
+                  title={tid === tableId ? null : SPT("Switch to this table")}
+                  onClick={() => switchTable(tid)}>
+                  {SPT("Table")} {i + 1}{trn.counts && trn.counts[tid] != null ? ` · ${trn.counts[tid]}` : ""}
+                </button>
+              ))}
+            </div>
           )}
-          {connected && mySeat >= 0 && (
-            <button className="iconbtn" title={seats[mySeat].sittingOut ? SPT("Sit in") : SPT("Sit out")} disabled={busy}
-              onClick={() => tx(seats[mySeat].sittingOut ? "Sit in" : "Sit out", () => SP.sdk.sitOut(tableId, !seats[mySeat].sittingOut))}>{ChromeIcons.pause}</button>
+          <div className="spacer" />
+          {/* No wallet chip / connect button here: the merged shell's header
+              owns balance, nickname, avatar and the cashier (profile drawer),
+              so duplicating them at the table was pure noise. */}
+          {/* Sitting OUT is a rare, deliberate act — stepping away for a few
+              hands. It used to live here as an unlabelled pause glyph whose
+              meaning flipped between "leave the action" and "rejoin it", one
+              seat away from the red Leave button: two irreversible things,
+              neither of them named. It now sits in Settings with its own words.
+              Coming BACK stays loud (the pulsing SIT IN on your own seat),
+              because that is the one a player needs to find in a hurry. */}
+          {/* Top up · cash only (a tournament stack cannot be bought). Between
+              hands, since the contract refuses while you are live in one. */}
+          {connected && mySeat >= 0 && !trn && (
+            <button className="topupbtn" disabled={busy}
+              title={SPT("Add chips to your stack")}
+              onClick={() => setModal({ type: "topup", stack: NV(seats[mySeat].stack) })}>
+              <span className="ic">{ChromeIcons.plus}</span>{SPT("Top up")}
+            </button>
           )}
           <button className="iconbtn" title={SPT("Settings")} onClick={() => setShowSettings((s) => !s)}>{ChromeIcons.gear}</button>
           {/* Tournament chips can't be cashed out mid-event (the contract
-              blocks leaveTable on controlled tables) — exit to the event page. */}
+              blocks leaveTable on controlled tables) · exit to the event page. */}
           {connected && mySeat >= 0 && (trn
             ? <button className="iconbtn leavebtn" title={SPT("Back to tournament")} disabled={busy}
                 onClick={() => (location.href = "tournament?id=" + trn.id)}>{ChromeIcons.leave}</button>
-            : <button className="iconbtn leavebtn" title={SPT("Leave table")} disabled={busy}
-                onClick={() => tx("Leave", () => SP.sdk.leave(tableId))}>{ChromeIcons.leave}</button>)}
+            : <button className={"iconbtn leavebtn" + (leaving ? " pending" : "")}
+                title={leaving ? SPT("Leaving after this hand · click to stay") : SPT("Leave table")}
+                onClick={() => (leaving ? cancelLeave() : startLeave())}>{ChromeIcons.leave}</button>)}
         </header>
 
         {showSettings && (
-          <SettingsPanel t={prefs} lang={lang} setLang={setLang}
+          <SettingsPanel t={prefs}
             set={setPref} dir={theme} setDir={setTheme} onClose={() => setShowSettings(false)}
-            session={{
-              active: sessionOn, busy,
-              label: SP.sdk.backend === "privy" ? "Email wallet · headless (no popups)" : null,
-              cap: mySeat >= 0 ? (CHIPS ? fmtChips(NV(seats[mySeat].stack)) : NV(seats[mySeat].stack).toFixed(2)) + " " + (CHIPS ? "chips" : SP.NETWORK.currency.symbol) : null,
-              onActivate: SP.sdk.backend === "injected" ? () => tx("Activate session", () => SP.sdk.activateSession()).then(() => setSessionOn(true)) : null,
-              onRevoke: SP.sdk.backend === "privy"
-                ? () => { SP.sdk.signOut().finally(() => location.reload()); }
-                : () => tx("Revoke session", () => SP.sdk.revokeSession()).then(() => setSessionOn(false)),
-            }} />
+            seat={connected && mySeat >= 0 ? {
+              sittingOut: seats[mySeat].sittingOut, busy,
+              toggle: () => tx(seats[mySeat].sittingOut ? "Sit in" : "Sit out", () => SP.sdk.sitOut(tableId, !seats[mySeat].sittingOut)),
+            } : null}
+            session={null} /* Privy-only → always headless; no session key to manage */ />
         )}
-
-        {trn && (() => {
-          const lsb = Number(trn.curSb), lbb = Number(trn.curBb), lante = Number(trn.curAnte || 0);
-          const nextIn = trn.nextAt ? Math.max(0, trn.nextAt - now) : null;
-          const mm = nextIn != null ? Math.floor(nextIn / 60) : 0, ss = nextIn != null ? String(nextIn % 60).padStart(2, "0") : "00";
-          const multi = trn.tables && trn.tables.length > 1;
-          return (
-            <div className="trn-hud">
-              <span className="tag">{SPT("TOURNAMENT")} · {multi ? "MTT" : "SNG"} #{trn.id}</span>
-              <span>{SPT("Level")} <b className="tnum">{trn.level + 1}</b></span>
-              <span>{SPT("Blinds")} <b className="tnum">{fmtChips(lsb)} / {fmtChips(lbb)}{lante ? ` (${SPT("ante")} ${fmtChips(lante)})` : ""}</b></span>
-              {trn.status === 1 && nextIn != null && nextIn > 0 && <span>{SPT("Next level")} <b className="tnum">{mm}:{ss}</b></span>}
-              {trn.status === 1 && nextIn != null && nextIn === 0 && <span className="tag">{SPT("Level up between hands")}</span>}
-              {trn.status === 1 && nextIn == null && <span className="tag">{SPT("Final level")}</span>}
-              <span>{SPT("Players")} <b className="tnum">{trn.remaining}/{trn.registered}</b></span>
-              <span>{SPT("Prize")} <b className="tnum">{Number(SP.fmt(trn.pool, 4))} {SP.NETWORK.currency.symbol}</b></span>
-              <span>{SPT("Split")} <b className="tnum">{trn.payoutBps.map((b) => b / 100 + "%").join(" / ")}</b></span>
-              {multi && (
-                <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-                  {trn.tables.map((tid, i) => (
-                    <button key={tid} onClick={() => switchTable(tid)}
-                      title={tid === tableId ? null : SPT("Switch to this table")}
-                      style={{ cursor: tid === tableId ? "default" : "pointer", fontFamily: "var(--mono)", fontSize: 11, padding: "3px 9px", borderRadius: 999,
-                        border: "1px solid " + (tid === tableId ? "var(--accent, #d9ab4a)" : "var(--line-2, #3a3a48)"),
-                        background: tid === tableId ? "var(--accent-12, rgba(217,171,74,.12))" : "transparent",
-                        color: tid === tableId ? "var(--accent-soft, #f2d78a)" : "var(--muted, #9a9aa8)" }}>
-                      {SPT("Table")} {i + 1}{trn.counts && trn.counts[tid] != null ? ` · ${trn.counts[tid]}` : ""}
-                    </button>
-                  ))}
-                </span>
-              )}
-              {trn.status === 2 && <span className="done">{SPT("FINISHED")}</span>}
-            </div>
-          );
-        })()}
 
         <div className="mainrow">
           <div className="feltwrap scanlines" ref={feltWrapRef}>
-            <canvas className="feltcanvas" ref={canvasRef} />
             <div className="feltglow" />
             <div className="felt">
+              {/* The house mark printed on the cloth, the way a real room does
+                  it. Barely there on purpose: it has to survive being covered
+                  by the board without ever competing with a card. */}
+              <div className="feltmark" aria-hidden="true" data-no-i18n>
+                <SparkMark className="fm-spark" />
+                <span className="fm-word">SHINYLUCK</span>
+              </div>
               <div className="center">
-                {anim.dealing && <span className="zkbadge shuffling"><span className="chk">{ChromeIcons.shield}</span>{SPT("shuffling — commitment sealed on-chain")}</span>}
-                <Board cards={board} deckMode={deck} flipFrom={anim.flipFrom} />
+                {anim.dealing && <span className="zkbadge shuffling"><span className="chk">{ChromeIcons.shield}</span>{SPT("shuffling · commitment sealed on-chain")}</span>}
+                <Board cards={board} deckMode={deck} flipFrom={anim.flipFrom} due={boardDue}
+                  dim={winUsed ? shownBoard.map((c) => !winUsed.set.has(c)) : null} />
+                {revealing && <div className="revealnote">{SPT("Revealing")}</div>}
+                {/* While the winner banner is up it already owns this strip of
+                    felt · printing "Next hand starting…" underneath it put two
+                    lines of text on the same pixels, which is what made the
+                    end of a hand look broken. */}
                 {hand.inProgress
                   ? <Pot pot={NV(hand.pot)} chips={CHIPS} />
+                  : (anim.winnerSeat >= 0 || sdWin) ? null
                   : <div className="pot"><div className="potmain"><span className="k">
                       {seats.filter((s) => !s.empty && !s.sittingOut).length >= 2
-                        ? SPT("Next hand starting…") /* players ARE here — we're waiting on the dealer, say so */
+                        ? SPT("Next hand starting…") /* players ARE here · we're waiting on the dealer, say so */
                         : SPT("Waiting for players")}
                     </span></div></div>}
               </div>
               {(anim.winnerSeat >= 0 || sdWin) && (() => {
                 const settled = anim.winnerSeat >= 0;
                 const wSeat = settled ? anim.winnerSeat : sdWin.seat;
-                const rvW = reveals[dealKey] && reveals[dealKey][wSeat];
-                const comboEn = rvW ? SP.handName(rvW.concat(snap.board)) : (sdWin && sdWin.seat === wSeat ? sdWin.comboEn : null);
-                const iWon = mySeat === wSeat;
+                const rvW = sdCards && sdCards[wSeat];
+                const comboEn = rvW ? SP.handName(rvW.concat(sdBoard)) : (sdWin && sdWin.seat === wSeat ? sdWin.comboEn : null);
+                // "You win" must mean YOU. `mySeat` is -1 for anyone not in a
+                // seat — a busted player watching the rest of the tournament, a
+                // spectator, someone who just walked up — and -1 === -1 made the
+                // banner congratulate every one of them on a pot they had no
+                // part in. The name is now always supplied when it wasn't us, so
+                // the banner can never fall through to "You win" by accident.
+                const iWon = mySeat >= 0 && mySeat === wSeat;
                 const played = mySeat >= 0 && !!holes[dealKey]; // I was dealt into this hand
+                const wName = seats[wSeat] && !seats[wSeat].empty ? nameOf(seats[wSeat].player) : `${SPT("Seat")} ${wSeat}`;
                 return <WinBanner
-                  won={settled ? (CHIPS ? fmtChips(anim.won) : anim.won.toFixed(2)) : null}
+                  won={settled ? (CHIPS ? fmtChips(anim.won) : fmtMoney(anim.won)) : null}
                   lose={played && !iWon}
-                  name={!iWon && seats[wSeat] ? nameOf(seats[wSeat].player) : null}
+                  name={iWon ? null : wName}
                   pending={!settled}
                   unit={CHIPS ? SPT("chips") : "SOMI"}
                   hand={comboEn ? SPTHand(comboEn) : ""} />;
@@ -734,13 +1287,13 @@ function LiveTable() {
             {/* opponents' face-down cards while in hand; on fold the backs get
                 one last render with the muck animation (slide to the pot).
                 At SHOWDOWN each seat's backs stay put until ITS revealed cards
-                arrive from the chain — the reveal tx can take seconds under
+                arrive from the chain · the reveal tx can take seconds under
                 load, and backs vanishing into nothing read as a glitch */}
             {hand.inProgress && seats.map((s) => {
               if (s.empty || s.index === mySeat) return null;
-              if (showdown && reveals[dealKey] && reveals[dealKey][s.index]) return null; // flipped up in the Seat
-              const fa = lastActs[s.index];
-              const mucking = !s.inHand && fa && fa.kind === "fold" && nowMs - fa.ts < 1400;
+              if (showdown && sdCards && sdCards[s.index]) return null; // flipped up in the Seat
+              // driven by foldFx's own 760ms timer, not by the 1s clock tick
+              const mucking = !s.inHand && !!foldFx[s.index];
               if (!s.inHand && !mucking) return null;
               const pos = seatPos(s.index);
               return <HoleBacks key={"b" + s.index} pos={pos} deal={anim.dealing && s.inHand && !showdown} delay={300 + s.index * 120}
@@ -763,7 +1316,7 @@ function LiveTable() {
               }
               const isMe = s.index === mySeat;
               const active = hand.inProgress && hand.actingSeat === s.index && hand.street <= ST.RIVER;
-              const rev = showdown && reveals[dealKey] && reveals[dealKey][s.index] ? reveals[dealKey][s.index].map(SP.intToCardStr) : null;
+              const rev = showdownView && sdCards && sdCards[s.index] ? sdCards[s.index].map(SP.intToCardStr) : null;
               return (
                 <Seat key={s.index}
                   player={{ hero: isMe, name: nameOf(s.player), avId: avOf(s.player).id, avImg: avOf(s.player).img }}
@@ -771,15 +1324,26 @@ function LiveTable() {
                     stack: NV(s.stack),
                     bbstacks: prefs.bbstacks, bbval: bbOf(s.stack),
                     ...(CHIPS ? { chips: NV(s.stack), bb: Math.max(0, Math.round(NV(s.stack) / Math.max(1, curBB))) } : {}),
-                    status: s.allIn ? SPT("all-in") : s.folded ? SPT("folded") : s.sittingOut ? SPT("sitting out") : (hand.inProgress && s.inHand ? "" : SPT("waiting")),
-                    folded: s.folded, allin: s.allIn, winner: s.index === anim.winnerSeat || (sdWin && sdWin.seat === s.index),
+                    // "WAITING" under a seat the instant a hand ends is both
+                    // untrue (nobody is waiting, the hand is over) and, sat
+                    // under a green glow, it reads as WINNING. The result beat
+                    // owns the seats; ordinary states resume with the next hand.
+                    status: settleHold ? "" : (s.allIn ? SPT("all-in") : s.folded ? SPT("folded") : s.sittingOut ? SPT("sitting out") : (hand.inProgress && s.inHand ? "" : SPT("waiting"))),
+                    folded: s.folded, allin: s.allIn,
+                    winner: winSeat >= 0 && s.index === winSeat,
+                    // Everyone who did NOT win steps back for the result beat,
+                    // so the winner is the only lit thing on the felt and does
+                    // not have to be identified by reading a line of text.
+                    dimmed: settleHold && winSeat >= 0 && s.index !== winSeat,
+                    won: winSeat >= 0 && s.index === winSeat ? winAmt : null,
                     timer: Number(cfg.actionTimeout),
-                    combo: rev ? SPTHand(SP.handName(reveals[dealKey][s.index].concat(snap.board))) : null,
-                    comboCat: rev ? (SP.handEval(reveals[dealKey][s.index].concat(snap.board)) || {}).cat : null,
+                    combo: rev ? SPTHand(SP.handName(sdCards[s.index].concat(sdBoard))) : null,
+                    comboCat: rev ? (SP.handEval(sdCards[s.index].concat(sdBoard)) || {}).cat : null,
                     lastAct: actFor(s.index) ? { kind: lastActs[s.index].kind, text: actLabel(lastActs[s.index]) } : null,
                   }}
                   pos={pos} active={active} marker={markerFor(s.index)} deckMode={deck}
-                  revealCards={rev} revealAnim={!reducedMo} />
+                  revealCards={rev} revealAnim={!reducedMo}
+                  revealDim={rev && winUsed && winUsed.seat === s.index ? sdCards[s.index].map((c) => !winUsed.set.has(c)) : null} />
               );
             })}
 
@@ -793,32 +1357,51 @@ function LiveTable() {
             {/* hero zone: hole cards + identity (design herozone) */}
             {mySeat >= 0 && (
               <div className="herozone">
-                {/* after folding your cards stay on the table, grayed — vanishing
+                {/* after folding your cards stay on the table, grayed · vanishing
                     instantly read as a glitch */}
-                {hand.inProgress && (seats[mySeat].inHand || seats[mySeat].folded) && (
-                  <div className="hole peek">
+                {/* …and they stay for the settle beat as well: the hand you just
+                    won or lost is exactly what you want to look at while the pot
+                    moves, and it vanishing there read as "the money just left". */}
+                {/* `muck` = your own fold fling · the same one everyone else's
+                    cards get, because folding your hand and having it silently
+                    deleted is the one action here with no feedback at all */}
+                {((hand.inProgress && (seats[mySeat].inHand || seats[mySeat].folded)) || (settleHold && myHole)) && (
+                  <div className={"hole peek" + (foldFx[mySeat] ? " muck" : "")}>
                     {myHole
-                      ? myHole.map((c, i) => <Card key={dealKey + i} c={c} folded={seats[mySeat].folded} className={heroDealing ? "deal" : ""} style={heroDealing ? { "--dy": "-220px", "--dr": (i ? 4 : -2) + "deg", animationDelay: i * 80 + "ms" } : undefined} />)
+                      ? myHole.map((c, i) => <Card key={dealKey + i} c={c} folded={seats[mySeat].folded}
+                          dim={!!(winUsed && winUsed.seat === mySeat && myHoleObj && !winUsed.set.has(myHoleObj.cards[i]))}
+                          className={heroDealing ? "deal" : ""} style={heroDealing ? { "--dy": "-220px", "--dr": (i ? 4 : -2) + "deg", animationDelay: i * 80 + "ms" } : undefined} />)
                       : (seats[mySeat].inHand ? [<Card key="0" back />, <Card key="1" back />] : null)}
                   </div>
                 )}
                 {myHole && bestHand && !seats[mySeat].folded && <div className="herocombo" style={heroEval ? comboStyle(heroEval.cat) : undefined}>{SPTHand(bestHand)}</div>}
-                <div className={"heroinfo" + (hand.inProgress && hand.actingSeat === mySeat ? " active" : "") + (seats[mySeat].allIn ? " allin" : "") + (seats[mySeat].folded ? " folded" : "") + (mySeat === anim.winnerSeat || (sdWin && sdWin.seat === mySeat) ? " winner" : "")}>
-                  {actFor(mySeat) && <span className={"actchip " + lastActs[mySeat].kind}>{actLabel(lastActs[mySeat])}</span>}
+                <div className={"heroinfo" + (hand.inProgress && hand.actingSeat === mySeat ? " active" : "") + (seats[mySeat].allIn ? " allin" : "") + (seats[mySeat].folded ? " folded" : "") + (seats[mySeat].sittingOut ? " sitout" : "") + (winSeat === mySeat ? " winner" : "") + (settleHold && winSeat >= 0 && winSeat !== mySeat ? " dimmed" : "")}>
+                  {winSeat === mySeat && <span className="crown" aria-hidden="true">👑</span>}
+                  {seats[mySeat].sittingOut && (
+                    <button className="sitinseat" disabled={busy} title={SPT("Sit in")}
+                      onClick={() => tx("Sit in", () => SP.sdk.sitOut(tableId, false))}>{SPT("SIT IN")}</button>
+                  )}
                   <AvatarIcon av={avOf(addr).id} img={avOf(addr).img} name={nameOf(addr)} />
                   <div className="meta">
                     <span className="nm">YOU · {nameOf(addr)}</span>
                     <span className="stack tnum">{prefs.bbstacks && bbOf(seats[mySeat].stack) != null
                       ? <React.Fragment>{bbOf(seats[mySeat].stack)}<span className="u">BB</span></React.Fragment>
-                      : <React.Fragment>{CHIPS ? fmtChips(NV(seats[mySeat].stack)) : NV(seats[mySeat].stack).toFixed(2)}<span className="u">{CHIPS ? "chips" : SP.NETWORK.currency.symbol}</span></React.Fragment>}</span>
+                      : <React.Fragment>{CHIPS ? <ChipMark size={15} /> : <SomiCoin size={15} />}{CHIPS ? fmtChips(NV(seats[mySeat].stack)) : fmtMoney(NV(seats[mySeat].stack))}</React.Fragment>}</span>
                   </div>
                   <div className="hmark">{markerFor(mySeat) && <Marker kind={markerFor(mySeat)} />}</div>
-                  <span className="hstatus">{seats[mySeat].allIn ? SPT("all-in") : seats[mySeat].folded ? SPT("folded") : seats[mySeat].sittingOut ? SPT("sitting out") : ""}</span>
+                  {/* your last action lives INSIDE the bar, at the end · floated
+                      above it, it landed on the combo badge that sits between
+                      your cards and your name */}
+                  {winSeat === mySeat
+                    ? <span className="wonchip">{winAmt ? "+" + winAmt : SPT("WINNER")}</span>
+                    : actFor(mySeat)
+                      ? <span className={"actchip inbar " + lastActs[mySeat].kind}>{actLabel(lastActs[mySeat])}</span>
+                      : <span className="hstatus">{settleHold ? "" : seats[mySeat].allIn ? SPT("all-in") : seats[mySeat].folded ? SPT("folded") : seats[mySeat].sittingOut ? SPT("sitting out") : ""}</span>}
                 </div>
               </div>
             )}
 
-            {/* pot collected to the winner (motion only — the banner shows regardless) */}
+            {/* pot collected to the winner (motion only · the banner shows regardless) */}
             {anim.winnerSeat >= 0 && !reducedMo && (
               <FlyChips wrapRef={feltWrapRef} toX={seatPos(anim.winnerSeat).x} toY={seatPos(anim.winnerSeat).y} />
             )}
@@ -835,10 +1418,14 @@ function LiveTable() {
           <button className="railfab" title={SPT("chat")} onClick={() => setRailOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 12a8 8 0 0 1-8 8H4l2.2-2.6A8 8 0 1 1 21 12z"/></svg>
           </button>
-          <LiveSideRail key={tableId} tableId={tableId} snap={snap} connected={connected} mySeat={mySeat} mobileOpen={railOpen} onClose={() => setRailOpen(false)} />
+          <LiveSideRail key={tableId} tableId={tableId} snap={snap} connected={connected} mySeat={mySeat} mobileOpen={railOpen} onClose={() => setRailOpen(false)} nameOf={nameOf} />
         </div>
 
-        {renderBar()}
+        {/* While a board card is still being turned over, the buttons are held
+            back visually — the action can be yours before you can see what you
+            are acting on. They stay CLICKABLE on purpose: the acting clock runs
+            on-chain, so a player who wants out must always be able to fold. */}
+        <div className={"barwrap" + (revealing ? " revealing" : "")}>{renderBar()}</div>
 
         {/* MTT rebalance: seat moved to another table → announce + auto-follow */}
         {movedTo != null && (
@@ -860,7 +1447,7 @@ function LiveTable() {
             <div className="lt-modal" style={{ width: "min(440px, 92vw)", textAlign: "center" }}>
               <div style={{ fontSize: 36, lineHeight: 1 }}>{myBust && myBust.prize > 0n ? "💰" : "🃏"}</div>
               <h3 style={{ marginTop: 10 }}>{RUv ? "Вы выбыли из турнира" : "You're out of the tournament"}</h3>
-              <div style={{ fontFamily: "var(--mono)", fontSize: 21, color: "var(--accent-soft, #f2d78a)", margin: "4px 0 6px" }}>
+              <div style={{ fontFamily: "var(--mono)", fontSize: 21, color: "var(--accent-soft, #F4DD9E)", margin: "4px 0 6px" }}>
                 {myBust
                   ? (RUv ? `${myBust.place}-е место из ${trn.registered}` : `${ordinal(myBust.place)} of ${trn.registered}`)
                   : (RUv ? "Определяем ваше место…" : "Finalizing your place…")}
@@ -868,8 +1455,8 @@ function LiveTable() {
               {myBust && myBust.prize > 0n
                 ? <p className="note" style={{ color: "var(--win, #57d9a3)" }}>{RUv
                     ? `Приз ${N(myBust.prize)} ${SP.NETWORK.currency.symbol} уже зачислен на ваш баланс в кассе.`
-                    : `Prize ${N(myBust.prize)} ${SP.NETWORK.currency.symbol} — already credited to your Cashier balance.`}</p>
-                : <p className="note">{RUv ? "В этот раз без приза — удачи в следующем!" : "No prize this time — better luck in the next one!"}</p>}
+                    : `Prize ${N(myBust.prize)} ${SP.NETWORK.currency.symbol} · already credited to your Cashier balance.`}</p>
+                : <p className="note">{RUv ? "В этот раз без приза · удачи в следующем!" : "No prize this time · better luck in the next one!"}</p>}
               <div className="row" style={{ marginTop: 14 }}>
                 <button className="pill" onClick={() => { markSeen("bust"); setBustHidden(true); }}>{RUv ? "Наблюдать финал" : "Watch the finish"}</button>
                 <button className="pill primary" onClick={() => { markSeen("bust"); location.href = "tournament?id=" + trn.id; }}>{RUv ? "К турниру" : "Tournament page"}</button>
@@ -886,25 +1473,25 @@ function LiveTable() {
               <div style={{ textAlign: "center", fontSize: 36, lineHeight: 1 }}>🏆</div>
               <h3 style={{ textAlign: "center", marginTop: 10 }}>
                 {iWonTrn
-                  ? (RUv ? "Поздравляем — вы выиграли турнир!" : "Congratulations — you won the tournament!")
+                  ? (RUv ? "Поздравляем · вы выиграли турнир!" : "Congratulations · you won the tournament!")
                   : (RUv ? "Турнир завершён" : "Tournament finished")}
               </h3>
               {trn.res.winner && (
-                <div style={{ textAlign: "center", fontFamily: "var(--mono)", fontSize: 14.5, color: "var(--accent-soft, #f2d78a)", marginBottom: 12 }}>
+                <div style={{ textAlign: "center", fontFamily: "var(--mono)", fontSize: 14.5, color: "var(--accent-soft, #F4DD9E)", marginBottom: 12 }}>
                   {RUv ? "Победитель" : "Winner"}: <b>{nameOf(trn.res.winner.player)}</b> · {N(trn.res.winner.prize)} {SP.NETWORK.currency.symbol}
                 </div>
               )}
-              <div style={{ maxHeight: 280, overflowY: "auto", border: "1px solid var(--line-2, #3a3a48)", borderRadius: 10 }}>
+              <div style={{ maxHeight: 280, overflowY: "auto", border: "1px solid var(--line-2, rgba(255,255,255,0.14))", borderRadius: 10 }}>
                 {standings.map((r, i) => {
                   const me = myAddrLc && r.player.toLowerCase() === myAddrLc;
                   return (
                     <div key={r.place} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px",
                       borderTop: i === 0 ? "none" : "1px solid var(--hair, rgba(255,255,255,.06))",
-                      background: me ? "var(--accent-12, rgba(217,171,74,.12))" : r.place <= 3 ? "rgba(217,171,74,.05)" : "transparent" }}>
-                      <span style={{ width: 36, fontFamily: "var(--mono)", fontSize: 13, color: r.place <= 3 ? "var(--accent-soft, #f2d78a)" : "var(--muted, #9a9aa8)" }}>{medal(r.place) || "#" + r.place}</span>
+                      background: me ? "var(--accent-12, rgba(217,185,112,.12))" : r.place <= 3 ? "rgba(217,185,112,.05)" : "transparent" }}>
+                      <span style={{ width: 36, fontFamily: "var(--mono)", fontSize: 13, color: r.place <= 3 ? "var(--accent-soft, #F4DD9E)" : "var(--muted, #8F8C85)" }}>{medal(r.place) || "#" + r.place}</span>
                       <AvatarIcon av={avOf(r.player).id} img={avOf(r.player).img} name={nameOf(r.player)} size={22} style={{ borderRadius: 6 }} />
                       <span style={{ flex: 1, fontFamily: "var(--mono)", fontSize: 13, color: "var(--text, #e6e6ee)" }}>{nameOf(r.player)}{me ? (RUv ? " · вы" : " · you") : ""}</span>
-                      <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: r.prize > 0n ? "var(--win, #57d9a3)" : "var(--muted, #9a9aa8)" }}>{r.prize > 0n ? `+${N(r.prize)} ${SP.NETWORK.currency.symbol}` : "—"}</span>
+                      <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: r.prize > 0n ? "var(--win, #57d9a3)" : "var(--muted, #8F8C85)" }}>{r.prize > 0n ? `+${N(r.prize)} ${SP.NETWORK.currency.symbol}` : "-"}</span>
                     </div>
                   );
                 })}
@@ -927,7 +1514,7 @@ function LiveTable() {
     if (!connected) return <StatusStrip text={SPT("Sign in to play")} sub={SPT("Email login → instant Somnia wallet, no popups")} accent="var(--accent-soft)" />;
     if (mySeat < 0) {
       if (trnBusted) return <StatusStrip
-        text={RUv ? "Вы выбыли — наблюдаете" : "You're out — observing"}
+        text={RUv ? "Вы выбыли · наблюдаете" : "You're out · observing"}
         sub={myBust ? (RUv ? `${myBust.place}-е место из ${trn.registered}` : `You finished ${ordinal(myBust.place)} of ${trn.registered}`) : ""}
         accent="var(--muted)" />;
       // spying on a sibling MTT table while my own seat lives elsewhere
@@ -935,41 +1522,73 @@ function LiveTable() {
         return (
           <div className="actionbar" style={{ flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
             <div style={{ fontFamily: "var(--label)", fontSize: 13, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--accent-soft)" }}>
-              {RUv ? `Здесь вы наблюдаете — ваше место за столом #${trn.myTable}` : `You're observing — your seat is at table #${trn.myTable}`}
+              {RUv ? `Здесь вы наблюдаете · ваше место за столом #${trn.myTable}` : `You're observing · your seat is at table #${trn.myTable}`}
             </div>
             <button className="pill" onClick={() => switchTable(trn.myTable)}>{RUv ? "К своему столу →" : "Back to my table →"}</button>
           </div>
         );
       }
       return (trn || ctl !== ZERO_CTL)
-        ? <StatusStrip text={SPT("Tournament table — you're observing")} sub={SPT("Seats are assigned by the tournament; register on its page to play")} accent="var(--muted)" />
+        ? <StatusStrip text={SPT("Tournament table · you're observing")} sub={SPT("Seats are assigned by the tournament; register on its page to play")} accent="var(--muted)" />
         : <StatusStrip text={SPT("Take an empty seat to join")} sub={SPT("Click a “+ Sit” spot around the table")} accent="var(--muted)" />;
     }
     const me = seats[mySeat];
     const myTurn = hand.inProgress && hand.actingSeat === mySeat && hand.street <= ST.RIVER;
-    // action already sent — hide the buttons instantly instead of leaving them
+    // action already sent · hide the buttons instantly instead of leaving them
     // greyed-out until the snapshot confirms the turn moved on
     if (myTurn && pendingAct && pendingAct.dealId === dealKey && pendingAct.street === hand.street) {
       return <StatusStrip text={SPT("Action sent") + " ✓"} sub={SPT("Confirming on-chain…")} accent="var(--accent-soft)" />;
     }
     if (!myTurn) {
-      const text = hand.inProgress ? (hand.street === ST.SHOWDOWN ? SPT("Showdown — settling on-chain") : SPT("Waiting for your turn")) : SPT("Waiting for the next hand");
+      // Sitting out used to read as "Waiting for the next hand" · identical to
+      // a normal wait, so a player dealt out at the start of a tournament just
+      // saw a table that never included them. Name the state and put the way
+      // back into the same strip.
+      if (me.sittingOut) {
+        return (
+          <div className="actionbar" style={{ flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <div style={{ fontFamily: "var(--label)", fontSize: 13, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--accent)" }}>
+              {SPT("You're sitting out")}
+            </div>
+            <div style={{ fontFamily: "var(--body)", fontSize: 12.5, color: "var(--muted)" }}>{SPT("You won't be dealt into hands until you sit back in")}</div>
+            <button className="pill primary" disabled={busy} onClick={() => tx("Sit in", () => SP.sdk.sitOut(tableId, false))}>{SPT("Sit in")}</button>
+          </div>
+        );
+      }
+      const text = hand.inProgress ? (hand.street === ST.SHOWDOWN ? SPT("Showdown · settling on-chain") : SPT("Waiting for your turn")) : SPT("Waiting for the next hand");
       const showPre = hand.inProgress && me.inHand && !me.folded && !me.allIn && hand.street <= ST.RIVER;
+      // Waiting is most of a hand, so the panel that fills it is worth as much
+      // care as the acting one: same card, same rhythm, and it says what your
+      // hand is while you wait rather than leaving the space blank.
+      if (!showPre) {
+        return (
+          <div className="actionbar">
+            <div className="actbar narrow waiting">
+              <div className="waitline">{text}</div>
+            </div>
+          </div>
+        );
+      }
       return (
-        <div className="actionbar" style={{ flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
-          {showPre && (
-            <div style={{ display: "flex", gap: 8 }}>
+        <div className="actionbar">
+          <div className="actbar prebar">
+            <div className="prehead">
+              <span className="ttl">{SPT("Pre-select your move")}</span>
+              {bestHand && !me.folded && <span className="youhave"><span className="k">{SPT("Best")}</span><b>{SPTHand(bestHand)}</b></span>}
+            </div>
+            <div className="actrow actions">
               {[["checkfold", SPT("Check") + " / " + SPT("Fold")], ["callany", SPT("Call") + " " + (window.__SPLANG === "ru" ? "всегда" : "Any")], ["check", SPT("Check")]].map(([k, l]) => (
-                <button key={k} className="pill" onClick={() => setPreAct(preAct === k ? null : k)}
-                  style={preAct === k ? { background: "var(--accent)", borderColor: "var(--accent)", color: "#1b1407" } : undefined}>
-                  {preAct === k ? "✓ " : ""}{l}
+                // The armed state is the gold fill, NOT a "✓ " prefix: the prefix
+                // made the button wider, which slid its neighbours sideways — so
+                // the tap meant to CANCEL an armed pre-action landed on the next
+                // one and armed that instead. Same label, same width, always.
+                <button key={k} className={"abtn pre" + (preAct === k ? " armed" : "")} aria-pressed={preAct === k}
+                  onClick={() => setPreAct(preAct === k ? null : k)}>
+                  <span className="lbl">{l}</span>
                 </button>
               ))}
             </div>
-          )}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-            <div style={{ fontFamily: "var(--label)", fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)" }}>{text}</div>
-            {showPre && preAct && <div style={{ fontFamily: "var(--body)", fontSize: 12.5, color: "var(--muted)" }}>{SPT("Pre-action armed — fires instantly on your turn")}</div>}
+            <div className="waitline">{preAct ? SPT("Pre-action armed · fires instantly on your turn") : text}</div>
           </div>
         </div>
       );
@@ -977,38 +1596,98 @@ function LiveTable() {
     const cur = hand.currentBet, committed = me.committedStreet;
     const toCallW = cur > committed ? cur - committed : 0n;
     const minRaiseToW = cur === 0n ? cfg.bigBlind : cur + hand.minRaise;
-    const maxToW = committed + me.stack;
-    const minN = NV(minRaiseToW), maxN = NV(maxToW), call = NV(toCallW), pot = NV(hand.pot);
+    // EFFECTIVE-STACK cap: never offer sizes beyond what any live opponent can
+    // actually match · betting 10k into a lone 7k stack is legal on-chain (the
+    // excess comes back) but reads wrong at the table, so the UI caps at the
+    // biggest opponent's street total instead.
+    const opps = seats.filter((s) => !s.empty && s.index !== mySeat && s.inHand && !s.folded);
+    const effCapW = opps.reduce((m, s) => {
+      const v = s.committedStreet + s.stack;
+      return v > m ? v : m;
+    }, 0n);
+    // Chips only matter if SOMEONE can still put more in. An opponent who is
+    // already all-in has nothing left to match, so raising past the current bet
+    // can only hand the excess straight back to me · offering a 10k shove at a
+    // lone all-in short stack is the table asking for a bet that cannot exist.
+    const raisableW = opps.reduce((m, s) => {
+      if (s.allIn || s.stack === 0n) return m;
+      const v = s.committedStreet + s.stack;
+      return v > m ? v : m;
+    }, 0n);
+    const myMaxW = committed + me.stack;
+    const maxToW = effCapW > 0n && effCapW < myMaxW ? (effCapW > minRaiseToW ? effCapW : (minRaiseToW < myMaxW ? minRaiseToW : myMaxW)) : myMaxW;
+    // the call NEVER costs more than my stack · an over-shove call is an all-in
+    const callW = toCallW < me.stack ? toCallW : me.stack;
+    const minN = NV(minRaiseToW), maxN = NV(maxToW), call = NV(callW), pot = NV(hand.pot);
     const canCheck = toCallW === 0n;
     const isBet = cur === 0n;
-    const canRaise = me.stack > toCallW && maxToW > cur && maxN > minN;
+    const callIsAllIn = !canCheck && toCallW >= me.stack;
+    const canRaise = me.stack > toCallW && maxToW > cur && maxN > minN && raisableW > cur;
     const bv = Math.min(maxN, Math.max(minN, betValue || minN));
-    const onFold = () => act(A.FOLD);
-    const onCheckCall = () => act(canCheck ? A.CHECK : A.CALL);
-    const onRaise = (v) => act(isBet ? A.BET : A.RAISE, Math.min(maxN, Math.max(minN, v)));
+
+    // A CLICK MUST SEND WHAT THE PLAYER SAW.
+    // One button carries both CHECK and CALL (its label swaps in place), and the
+    // bar itself swaps shape when a raise stops being possible. A snapshot that
+    // lands between the eye and the finger therefore used to turn a check into a
+    // call — silently, irreversibly, for real money. The same hole swallowed the
+    // second tap of an impatient double-click: it landed on the NEXT turn's bar,
+    // where that position meant something else entirely.
+    // So the bar's meaning is stamped with the moment it last changed, and a
+    // click that arrives before the player could have read it is refused and
+    // explained instead of being executed as a different action. Folding is
+    // guarded too — a mis-tap that folds a made hand costs just as much.
+    const turnKey = `${dealKey}:${hand.street}:${hand.actingDeadline}`;
+    const meaning = `${canCheck ? "check" : callIsAllIn ? "allin" : "call:" + call}|${canRaise ? "raise" : "-"}`;
+    const g = barGuardRef.current;
+    if (g.turn !== turnKey || g.meaning !== meaning) barGuardRef.current = { turn: turnKey, meaning, since: Date.now() };
+    const GUARD_MS = 600;
+    const settled = () => {
+      if (Date.now() - barGuardRef.current.since >= GUARD_MS) return true;
+      flash(window.__SPLANG === "ru"
+        ? "Стол только что изменился — посмотрите и нажмите ещё раз"
+        : "The table just changed — check it and press again", 2600);
+      return false;
+    };
+    const onFold = () => { if (settled()) act(A.FOLD); };
+    const onCheckCall = () => { if (settled()) act(canCheck ? A.CHECK : callIsAllIn ? A.ALLIN : A.CALL); };
+    const onRaise = (v) => { if (settled()) act(isBet ? A.BET : A.RAISE, Math.min(maxN, Math.max(minN, v))); };
     if (!canRaise) {
+      const secs = Math.max(0, hand.actingDeadline - now);
+      const pct = Math.max(0, Math.min(1, secs / (Number(cfg.actionTimeout) || 30)));
       return (
-        <div className="actionbar" style={{ justifyContent: "center", gap: 10 }}>
-          <div className="actions">
+        <div className="actionbar">
+          <div className={"actbar narrow" + (secs <= 8 ? " urgent" : "")}>
+          <div className="acttimer"><i style={{ width: (pct * 100) + "%" }} /></div>
+          <div className="actrow actions">
             <button className="abtn fold" disabled={busy} onClick={onFold}><span className="key">F</span><span className="lbl">{SPT("Fold")}</span></button>
-            <button className="abtn call" disabled={busy} onClick={onCheckCall}><span className="key">C</span><span className="lbl">{canCheck ? SPT("Check") : SPT("Call")}</span>{!canCheck && <span className="amt tnum">{call.toFixed(2)}</span>}</button>
-            {me.stack > 0n && !canCheck && <button className="abtn raise" disabled={busy} onClick={() => act(A.ALLIN)}><span className="lbl">{SPT("All-in")}</span><span className="amt tnum">{maxN.toFixed(2)}</span></button>}
+            <button className={"abtn call" + (canCheck ? " check" : "")} disabled={busy} onClick={onCheckCall}><span className="key">C</span><span className="lbl">{canCheck ? SPT("Check") : callIsAllIn ? SPT("All-in") : SPT("Call")}</span>{!canCheck && <span className="amt tnum">{fmtMoney(call)}</span>}</button>
+            {/* short-shove (a stack too small for a legal min-raise) is still a real
+                option · but only when an opponent has chips left to call it, and
+                the amount shown is what can actually be matched, not my whole stack */}
+            {me.stack > 0n && !canCheck && !callIsAllIn && raisableW > cur && (
+              <button className="abtn allin" disabled={busy} onClick={() => { if (settled()) act(A.ALLIN); }}>
+                <span className="lbl">{SPT("All-in")}</span>
+                <span className="amt tnum">{fmtMoney(NV(effCapW > 0n && effCapW < myMaxW ? effCapW : myMaxW))}</span>
+              </button>
+            )}
+          </div>
           </div>
         </div>
       );
     }
     const actionData = {
-      toCall: call, minRaise: minN, potForBet: pot, heroStack: maxN,
-      best: SPTHand(bestHand) || "—", outs: "—", potOdds: canCheck ? "—" : Math.round((call / (pot + call)) * 100) + "%",
+      toCall: call, minRaise: minN, potForBet: pot, heroStack: maxN, chips: CHIPS,
+      best: SPTHand(bestHand) || "-", outs: "-", potOdds: canCheck ? "-" : Math.round((call / (pot + call)) * 100) + "%",
       raiseLabel: isBet ? SPT("Bet") : SPT("Raise to"), canCheck, step: NV(cfg.bigBlind) || (CHIPS ? 1 : 0.01), symbol: CHIPS ? SPT("chips") : SP.NETWORK.currency.symbol,
       timer: Math.max(0, hand.actingDeadline - now), timerTotal: Number(cfg.actionTimeout),
     };
-    return <ActionBar action={actionData} onFold={onFold} onCheckCall={onCheckCall} onRaise={onRaise} betValue={bv} setBetValue={setBetValue} />;
+    const onAllIn = () => { if (settled()) act(A.ALLIN); };
+    return <ActionBar action={actionData} onFold={onFold} onCheckCall={onCheckCall} onRaise={onRaise} onAllIn={onAllIn} betValue={bv} setBetValue={setBetValue} />;
   }
 }
 
 /* live side rail: real chat (via dealer bot), on-chain hand history, private notes */
-function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose }) {
+function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose, nameOf }) {
   const [tab, setTab] = useState("chat");
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
@@ -1069,13 +1748,15 @@ function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose })
       </div>
       <div className="railbody" ref={bodyRef}>
         {tab === "chat" && (msgs.length === 0
-          ? <div className="chatline dealer">Welcome — live on Somnia. Provably-fair commit-reveal dealing.</div>
-          : msgs.map((m) => <div key={m.id} className={"chatline" + (m.dealer ? " dealer" : "")}>{!m.dealer && <span className="who">{m.who}</span>}{m.text}</div>))}
+          ? <div className="chatline dealer">{SP.sdk.zkLayer
+              ? SPT("Welcome · live on Somnia. zkShuffle dealing: only your browser can see your cards.")
+              : SPT("Welcome · live on Somnia. Provably-fair commit-reveal dealing.")}</div>
+          : msgs.map((m) => <div key={m.id} className={"chatline" + (m.dealer ? " dealer" : "")}>{!m.dealer && <span className="who">{(m.addr && nameOf ? nameOf(m.addr) : m.who)}</span>}{m.text}</div>))}
         {tab === "hands" && (hands == null
           ? <div className="chatline dealer">Loading on-chain history…</div>
           : hands.length === 0 ? <div className="chatline dealer">No settled hands yet at this table.</div>
           : hands.map((h2, i) => {
-              const who = snap && snap.seats[h2.seat] && !snap.seats[h2.seat].empty ? short(snap.seats[h2.seat].player) : "seat " + h2.seat;
+              const who = snap && snap.seats[h2.seat] && !snap.seats[h2.seat].empty ? (nameOf ? nameOf(snap.seats[h2.seat].player) : short(snap.seats[h2.seat].player)) : "seat " + h2.seat;
               return <div key={i} className="hhrow"><span className="st">#{h2.handId}</span><span className="act">{who} won <b className="tnum">{CHIPS ? Number(h2.amount) : Number(SP.fmt(h2.amount, 6))}</b> · {h2.kind}</span></div>;
             }))}
         {tab === "notes" && (
@@ -1086,11 +1767,11 @@ function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose })
               return (
                 <div key={s.index} style={{ padding: "8px 4px", borderBottom: "1px solid var(--hair)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
-                    {["#ef5a6f", "#e8c15a", "#46d39a", "#d9ab4a"].map((c) => (
+                    {["#ef5a6f", "#e8c15a", "#46d39a", "#D9B970"].map((c) => (
                       <span key={c} onClick={() => saveNote(s.player.toLowerCase(), { tag: n.tag === c ? null : c })}
                         style={{ width: 12, height: 12, borderRadius: "50%", background: c, cursor: "pointer", opacity: n.tag === c ? 1 : 0.35, outline: n.tag === c ? "1.5px solid #fff" : "none" }} />
                     ))}
-                    <span style={{ fontFamily: "var(--label)", fontSize: 11.5, color: n.tag || "var(--text-2)" }}>{short(s.player)}</span>
+                    <span style={{ fontFamily: "var(--label)", fontSize: 11.5, color: n.tag || "var(--text-2)" }}>{nameOf ? nameOf(s.player) : short(s.player)}</span>
                   </div>
                   <input placeholder="Add a note…" defaultValue={n.text || ""}
                     onBlur={(e) => saveNote(s.player.toLowerCase(), { text: e.target.value })}
@@ -1111,12 +1792,19 @@ function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose })
       )}
       <div className="pfwidget">
         <div className="pfhead">
-          <span className="ttl">{ChromeIcons.shield} {SPT("provably fair · commit-reveal")}</span>
+          <span className="ttl">{ChromeIcons.shield} {SPT(SP.sdk.zkLayer ? "provably fair · zkShuffle" : "provably fair · commit-reveal")}</span>
         </div>
-        <div className="commit">
-          <div><span className="lab">commit</span> {commit ? shh(commit.seedHash) : "— waiting for a hand —"}</div>
-          <div style={{ marginTop: 4 }}><span className="lab">deck</span> {commit && commit.revealed ? "revealed & verified on-chain ✓" : "sealed pre-deal · reveal post-hand"}</div>
-        </div>
+        {SP.sdk.zkLayer ? (
+          <div className="commit">
+            <div><span className="lab">deal</span> {commit && commit.dealId ? "#" + BigInt(commit.dealId).toString(16).slice(0, 14) + "…" : "- waiting for a hand -"}</div>
+            <div style={{ marginTop: 4 }}><span className="lab">cards</span> {commit && commit.revealed ? "showdown proofs verified on-chain ✓" : "player-encrypted · every reveal proven"}</div>
+          </div>
+        ) : (
+          <div className="commit">
+            <div><span className="lab">commit</span> {commit ? shh(commit.seedHash) : "- waiting for a hand -"}</div>
+            <div style={{ marginTop: 4 }}><span className="lab">deck</span> {commit && commit.revealed ? "revealed & verified on-chain ✓" : "sealed pre-deal · reveal post-hand"}</div>
+          </div>
+        )}
       </div>
     </aside>
   );
@@ -1124,10 +1812,44 @@ function LiveSideRail({ tableId, snap, connected, mySeat, mobileOpen, onClose })
 
 /* sit / cashier modal */
 function Modal({ kind, close, sdk, tableId, cfg, bal, tx, refresh }) {
+  // THE PANEL STAYS UP UNTIL THE CHAIN ANSWERS.
+  // It used to close the instant you pressed the button and only then send the
+  // transaction — so the two-to-four seconds of sitting down (a balance read, a
+  // deposit if you were short, then sitDown itself) happened against an empty
+  // screen with nothing at all to say it was working. Now the button spins in
+  // place, the panel names the wait, and it closes when the seat is actually
+  // yours. A refusal leaves the panel open so the amount can be changed.
+  const [txBusy, setTxBusy] = useState(false);
+  const runTx = async (label, fn) => {
+    if (txBusy) return false;
+    setTxBusy(true);
+    try { const ok = await tx(label, fn); if (ok) close(); return ok; }
+    finally { setTxBusy(false); }
+  };
   const minE = Number(SP.fmt(cfg.minBuyIn, 4)), maxE = Number(SP.fmt(cfg.maxBuyIn, 4));
-  const [amt, setAmt] = useState(kind.type === "sit" ? String(maxE) : "1");
-  const amtNum = parseFloat(amt) || 0;
-  const amtOk = amtNum >= minE && amtNum <= maxE;
+  const bbE = Number(SP.fmt(cfg.bigBlind, 4));
+  // What you can actually add: the table's ceiling minus what you already have,
+  // and never more than your room balance.
+  const topMax = kind.type === "topup" ? Math.max(0, Math.min(maxE - (kind.stack || 0), bal)) : 0;
+  const [amt, setAmt] = useState(kind.type === "sit" ? String(Math.min(maxE, bal || maxE))
+    : kind.type === "topup" ? String(Math.max(0, Math.min(maxE - (kind.stack || 0), bal))) : "1");
+  const amtNum = SP.num(amt);
+  const amtOk = amtNum >= minE && amtNum <= maxE && amtNum <= bal;
+  const topOk = amtNum > 0 && amtNum <= topMax;
+  const round = (v) => Math.round(Math.min(maxE, Math.max(minE, v)) * 10000) / 10000;
+  // the four sizes people actually pick, in big blinds like every poker room
+  const buyPresets = [
+    { k: SPT("Min"), v: round(minE) },
+    { k: "20BB", v: round(bbE * 20) },
+    { k: "40BB", v: round(bbE * 40) },
+    { k: SPT("Max"), v: round(Math.min(maxE, bal || maxE)) },
+  ].filter((p, i, a) => a.findIndex((q) => Math.abs(q.v - p.v) < 1e-9) === i);
+  const tr = (v) => Math.round(Math.min(topMax, Math.max(0, v)) * 10000) / 10000;
+  const topPresets = [
+    { k: "20BB", v: tr(bbE * 20) },
+    { k: "40BB", v: tr(bbE * 40) },
+    { k: SPT("Max"), v: tr(topMax) },
+  ].filter((p, i, a) => p.v > 0 && a.findIndex((q) => Math.abs(q.v - p.v) < 1e-9) === i);
   const [wd, setWd] = useState(String(bal));
   const [walletBal, setWalletBal] = useState(null);
   useEffect(() => { sdk.walletBalance().then((b) => setWalletBal(Number(SP.fmt(b, 6)))).catch(() => {}); }, []);
@@ -1141,32 +1863,93 @@ function Modal({ kind, close, sdk, tableId, cfg, bal, tx, refresh }) {
       <div className="lt-modal" onClick={stop}>
         {kind.type === "sit" ? (
           <>
+            {/* The buy-in panel from a real room: what you have, what it will
+                cost you, a slider between the table's own limits, and the four
+                sizes anyone actually picks. The old one was a bare text field
+                with the range spelled out twice in prose. */}
             <h3>{SPT("Sit at seat")} {kind.seat}</h3>
-            <p className="note">{SPT("Blinds")} {Number(SP.fmt(cfg.smallBlind, 4))}/{Number(SP.fmt(cfg.bigBlind, 4))} {SP.NETWORK.currency.symbol}. {SPT("Buy-in")} {minE}–{maxE}.</p>
-            <label>{SPT("Buy-in")} ({minE}–{maxE} {SP.NETWORK.currency.symbol})</label>
-            <input value={amt} onChange={(e) => setAmt(e.target.value)} style={{ borderColor: amtOk ? undefined : "var(--danger, #ef5a6f)" }} />
-            {!amtOk && <p className="note" style={{ color: "var(--danger, #ef5a6f)" }}>{SPT("Buy-in")}: {minE}–{maxE} {SP.NETWORK.currency.symbol}</p>}
+            {/* "You will be charged" used to sit here repeating the big number
+                two rows below it · the big number IS what you will be charged */}
+            <div className="buyrows">
+              <div className="buyrow"><span>{SPT("Game")}</span><b>NLHE {Number(SP.fmt(cfg.smallBlind, 4))}/{Number(SP.fmt(cfg.bigBlind, 4))}</b></div>
+              <div className="buyrow"><span>{SPT("Available")}</span><b className="tnum"><SomiCoin size={13} />{fmtMoney(bal)}</b></div>
+            </div>
+            <div className={"buyamt" + (amtOk ? "" : " bad")}>
+              <span className="coin"><SomiCoin size={20} /></span>
+              <input className="buybig tnum" value={amt} onChange={(e) => setAmt(e.target.value)} inputMode="decimal" />
+              <span className="unit">{sym}</span>
+            </div>
+            <div className="buyslider" style={{ "--fill": maxE > minE ? Math.max(0, Math.min(1, (Math.min(maxE, Math.max(minE, amtNum)) - minE) / (maxE - minE))) : 1 }}>
+              <span className="end tnum">{fmtMoney(minE)}</span>
+              <input type="range" min={minE} max={maxE} step={Math.max(0.0001, (maxE - minE) / 200)}
+                value={Math.min(maxE, Math.max(minE, amtNum))} onChange={(e) => setAmt(String(Number(e.target.value)))} />
+              <span className="end hi tnum">{fmtMoney(maxE)}</span>
+            </div>
+            <div className="buypresets">
+              {buyPresets.map((p) => (
+                <button key={p.k} className={Math.abs(amtNum - p.v) < 1e-9 ? "on" : ""}
+                  onClick={() => setAmt(String(p.v))}>{p.k}</button>
+              ))}
+            </div>
+            {!amtOk && <p className="note" style={{ color: "var(--danger)" }}>{SPT("Buy-in")}: {fmtMoney(minE)}–{fmtMoney(maxE)} {sym}</p>}
             <div className="row">
-              <button className="pill" onClick={close}>{SPT("Cancel")}</button>
-              <button className="pill primary" disabled={!amtOk} onClick={async () => {
-                close();
-                await tx("Take seat", async () => {
+              <button className="pill primary buycta" disabled={!amtOk || txBusy} onClick={async () => {
+                await runTx("Take seat", async () => {
                   // one game at a time: block sitting here while seated anywhere
                   // else (cash or a running tournament table)
                   const other = await sdk.seatedTableAt(tableId);
                   if (other >= 0) throw new Error(window.__SPLANG === "ru"
-                    ? `Вы уже играете за столом #${other} — сначала покиньте его`
-                    : `You're already playing at table #${other} — leave it first`);
+                    ? `Вы уже играете за столом #${other} · сначала покиньте его`
+                    : `You're already playing at table #${other} · leave it first`);
                   const need = SP.parseEther(amt);
                   const have = await sdk.balanceOf(sdk.address);
                   if (have < need) await sdk.deposit(SP.fmt(need - have, 6));
                   await sdk.sitDown(tableId, kind.seat, amt);
                   // injected wallets: grant a session key so actions need no popup.
-                  // Privy email wallets are already headless — nothing to do.
+                  // Privy email wallets are already headless · nothing to do.
                   if (sdk.backend === "injected" && !sdk.hasSession()) await sdk.activateSession();
                 });
-              }}>{SPT("Take seat")}</button>
+              }}>{SPT("Sit down")}</button>
             </div>
+            {txBusy && <p className="buywait">{SPT("Confirming on-chain · this takes a moment")}</p>}
+          </>
+        ) : kind.type === "topup" ? (
+          <>
+            {/* Same panel, one table over: adding chips to a seat you already
+                hold. The contract caps the stack at the table's max buy-in and
+                refuses while you are live in a hand, so the slider is bounded
+                by what is actually addable, not by the table's whole range. */}
+            <h3>{SPT("Add chips")}</h3>
+            <div className="buyrows">
+              <div className="buyrow"><span>{SPT("Your stack")}</span><b className="tnum"><SomiCoin size={13} />{fmtMoney(kind.stack)}</b></div>
+              <div className="buyrow"><span>{SPT("Available")}</span><b className="tnum"><SomiCoin size={13} />{fmtMoney(bal)}</b></div>
+              <div className="buyrow"><span>{SPT("Table max")}</span><b className="tnum"><SomiCoin size={13} />{fmtMoney(maxE)}</b></div>
+            </div>
+            <div className={"buyamt" + (topOk ? "" : " bad")}>
+              <span className="coin"><SomiCoin size={20} /></span>
+              <input className="buybig tnum" value={amt} onChange={(e) => setAmt(e.target.value)} inputMode="decimal" />
+              <span className="unit">{sym}</span>
+            </div>
+            <div className="buyslider" style={{ "--fill": topMax > 0 ? Math.max(0, Math.min(1, Math.min(topMax, Math.max(0, amtNum)) / topMax)) : 0 }}>
+              <span className="end tnum">0</span>
+              <input type="range" min={0} max={topMax} step={Math.max(0.0001, topMax / 200)}
+                value={Math.min(topMax, Math.max(0, amtNum))} onChange={(e) => setAmt(String(Number(e.target.value)))} />
+              <span className="end hi tnum">{fmtMoney(topMax)}</span>
+            </div>
+            <div className="buypresets">
+              {topPresets.map((p) => (
+                <button key={p.k} className={Math.abs(amtNum - p.v) < 1e-9 ? "on" : ""}
+                  onClick={() => setAmt(String(p.v))}>{p.k}</button>
+              ))}
+            </div>
+            {topMax <= 0 && <p className="note">{SPT("You're already at this table's maximum stack.")}</p>}
+            {topMax > 0 && !topOk && <p className="note" style={{ color: "var(--danger)" }}>{SPT("Up to")} {fmtMoney(topMax)} {sym}</p>}
+            <div className="row">
+              <button className="pill primary buycta" disabled={!topOk || txBusy} onClick={() => {
+                runTx("Top up", () => sdk.topUp(tableId, amt)).then((ok) => { if (ok) refresh(); });
+              }}>{SPT("Add chips")}</button>
+            </div>
+            {txBusy && <p className="buywait">{SPT("Confirming on-chain · this takes a moment")}</p>}
           </>
         ) : (
           <>
@@ -1174,20 +1957,18 @@ function Modal({ kind, close, sdk, tableId, cfg, bal, tx, refresh }) {
             <p className="note">Wallet <b className="mono">{short(sdk.address)}</b> · {walletBal == null ? "…" : walletBal.toFixed(3)} {sym} &nbsp;|&nbsp; In-room <b>{bal.toFixed(3)}</b> {sym}</p>
             {lowWallet && (
               <div className="fundbox">
-                <div className="fh">Low {sym} balance — you need {sym} to buy in and cover gas.</div>
+                <div className="fh">Low {sym} balance · you need {sym} to buy in and cover gas.</div>
                 <div className="fa"><span className="mono">{sdk.address}</span><button className="pill" onClick={copyAddr}>copy</button></div>
-                {isTestnet
-                  ? <a className="pill primary" href="https://testnet.somnia.network" target="_blank" rel="noopener" style={{ display: "block", textAlign: "center", textDecoration: "none", marginTop: 8 }}>Get free test {sym} — open faucet ↗</a>
-                  : <div className="note" style={{ marginTop: 6 }}>Send {sym} to this address from any wallet or exchange.</div>}
+                <div className="note" style={{ marginTop: 6 }}>Send {sym} to this address from any wallet or exchange.</div>
                 <div className="note" style={{ marginTop: 8 }}>Then deposit below and take a seat.</div>
               </div>
             )}
             <label>Deposit (wallet → room)</label>
             <input value={amt} onChange={(e) => setAmt(e.target.value)} />
-            <div className="row"><button className="pill primary" onClick={() => { close(); tx("Deposit", () => sdk.deposit(amt)).then(refresh); }}>Deposit</button></div>
+            <div className="row"><button className="pill primary" disabled={txBusy} onClick={() => { runTx("Deposit", () => sdk.deposit(amt)).then((ok) => { if (ok) refresh(); }); }}>Deposit</button></div>
             <label>Withdraw (room → wallet)</label>
             <input value={wd} onChange={(e) => setWd(e.target.value)} />
-            <div className="row"><button className="pill" onClick={() => { close(); tx("Withdraw", () => sdk.withdraw(wd)).then(refresh); }}>Withdraw</button></div>
+            <div className="row"><button className="pill" disabled={txBusy} onClick={() => { runTx("Withdraw", () => sdk.withdraw(wd)).then((ok) => { if (ok) refresh(); }); }}>Withdraw</button></div>
           </>
         )}
       </div>
@@ -1196,22 +1977,51 @@ function Modal({ kind, close, sdk, tableId, cfg, bal, tx, refresh }) {
 }
 
 /* ---- scale-to-fit stage (from the design) ---- */
+// Bound once - see the same fix in poker-lobby-app.jsx. This one mattered most:
+// it is the screen people sit on for hours, so the leaked resize handlers piled
+// up the longest.
+let _tableScaleBound = false;
 function mountScale() {
   const scaler = document.getElementById("scaler");
   if (!scaler) return;
   const app = scaler.querySelector(".app");
   if (!app) return;
   function fit() {
+    const embedNow = document.documentElement.classList.contains("sp-embed");
+    let big = false;
+    try { big = !!JSON.parse(localStorage.getItem("sp_prefs") || "{}").bigui; } catch (e) {}
+    const key = window.innerWidth + "x" + window.innerHeight + "|" + (embedNow ? 1 : 0) + "|" + (big ? 1 : 0);
+    if (app.dataset.slFit === key) return;   // remounted nodes carry no marker
+    app.dataset.slFit = key;
     if (window.innerWidth <= 760) { // fluid mobile layout (mobile.css) - no stage scaling
       app.style.transform = ""; app.style.position = ""; app.style.top = ""; app.style.left = "";
+      app.style.width = ""; app.style.height = "";
       scaler.style.width = ""; scaler.style.height = "";
       return;
     }
-    const s = Math.min((window.innerWidth - 24) / 1600, (window.innerHeight - 84) / 1000);
+    // The TABLE must fit BOTH axes · a player has to see their own seat at the
+    // bottom without scrolling. The canvas ASPECT follows the viewport (width
+    // stretches between sane poker proportions) so the scaled stage fills the
+    // screen edge-to-edge instead of leaving dead side bands on 16:9.
+    // Shrink the canvas, let the scale-up compensate: same fit, everything
+    // bigger, less on screen. What used to be the "Larger interface" setting
+    // (1.18) is now the DEFAULT — players read the table at a glance and the
+    // old baseline was simply too small — and the setting goes further still
+    // for anyone who needs it. Kept well under the point where the fixed-height
+    // chrome (top bar, tournament strip, action bar) would start eating the
+    // felt: at 1.34 the felt still gets ~580 of the 746px canvas.
+    const availW = window.innerWidth - 16;
+    const availH = window.innerHeight - (embedNow ? 16 : 84);
+    const k = big ? 1.34 : 1.18;
+    const H = Math.round(1000 / k);
+    const W = Math.round(Math.min(2.05 * H, Math.max(1.45 * H, (availW / Math.max(1, availH)) * H)));
+    const s = Math.min(availW / W, availH / H);
+    app.style.width = W + "px"; app.style.height = H + "px";
     app.style.transform = `scale(${s})`; app.style.transformOrigin = "top left"; app.style.position = "absolute"; app.style.top = "0"; app.style.left = "0";
-    scaler.style.width = 1600 * s + "px"; scaler.style.height = 1000 * s + "px";
+    scaler.style.width = W * s + "px"; scaler.style.height = H * s + "px";
   }
-  fit(); window.addEventListener("resize", fit);
+  fit();
+  if (!_tableScaleBound) { _tableScaleBound = true; window.addEventListener("resize", () => mountScale()); }
 }
 
 function boot() {

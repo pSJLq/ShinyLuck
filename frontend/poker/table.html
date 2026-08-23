@@ -3,11 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ShinyPoker — Table</title>
+<title>ShinyPoker · Table</title>
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Source+Code+Pro:wght@400;500;600&family=DM+Sans:wght@400;500;600&family=Bricolage+Grotesque:opsz,wght@12..96,600..800&display=swap" rel="stylesheet" />
+<!-- Boot guard · see poker-boot.js (storage hardening + failure beacon). -->
+<script src="poker-boot.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 <link rel="stylesheet" href="table-anim.css" />
 <link rel="stylesheet" href="poker-live.css" />
@@ -17,35 +19,68 @@
     background: radial-gradient(120% 90% at 50% -10%, #0c0c11 0%, #070707 62%); overflow: hidden; }
   #bgcanvas { position: fixed; inset: 0; width: 100%; height: 100%; opacity: 0.26; pointer-events: none; }
   #root { position: relative; z-index: 2; }
+  /* Embedded in the merged shell (/poker?v=table&t=N): the shell owns the
+     site chrome · hide the duplicated branding + product switcher, keep the
+     functional pills (blinds / hand / chips). The table scales to fit BOTH
+     axes (see mountScale), so the stage never scrolls · no scrollbar. */
+  .sp-embed .topbar > .group:first-child { display: none !important; }
+  .sp-embed .topbar .switcher { display: none !important; }
+  .sp-embed #stage { overflow: hidden !important; place-items: center !important; padding-top: 0; }
 </style>
+<script>
+  // Embed mode: inside the merged-site shell (/poker?v=table&t=N).
+  (function () {
+    var inFrame = false;
+    try { inFrame = window.self !== window.top; } catch (e) { inFrame = true; }
+    var flagged = /(^|[?&])embed=1/.test(location.search);
+    if (!inFrame && !flagged) {
+      // Standalone visit (old links): the table now lives inside the shell.
+      var q = location.search.replace(/^\?/, "").replace(/(^|&)embed=1/, "");
+      location.replace("/poker?v=table" + (q ? "&" + q : ""));
+      return;
+    }
+    document.documentElement.classList.add("sp-embed");
+    // The TABLE is a viewport app, never a scrolling page: the stage scales
+    // itself to whatever box it gets (mountScale). Report height 1 so the
+    // shell clamps the iframe to its viewport floor (100vh minus the shell
+    // chrome) — a tall height left over from the poker LOBBY page in this
+    // same iframe used to force the whole site to scroll mid-game.
+    function pin() { try { window.parent.postMessage({ type: "sl-height", h: 1 }, "*"); } catch (e) {} }
+    pin();
+    addEventListener("load", pin);
+    addEventListener("resize", pin);
+  })();
+</script>
+  <script type="module" src="/lib/i18n.js"></script>
 </head>
 <body>
-<canvas id="bgcanvas"></canvas>
 <div id="stage"><div id="root"></div></div>
 
 <!-- Privy (email → embedded Somnia wallet, headless). Same bundle/app as the casino. -->
-<script src="/vendor/privy.bundle.js"></script>
-<script src="poker-grid.js"></script>
-<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
+<!-- Wallet source · reuses the shell's Privy when embedded (same origin),
+     loads the 4.8 MB bundle only when standalone. See poker-auth.js. -->
+<script src="poker-auth.js"></script>
+<script src="poker-dust.js"></script>
+<!-- ambient pad · obeys the casino Settings panel (Music card) -->
+<script defer src="/lib/music.js"></script>
+  <script src="poker-press.js"></script>
+<!-- React is served from our own host and the JSX ships precompiled. This page
+     used to fetch three files from unpkg.com — including Babel Standalone, 2.9 MB —
+     and transpile ~140 KB of JSX in the browser on EVERY load. Anyone whose
+     network could not reach unpkg (or whose phone gave up part-way) got the felt
+     background and nothing on top of it, with no error to show for it.
+     Regenerate the .compiled.js files with `node scripts/build-poker-jsx.js`. -->
+<script defer src="/vendor/react.production.min.js"></script>
+<script defer src="/vendor/react-dom.production.min.js"></script>
+<script defer src="poker-cards.compiled.js"></script>
+<script defer src="poker-seats.compiled.js"></script>
+<script defer src="poker-chrome.compiled.js"></script>
+<script type="module" src="poker-bridge.js"></script>
+<script defer src="poker-live-table.compiled.js"></script>
 
 <!-- design visual components (export to window) -->
-<script type="text/babel" src="poker-cards.jsx"></script>
-<script type="text/babel" src="poker-seats.jsx"></script>
-<script type="text/babel" src="poker-chrome.jsx"></script>
 
 <!-- live data bridge (ES module → window.SP) + the live app -->
-<script type="module" src="poker-bridge.js"></script>
-<script type="text/babel" src="poker-live-table.jsx"></script>
 
-<script>
-  // ambient background grid (behind the table)
-  window.addEventListener("load", function () {
-    var c = document.getElementById("bgcanvas");
-    if (window.GridField && c) new GridField(c, { cell: 22, gap: 7, speed: 0.4, density: 0.5,
-      accent: "#d9ab4a", accent2: "#f2d78a", maxAlpha: 0.7, minBright: 0.01, shape: "square" }).start();
-  });
-</script>
 </body>
 </html>

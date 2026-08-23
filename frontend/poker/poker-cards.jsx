@@ -1,4 +1,4 @@
-/* Playing cards — suit glyphs + Card component. Exports to window. */
+/* Playing cards · suit glyphs + Card component. Exports to window. */
 const SUIT_PATHS = {
   s: "M12 2C12 2 4 8.5 4 14.2 4 17.4 6.4 19.6 9.2 19.6 10.3 19.6 11.2 19.2 12 18.5 12.8 19.2 13.7 19.6 14.8 19.6 17.6 19.6 20 17.4 20 14.2 20 8.5 12 2 12 2ZM10.6 18.5C10.6 20.4 9.8 21.6 8.5 22.4L15.5 22.4C14.2 21.6 13.4 20.4 13.4 18.5Z",
   h: "M12 21.4C12 21.4 2.5 14.9 2.5 8.6 2.5 5.5 4.9 3.2 7.8 3.2 9.6 3.2 11.2 4.2 12 5.6 12.8 4.2 14.4 3.2 16.2 3.2 19.1 3.2 21.5 5.5 21.5 8.6 21.5 14.9 12 21.4 12 21.4Z",
@@ -16,8 +16,8 @@ function Suit({ s, size }) {
   );
 }
 
-/* card string like "As", "Kh", "Td", "9c"  — or {back:true} */
-function Card({ c, back, folded, dealing, className, style, delay }) {
+/* card string like "As", "Kh", "Td", "9c"  · or {back:true} */
+function Card({ c, back, folded, dealing, dim, className, style, delay }) {
   if (back || !c) {
     return (
       <div className={"card back " + (className || "")} style={style}>
@@ -30,6 +30,7 @@ function Card({ c, back, folded, dealing, className, style, delay }) {
   const cls = ["card", "s-" + SUIT_NAME[suit]];
   if (folded) cls.push("folded");
   if (dealing) cls.push("dealing");
+  if (dim) cls.push("offcombo"); // plays no part in the winning combination
   if (className) cls.push(className);
   const st = Object.assign({}, style);
   if (dealing && delay != null) st.animationDelay = delay + "ms";
@@ -43,12 +44,12 @@ function Card({ c, back, folded, dealing, className, style, delay }) {
 }
 
 /* Deterministic avatar look: a warm two-tone gradient + tilt derived from the
-   player's name/address — kills the "letter in a gray box" placeholder feel. */
+   player's name/address · kills the "letter in a gray box" placeholder feel. */
 function avatarColors(seed) {
   let h = 0; const s = String(seed || "?").toLowerCase();
   for (let i = 0; i < s.length; i++) h = ((h * 31 + s.charCodeAt(i)) & 0xffffffff) >>> 0;
   const PAL = [
-    ["#d9ab4a", "#7c5117"], ["#e2793f", "#6e2a12"], ["#c8963a", "#3f2a0e"], ["#b8574f", "#521c1c"],
+    ["#D9B970", "#7c5117"], ["#e2793f", "#6e2a12"], ["#c8963a", "#3f2a0e"], ["#b8574f", "#521c1c"],
     ["#7a9a4e", "#2a4319"], ["#4f8f8b", "#1b3d3b"], ["#9a6ad0", "#37215a"], ["#c0576f", "#4e1c2c"],
     ["#5e82c8", "#1f3153"], ["#b0b46a", "#44461e"], ["#cf8f5c", "#5a3416"], ["#6aa9a0", "#24443f"],
   ];
@@ -56,16 +57,22 @@ function avatarColors(seed) {
   return { a: p[0], b: p[1], rot: (h >>> 4) % 360 };
 }
 
-/* Minimal sparkle mark (card backs, small accents) — single-path currentColor. */
+/* THE HOUSE MARK — the real one.
+   This used to be a hand-drawn path, and what it drew was a sharp crystal: four
+   straight-ish points meeting in a diamond. The brand is not a crystal. It is
+   the spark from /assets/spark.png — a four-pointed star with CONCAVE sides and
+   a fat middle, white core, gold rim, sparkle dust, on its own dark field,
+   tilted. Nobody looking at the felt or a card back should have to wonder
+   whether it is the same logo as the one in the header, so it now IS that
+   file rather than an impression of it. */
 function SparkMark({ className, style }) {
   return (
-    <svg className={className} style={style} viewBox="0 0 64 64" fill="none" aria-hidden="true">
-      <path d="M 32 3 Q 36.5 23 47 32 Q 36.5 41 32 61 Q 27.5 41 17 32 Q 27.5 23 32 3 Z" fill="currentColor" transform="rotate(26 32 32)" />
-    </svg>
+    <img className={className} style={{ objectFit: "contain", ...(style || {}) }}
+      src="/assets/spark.png" alt="" aria-hidden="true" draggable="false" />
   );
 }
 
-/* ShinyPoker brand mark — the "shiny card" sparkle from ShinyPokerDesign/Logo:
+/* ShinyPoker brand mark · the "shiny card" sparkle from ShinyPokerDesign/Logo:
    a card bent into a four-point star, white core, gold rim, sparkle dust. */
 function SparkLogo({ size = 22 }) {
   const star = (x, y, r) => `M ${x} ${y - r} L ${x + r * 0.28} ${y - r * 0.28} L ${x + r} ${y} L ${x + r * 0.28} ${y + r * 0.28} L ${x} ${y + r} L ${x - r * 0.28} ${y + r * 0.28} L ${x - r} ${y} L ${x - r * 0.28} ${y - r * 0.28} Z`;
@@ -85,12 +92,12 @@ function SparkLogo({ size = 22 }) {
         <path d="M 32 3 Q 36.5 23 47 32 Q 36.5 41 32 61 Q 27.5 41 17 32 Q 27.5 23 32 3 Z"
           fill="#e8c15a" opacity="0.6" filter="url(#spkGlow)" />
         <path d="M 32 3 Q 36.5 23 47 32 Q 36.5 41 32 61 Q 27.5 41 17 32 Q 27.5 23 32 3 Z"
-          fill="url(#spkCore)" stroke="#d9ab4a" strokeWidth="1.4" strokeLinejoin="round" />
+          fill="url(#spkCore)" stroke="#D9B970" strokeWidth="1.4" strokeLinejoin="round" />
       </g>
-      <path d={star(13, 18, 3)} fill="#f2d78a" opacity="0.95" />
-      <path d={star(52, 13, 2.2)} fill="#f2d78a" opacity="0.8" />
-      <path d={star(50, 51, 2.6)} fill="#f2d78a" opacity="0.9" />
-      <path d={star(12, 47, 1.8)} fill="#f2d78a" opacity="0.7" />
+      <path d={star(13, 18, 3)} fill="#F4DD9E" opacity="0.95" />
+      <path d={star(52, 13, 2.2)} fill="#F4DD9E" opacity="0.8" />
+      <path d={star(50, 51, 2.6)} fill="#F4DD9E" opacity="0.9" />
+      <path d={star(12, 47, 1.8)} fill="#F4DD9E" opacity="0.7" />
     </svg>
   );
 }
@@ -105,7 +112,7 @@ function BraceMark({ className, style }) {
   );
 }
 
-/* The {s} composed logo — braces with a mono s centered */
+/* The {s} composed logo · braces with a mono s centered */
 function BraceLogo({ size = 20, withS = true }) {
   return (
     <span className="brace-logo" style={{ fontSize: size + "px" }}>
@@ -134,10 +141,65 @@ function SomiIcon({ className, style }) {
   );
 }
 
+/* The SOMI token as a COIN, for standing in front of a figure.
+   `SomiIcon` above is the bare {} mark — correct as a logo, but at the 13px a
+   stack label needs it just reads as punctuation. Minted into a disc it reads
+   as money at a glance, which is the whole job: every number on the felt is
+   either chips or SOMI and the player must never have to work out which. */
+function SomiCoin({ size = 14, className, style }) {
+  return (
+    <svg className={"somicoin " + (className || "")} style={style} width={size} height={size}
+      viewBox="0 0 32 32" aria-hidden="true">
+      <defs>
+        <linearGradient id="somiRim" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#F4DD9E" /><stop offset="100%" stopColor="#A6822F" />
+        </linearGradient>
+      </defs>
+      <circle cx="16" cy="16" r="15" fill="#100E09" stroke="url(#somiRim)" strokeWidth="1.6" />
+      <g transform="translate(16 16) scale(0.0325) translate(-292.9 -222.2)" fill="#F4DD9E">
+        <path d="M 0 205.706 L 20.571 205.706 C 26.399 205.706 31.542 204.506 35.998 202.106 C 40.455 199.363 44.055 195.935 46.798 191.82 C 49.884 187.364 52.112 182.564 53.483 177.421 C 55.198 171.936 56.055 166.45 56.055 160.965 L 56.055 78.168 C 56.055 65.483 57.255 54.341 59.655 44.741 C 62.397 35.141 66.854 27.085 73.025 20.571 C 79.197 13.714 87.425 8.571 97.71 5.143 C 108.338 1.714 121.538 0 137.308 0 L 178.964 0 L 178.964 33.427 L 135.251 33.427 C 120.852 33.427 110.567 36.684 104.396 43.198 C 98.567 49.712 95.653 61.54 95.653 78.682 L 95.653 149.651 C 95.653 172.621 92.225 189.592 85.368 200.563 C 78.511 211.191 70.626 218.391 61.712 222.162 C 70.626 226.276 78.511 233.99 85.368 245.304 C 92.225 256.618 95.653 273.074 95.653 294.673 L 95.653 365.642 C 95.653 382.784 98.739 394.612 104.91 401.126 C 111.081 407.64 121.366 410.897 135.766 410.897 L 178.964 410.897 L 178.964 444.324 L 137.308 444.324 C 121.538 444.324 108.338 442.61 97.71 439.181 C 87.425 435.753 79.197 430.61 73.025 423.753 C 66.854 417.24 62.397 409.183 59.655 399.583 C 57.255 389.983 56.055 378.841 56.055 366.156 L 56.055 283.359 C 56.055 278.217 55.198 273.074 53.483 267.932 C 52.112 262.446 49.884 257.646 46.798 253.532 C 44.055 249.075 40.455 245.475 35.998 242.733 C 31.884 239.99 26.913 238.618 21.085 238.618 L 0 238.618 L 0 205.706 Z" />
+        <path d="M 585.892 238.618 L 565.321 238.618 C 559.493 238.618 554.35 239.99 549.893 242.733 C 545.779 245.132 542.179 248.561 539.094 253.018 C 536.351 257.132 534.123 261.932 532.408 267.417 C 531.037 272.56 530.351 277.874 530.351 283.359 L 530.351 366.156 C 530.351 378.841 528.98 389.983 526.237 399.583 C 523.837 409.183 519.38 417.24 512.866 423.753 C 506.695 430.61 498.295 435.753 487.667 439.181 C 477.382 442.61 464.354 444.324 448.583 444.324 L 406.928 444.324 L 406.928 410.897 L 450.64 410.897 C 465.04 410.897 475.154 407.64 480.982 401.126 C 487.153 394.612 490.239 382.784 490.239 365.642 L 490.239 294.673 C 490.239 271.703 493.667 254.904 500.524 244.275 C 507.381 233.304 515.266 225.933 524.18 222.162 C 515.266 218.048 507.381 210.334 500.524 199.02 C 493.667 187.706 490.239 171.25 490.239 149.651 L 490.239 78.682 C 490.239 61.54 487.153 49.712 480.982 43.198 C 474.811 36.684 464.526 33.427 450.126 33.427 L 406.928 33.427 L 406.928 0 L 448.583 0 C 464.354 0 477.382 1.714 487.667 5.143 C 498.295 8.571 506.695 13.714 512.866 20.571 C 519.38 27.085 523.837 35.141 526.237 44.741 C 528.98 54.341 530.351 65.483 530.351 78.168 L 530.351 160.965 C 530.351 166.107 531.037 171.421 532.408 176.907 C 533.78 182.049 535.837 186.849 538.58 191.306 C 541.665 195.42 545.265 198.849 549.379 201.591 C 553.836 204.334 558.979 205.706 564.807 205.706 L 585.892 205.706 L 585.892 238.618 Z" />
+      </g>
+      <text x="16" y="16" textAnchor="middle" dominantBaseline="central"
+        fontFamily="Inter, system-ui, sans-serif" fontWeight="700" fontSize="13" fill="#F4DD9E">s</text>
+    </svg>
+  );
+}
+
+/* Money, at whatever size it actually is.
+   Every figure on the felt used to be printed with `toFixed(v % 1 ? 1 : 0)` —
+   one decimal place. The smallest cash table runs 0.01/0.02 blinds, so a real
+   pot of 0.04 rendered as **0.0** and a 0.04 bet as **0.0**: the table showed
+   a player that their money had gone nowhere. Places scale with magnitude, so
+   a 1200-chip pot does not carry four meaningless decimals either, and a
+   non-zero amount can never round away to "0". */
+function fmtMoney(n) {
+  n = Number(n) || 0;
+  if (!isFinite(n) || n === 0) return "0";
+  const a = Math.abs(n);
+  const dp = a >= 1000 ? 0 : a >= 100 ? 1 : a >= 1 ? 2 : a >= 0.01 ? 3 : 4;
+  const s = n.toFixed(dp);
+  if (/^-?0(\.0*)?$/.test(s)) return (n < 0 ? "-" : "") + "<0.0001";
+  return s.indexOf(".") < 0 ? s : s.replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/* Tournament chips are NOT the token · a stack of 10 000 tournament chips is
+   worth nothing off the table, so it must never wear the money mark. */
+function ChipMark({ size = 14, className, style }) {
+  return (
+    <svg className={"chipmark " + (className || "")} style={style} width={size} height={size}
+      viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="16" cy="16" r="14.4" fill="#141018" stroke="#D9B970" strokeWidth="1.5" />
+      <circle cx="16" cy="16" r="8.2" fill="none" stroke="#D9B970" strokeWidth="1.5" strokeDasharray="3.6 3.4" opacity="0.85" />
+      <circle cx="16" cy="16" r="3.2" fill="#D9B970" opacity="0.9" />
+    </svg>
+  );
+}
+
 /* ------------------------------------------------------------------------
    On-chain avatars. PlayerProfile.avatar is a uint16 stored with the nickname;
    0 = "auto" (gradient + initial derived from the name hash), 1..N = curated
-   looks below. IDs live on-chain — only APPEND to this list, never reorder.
+   looks below. IDs live on-chain · only APPEND to this list, never reorder.
    ------------------------------------------------------------------------ */
 const SP_AVATARS = [
   null, // 0 = auto
@@ -152,10 +214,9 @@ const SP_AVATARS = [
 function AvatarIcon({ av, img, name, size, style }) {
   const box = size ? { width: size, height: size, fontSize: Math.round(size * 0.38) } : undefined;
   if (img) {
+    // an uploaded photo shows as-is · no dot overlay on the user's own picture
     return (
-      <div className="avatar deco" style={{ background: `url("${img}") center/cover no-repeat, #15151c`, ...box, ...style }}>
-        <span className="ava-grid" />
-      </div>
+      <div className="avatar deco" style={{ background: `url("${img}") center/cover no-repeat, #15151c`, ...box, ...style }} />
     );
   }
   const id = Number(av) || 0;
@@ -168,7 +229,6 @@ function AvatarIcon({ av, img, name, size, style }) {
       {glyph
         ? <span className="em" style={{ position: "relative", ...(size ? { fontSize: Math.round(size * 0.54) } : {}) }}>{glyph}</span>
         : <span style={{ position: "relative" }}>{(name || "?").replace(/^0x/i, "")[0].toUpperCase()}</span>}
-      <span className="ava-grid" />
     </div>
   );
 }
@@ -193,14 +253,14 @@ function SPCompressAvatar(file, maxBytes = 7800) {
         const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
         if (bytes.length <= maxBytes) return resolve({ bytes, dataUri: uri });
       }
-      reject(new Error("image won't compress under the on-chain cap — try a simpler picture"));
+      reject(new Error("image won't compress under the on-chain cap · try a simpler picture"));
     };
     im.onerror = () => { URL.revokeObjectURL(url); reject(new Error("could not read that image")); };
     im.src = url;
   });
 }
 
-Object.assign(window, { Card, Suit, BraceMark, BraceLogo, SomiIcon, SparkLogo, SparkMark, avatarColors, SP_AVATARS, AvatarIcon, SPCompressAvatar });
+Object.assign(window, { Card, Suit, fmtMoney, BraceMark, BraceLogo, SomiIcon, SomiCoin, ChipMark, SparkLogo, SparkMark, avatarColors, SP_AVATARS, AvatarIcon, SPCompressAvatar });
 
 /* ------------------------------------------------------------------------
    i18n (EN/RU) for the live-table experience. First-loaded script → every
@@ -212,45 +272,132 @@ const SP_I18N_RU = {
   "all-in": "олл-ин", "folded": "фолд", "sitting out": "сит-аут", "waiting": "ожидание",
   "Fold": "Фолд", "Check": "Чек", "Call": "Колл", "Raise to": "Рейз до", "Bet": "Бет",
   "Min": "Мин", "Pot": "Банк", "All-in": "Олл-ин", "Best": "Комбо", "Pot odds": "Шансы банка",
+  "Pre-select your move": "Выбрать ход заранее", "Less": "Меньше", "More": "Больше",
   "You win": "Вы выиграли", "You lose": "Вы проиграли", "wins": "выигрывает",
-  "paid out on-chain": "— выплата он-чейн", "pot settled on-chain": "банк рассчитан он-чейн",
+  "paid out on-chain": "- выплата он-чейн", "pot settled on-chain": "банк рассчитан он-чейн",
   "Winning hand": "Победная рука", "Settling pot on-chain…": "Банк рассчитывается он-чейн…",
   "Action sent": "Действие отправлено", "Confirming on-chain…": "Подтверждаем он-чейн…",
-  "Dealer button": "Баттон (дилер) — раздача идёт от него", "Small blind": "Малый блайнд", "Big blind": "Большой блайнд",
+  "Dealer button": "Баттон (дилер) · раздача идёт от него", "Small blind": "Малый блайнд", "Big blind": "Большой блайнд",
   "Sign in to play": "Войдите, чтобы играть",
   "Email login → instant Somnia wallet, no popups": "Вход по email → мгновенный кошелёк Somnia, без попапов",
   "Take an empty seat to join": "Сядьте на свободное место",
   "Click a “+ Sit” spot around the table": "Нажмите «+ Sit» на свободном месте за столом",
-  "Tournament table — you're observing": "Турнирный стол — вы наблюдаете",
-  "Seats are assigned by the tournament; register on its page to play": "Места раздаёт турнир — зарегистрируйтесь на его странице, чтобы играть",
-  "Showdown — settling on-chain": "Шоудаун — расчёт он-чейн",
+  "Tournament table · you're observing": "Турнирный стол · вы наблюдаете",
+  "Seats are assigned by the tournament; register on its page to play": "Места раздаёт турнир · зарегистрируйтесь на его странице, чтобы играть",
+  "Showdown · settling on-chain": "Шоудаун · расчёт он-чейн",
   "Waiting for your turn": "Ожидание вашего хода",
+  "Revealing": "Раскрываем",
   "Waiting for the next hand": "Ожидание следующей руки",
   "Your chips & action are safe on-chain": "Ваши фишки и действия защищены он-чейн",
-  "Pre-action armed — fires instantly on your turn": "Пре-действие взведено — сработает в ваш ход",
+  "Pre-action armed · fires instantly on your turn": "Пре-действие взведено · сработает в ваш ход",
   "TOURNAMENT": "ТУРНИР", "Level": "Уровень", "Blinds": "Блайнды", "ante": "анте",
-  "Next level": "След. уровень", "Final level": "Финальный уровень", "Players": "Игроки",
+  "Next level": "След. уровень", "Final level": "финальный уровень", "Players": "Игроки",
   "Prize": "Приз", "Split": "Сплит", "FINISHED": "ЗАВЕРШЁН",
+  // the header's own line, which replaced the tournament strip
+  "left": "в игре", "finished": "завершён", "level up next hand": "уровень со след. руки",
   "Table": "Стол", "Switch to this table": "Перейти к этому столу",
   "Next hand starting…": "Следующая рука вот-вот начнётся…",
   "Level up between hands": "Уровень поднимется между руками",
   "Hand": "Рука", "Cashier": "Касса", "Connect Wallet": "Подключить кошелёк",
+  "Show finished": "Показать завершённые", "Hide finished": "Скрыть завершённые",
+  "Take a seat": "Сесть за стол", "Join": "Присоединиться", "Rake": "Рейк", "cap": "потолок",
+  "no entries yet": "пока никого", "WINNER": "ПОБЕДА",
+  "Confirming on-chain · this takes a moment": "Подтверждаем в сети · это займёт момент",
+  "You're in this hand — you can leave once it ends": "Вы в раздаче — выйти можно, когда она закончится",
+  "Leaving · you'll be folded and stood up when this hand ends": "Выходим · сфолдим и поднимем из-за стола, как только рука закончится",
+  "Leaving after this hand · click to stay": "Выходим после этой руки · нажмите, чтобы остаться",
+  "Staying at the table": "Остаёмся за столом",
+  "Game": "Игра", "Available": "Доступно", "You will be charged": "Спишется",
+  "Sit down": "Сесть", "Max": "Макс", "Add chips": "Добавить фишек",
+  "Your stack": "Ваш стек", "Table max": "Максимум стола", "Top up": "Пополнить",
+  "Add chips to your stack": "Добавить фишек в стек", "Up to": "До",
+  "You're already at this table's maximum stack.": "У вас уже максимальный стек для этого стола.",
+  "open table": "стол свободен", "waiting for players": "ждём игроков",
+  "nothing is taken when the hand ends before the flop": "если рука закончилась до флопа, рейк не берётся",
+  "Nothing running right now": "Сейчас ничего не идёт",
+  "Create one, or look through what has already been played.": "Создайте свой или посмотрите, что уже сыграно.",
+  "Be the first · create one with your own buy-in, prize pool and payout split.": "Будьте первым · создайте турнир со своим бай-ином, призовым и раскладкой выплат.",
+  "Create tournament": "Создать турнир", "Buy-in": "Бай-ин", "Free": "Бесплатно",
+  "payout": "выплаты", "Play": "Играть", "Observe": "Смотреть",
   "Say something…": "Напишите что-нибудь…", "Sit down to chat": "Сядьте за стол, чтобы писать", "Send": "Отпр.",
   "table chat · dealer feed": "чат стола · лента дилера", "hand history · on-chain": "история рук · он-чейн", "private player notes": "приватные заметки",
   "chat": "чат", "hands": "руки", "notes": "заметки",
   "provably fair · commit-reveal": "честная раздача · commit-reveal",
-  "shuffling — commitment sealed on-chain": "тасуем — коммит колоды запечатан он-чейн",
+  "provably fair · zkShuffle": "честная раздача · zkShuffle",
+  "Welcome · live on Somnia. zkShuffle dealing: only your browser can see your cards.": "Добро пожаловать · мы на Somnia. Раздача zkShuffle: ваши карты видит только ваш браузер.",
+  "Welcome · live on Somnia. Provably-fair commit-reveal dealing.": "Добро пожаловать · мы на Somnia. Честная раздача commit-reveal.",
+  "shuffling · commitment sealed on-chain": "тасуем · коммит колоды запечатан он-чейн",
   "table settings": "настройки стола", "Table theme": "Тема стола", "Sound effects": "Звуки",
   "4-color deck": "4-цветная колода", "Turbo animations": "Турбо-анимации", "Reduced motion": "Меньше анимаций",
+  "Larger interface": "Крупный интерфейс",
+  "Extra large interface": "Очень крупный интерфейс",
   "Stacks in big blinds": "Стеки в блайндах (BB)",
   "Language": "Язык", "Close": "Закрыть",
   "Sit at seat": "Сесть на место", "Buy-in": "Бай-ин", "Cancel": "Отмена", "Take seat": "Сесть",
   "Leave table": "Покинуть стол", "Back to tournament": "К турниру", "Settings": "Настройки",
-  "Sit out": "Сит-аут", "Sit in": "Вернуться в игру", "Sit": "Сесть", "Connect": "Войти",
+  "Sit out": "Сит-аут", "Sit in": "Вернуться в игру",
+  "Sit out next hand": "Пропустить следующие руки", "Sit back in": "Вернуться в игру",
+  "You keep your seat and your chips while sitting out.": "Место и фишки остаются за вами.",
+  "Keeps your seat and chips · you are not dealt in until you sit back.": "Место и фишки остаются за вами · карты не раздаются, пока не вернётесь.",
+  // ---- poker lobby (terms like NLHE / rake / Sit & Go stay English) ----
+  "Players seated": "Игроков за столами",
+  "Tables": "Столы",
+  "Hands in play": "Раздач идёт",
+  "Stakes": "Ставки",
+  "Size": "Размер",
+  "Scheduled tournaments": "Турниры по расписанию",
+  "Cash NLHE is live now.": "Кэш NLHE уже работает.",
+  "Loading tables…": "Загрузка столов…",
+  "No tables match your filters.": "Нет столов под ваши фильтры.",
+  "Full · watch": "Занято · смотреть",
+  "Loading tournaments…": "Загрузка турниров…",
+  "No tournaments yet": "Турниров пока нет",
+  "Tournament": "Турнир",
+  "Prize pool": "Призовой фонд",
+  "Entrants": "Участники",
+  "Status": "Статус",
+  "Action": "Действие",
+  "View": "Открыть",
+  "Apply": "Подать заявку",
+  "Register": "Зарегистрироваться",
+  "Unregister": "Отменить регистрацию",
+  "Start": "Запустить",
+  "Blind structure": "Структура блайндов",
+  "Save structure": "Сохранить структуру",
+  "Create tournament": "Создать турнир",
+  "Create": "Создать",
+  "Table size": "Размер стола",
+  "Custom": "Свой",
+  "View / edit": "Открыть / изменить",
+  "Seats": "Места",
+  "Open seats · join now": "Свободные места · заходите",
+  "Pick a time at least a minute in the future.": "Выберите время хотя бы на минуту вперёд.",
+  "hand in play": "раздача идёт",
+  "Format": "Формат",
+  "You're sitting out": "Вы вне игры (сит-аут)",
+  "You won't be dealt into hands until you sit back in": "Карты вам не раздаются, пока вы не вернётесь в игру",
+  "SIT IN": "ВЕРНУТЬСЯ", "Sit": "Сесть", "Connect": "Войти",
 };
-window.__SPLANG = (function () { try { return localStorage.getItem("sp_lang") || "en"; } catch (e) { return "en"; } })();
+// Language is a SITE preference owned by the casino's Settings (lib/i18n.js,
+// key "sl-lang") · poker used to keep its own switch in the table's gear panel,
+// where it could only ever reach this one page. `sp_lang` is still read as a
+// fallback so anyone who set it there before keeps their choice.
+window.__SPLANG = (function () {
+  try { return localStorage.getItem("sl-lang") || localStorage.getItem("sp_lang") || "en"; }
+  catch (e) { return "en"; }
+})();
 window.SPT = (s) => (window.__SPLANG === "en" ? s : (SP_I18N_RU[s] != null ? SP_I18N_RU[s] : s));
-window.SPLangSet = (l) => { window.__SPLANG = l; try { localStorage.setItem("sp_lang", l); } catch (e) {} };
+window.SPLangSet = (l) => { window.__SPLANG = l; try { localStorage.setItem("sl-lang", l); } catch (e) {} };
+// The casino broadcasts into this iframe when the switch is used · adopt it and
+// let listeners re-render. Same channel the sound pref rides on.
+if (typeof document !== "undefined") {
+  document.addEventListener("shinyluck:lang", (e) => {
+    const l = e && e.detail && e.detail.lang;
+    if (!l || l === window.__SPLANG) return;
+    window.__SPLANG = l;
+    try { window.dispatchEvent(new CustomEvent("sp-lang-changed", { detail: { lang: l } })); } catch (_) {}
+  });
+}
 
 /* Hand-name translator: maps the evaluator's English combos ("Pair of Nines",
    "Flush, King high"…) to Russian poker terms. EN → passthrough. */
@@ -260,8 +407,14 @@ const SP_RU_HIGH = ["двойки", "тройки", "четвёрки", "пят�
 const SP_RU_PL = ["двоек", "троек", "четвёрок", "пятёрок", "шестёрок", "семёрок", "восьмёрок", "девяток", "десяток", "вальтов", "дам", "королей", "тузов"];
 const spRuHigh = (w) => SP_RU_HIGH[SP_EN_RANKS.indexOf(w)] || w;
 const spRuPl = (w) => SP_RU_PL[SP_EN_PLURAL.indexOf(w)] || w;
+const SP_RU_TIER = {
+  "High Card": "Старшая карта", "Pair": "Пара", "Two Pair": "Две пары", "Three of a Kind": "Тройка",
+  "Straight": "Стрит", "Flush": "Флеш", "Full House": "Фулл-хаус", "Four of a Kind": "Каре",
+  "Straight Flush": "Стрит-флеш", "Royal Flush": "Флеш-рояль",
+};
 window.SPTHand = (name) => {
   if (!name || window.__SPLANG === "en") return name;
+  if (SP_RU_TIER[name]) return SP_RU_TIER[name]; // plain tier names (current handName output)
   let m;
   if (name === "Royal Flush") return "Флеш-рояль";
   if ((m = name.match(/^Straight Flush, (\w+) high$/))) return "Стрит-флеш до " + spRuHigh(m[1]);
@@ -272,6 +425,6 @@ window.SPTHand = (name) => {
   if ((m = name.match(/^Three of a Kind, (\w+)$/))) return "Сет из " + spRuPl(m[1]);
   if ((m = name.match(/^Two Pair, (\w+) & (\w+)$/))) return "Две пары: " + spRuPl(m[1]) + " и " + spRuPl(m[2]);
   if ((m = name.match(/^Pair of (\w+)$/))) return "Пара " + spRuPl(m[1]);
-  if ((m = name.match(/^(\w+) high$/))) return "Старшая карта — " + spRuHigh(m[1]);
+  if ((m = name.match(/^(\w+) high$/))) return "Старшая карта · " + spRuHigh(m[1]);
   return name;
 };

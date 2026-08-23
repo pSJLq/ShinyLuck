@@ -1,4 +1,4 @@
-// ShinyPoker — live table controller (vanilla JS over the SDK).
+// ShinyPoker · live table controller (vanilla JS over the SDK).
 import { ShinyPoker, ACTION, STREET, STREET_NAME, cardLabel, fmt } from "./poker-sdk.js";
 import { POKER_CONFIG, NETWORK } from "./poker-config.js";
 
@@ -157,7 +157,7 @@ function render(snap) {
     let tag = null;
     if (hand.inProgress) {
       if (seat.index === hand.button) tag = "D";
-      // SB/BB derived: next occupied after button etc. — simplest: mark via blinds not tracked; show D only
+      // SB/BB derived: next occupied after button etc. · simplest: mark via blinds not tracked; show D only
     }
     if (tag) inner.append(el("div", { class: "tag " + tag }, tag));
 

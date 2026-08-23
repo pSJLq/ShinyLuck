@@ -1,7 +1,7 @@
-// ShinyPoker — zkShuffle v2 core (EXPERIMENTAL): Barnett–Smart mental poker.
+// ShinyPoker · zkShuffle v2 core (EXPERIMENTAL): Barnett–Smart mental poker.
 //
-// The property v1 cannot give: DURING the hand nobody — not the dealer bot,
-// not the host, not other players — learns your hole cards. The deck is
+// The property v1 cannot give: DURING the hand nobody · not the dealer bot,
+// not the host, not other players · learns your hole cards. The deck is
 // ElGamal-encrypted under the TABLE's aggregate key; every player shuffles and
 // re-randomizes it themselves; a hole card is decrypted only by its owner from
 // the other players' decryption shares.
@@ -13,12 +13,12 @@
 //   - Fiat–Shamir via keccak256
 //
 // Verification model of THIS stage (v2-beta, документировано и в UI):
-// shuffles are verified OPTIMISTICALLY — after the hand every player opens
+// shuffles are verified OPTIMISTICALLY · after the hand every player opens
 // their permutation+randomness and the whole chain is re-computed; any
 // manipulation is detected deterministically and attributable to the exact
 // cheater (on a real table: escrow slash + hand void). Zero-knowledge shuffle
 // arguments (verify DURING the hand, nothing opened after) are the next stage
-// — see docs/ZKSHUFFLE-V2-SPEC.md R2.
+// · see docs/ZKSHUFFLE-V2-SPEC.md R2.
 //
 // Dependency-injected so the SAME code runs in the browser (esm.sh noble +
 // vendored ethers keccak) and in node selftests (npm noble + ethers).
@@ -90,7 +90,7 @@ export function aggregate(Xs) {
 }
 
 // ---- ElGamal deck ----------------------------------------------------------
-/// Start with trivial ciphertexts (A=O, B=M_j): no trusted encryptor needed —
+/// Start with trivial ciphertexts (A=O, B=M_j): no trusted encryptor needed -
 /// the first shuffle's re-randomization makes them real.
 export function initialDeck(pts) {
   return pts.map((M) => ({ A: P.ZERO, B: M }));
@@ -116,7 +116,7 @@ export function remask(ct, X, rho) {
 
 // ---- decryption shares (Chaum–Pedersen) --------------------------------------
 /// Share for ciphertext (A,B) from player with secret x: d = A·x, plus a proof
-/// that log_G(X) == log_A(d) — an invalid share is rejected on the spot.
+/// that log_G(X) == log_A(d) · an invalid share is rejected on the spot.
 export function decryptionShare(ct, x, X, ctx) {
   const d = ct.A.multiply(x);
   const k = randScalar();
@@ -144,7 +144,7 @@ export function decryptWithShares(ct, shares, ownX) {
 // ---- post-hand audit ---------------------------------------------------------
 /// Every player opens {perm, rho}; the chain is recomputed stage by stage.
 /// The first stage whose published deck doesn't match the recomputation is the
-/// cheater — deterministically, no probabilistic hand-waving.
+/// cheater · deterministically, no probabilistic hand-waving.
 export function auditShuffles(pts, X, stages) {
   let cur = initialDeck(pts);
   for (let i = 0; i < stages.length; i++) {

@@ -1,8 +1,9 @@
-// VAULT.7 — on-chain slot frontend.
+// VAULT.7 · on-chain slot frontend.
 //
 // The reel animation, ticker, particles & big-win overlay are unchanged from
 // the original `slots/game.js` design. The only swap: instead of an in-memory
-// SlotEngine producing the result, we call placeSlotsBet → poll for the
+// SlotEngine producing the result, we call the Vault7 module's placeSpin →
+// poll for the
 // BetSettled event → decode the on-chain grid into the same shape the UI
 // expects, then run the same animations against the real result.
 //
@@ -11,16 +12,17 @@
 //              uint256 scatterPayX100, bool isFreeSpin)
 //
 //   grid[col * 3 + row] = symbol ID:
-//     0=E, 1=D, 2=F, 3=A (low) — 4=COIN, 5=BOLT (mid) — 6=CRYS, 7=DIAM (high)
+//     0=E, 1=D, 2=F, 3=A (low) · 4=COIN, 5=BOLT (mid) · 6=CRYS, 7=DIAM (high)
 //     8=WILD, 9=SCAT
 
 import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect } from "../wallet.js";
 import { CONFIG } from "../config.js";
+import { CONFIG_V15 } from "../config-v15.js";
 import { provider, fetchRecentLogs } from "../rpc.js";
 import {
   $, $$, setText, populateFairPanel, clearFairServer, friendlyError,
-  pollForSettle, fmtSTT, explorerTxUrl,
+  pollForSpinSettle, fmtSTT, explorerTxUrl,
 } from "./_base.js";
 import { validateStake } from "../errors.js";
 
@@ -109,7 +111,7 @@ function sizeReels() {
   if (!reels.length) return;
   let w = reels[0].clientWidth;
   // First-paint guard: clientWidth can be 0 if the reels container hasn't
-  // been laid out yet. Wait one frame and retry — without this the strip
+  // been laid out yet. Wait one frame and retry · without this the strip
   // heights collapse and the symbols end up at wildly different scales,
   // which is the "reels are scattered" bug.
   if (w === 0) { requestAnimationFrame(sizeReels); return; }
@@ -176,14 +178,11 @@ function decodeWinningCells(grid) {
 let _casinoRO = null;
 function casinoRO() {
   if (!_casinoRO) {
-    const abi = [
-      "function freeSpinsAvailable(address) view returns (uint256)",
+    // v15: loyalty counters live in the shared SlotLoyalty contract.
+    _casinoRO = new ethers.Contract(CONFIG_V15.addresses.loyalty, [
+      "function available(address) view returns (uint256)",
       "function getPlayerSlotState(address) view returns (uint64 total,uint64 earned,uint64 used,uint256 toNext)",
-      "function gameMaxBet(uint8) view returns (uint256)",
-      "function houseEdgeBps(uint8) view returns (uint256)",
-      "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
-    ];
-    _casinoRO = new ethers.Contract(CONFIG.casino, abi, provider());
+    ], provider());
   }
   return _casinoRO;
 }
@@ -198,13 +197,13 @@ async function refreshLoyalty() {
   try {
     const c = casinoRO();
     const [free, [tot, earned, used, toNext]] = await Promise.all([
-      c.freeSpinsAvailable(SL.address),
+      c.available(SL.address),
       c.getPlayerSlotState(SL.address),
     ]);
     lastFreeSpinsAvailable = Number(free);
     setText("#freeSpinsCount", String(lastFreeSpinsAvailable));
     const totalSpins = Number(tot);
-    // Loyalty bar — fills with each paid spin. No numbers exposed to the
+    // Loyalty bar · fills with each paid spin. No numbers exposed to the
     // player; the reward is a surprise drop when the bar completes.
     const progress = (totalSpins % 150) / 150 * 100;
     const bar = $("#loyaltyBar");
@@ -219,7 +218,7 @@ async function refreshLoyalty() {
     if (fsBtn) {
       fsBtn.classList.toggle("active", lastFreeSpinsAvailable > 0);
       fsBtn.title = lastFreeSpinsAvailable > 0
-        ? "Free spin available — click SPIN to use it"
+        ? "Free spin available · click SPIN to use it"
         : "Keep playing to unlock free spins";
     }
   } catch (e) { console.warn("[vault7] loyalty:", e.message); }
@@ -238,7 +237,7 @@ async function refreshGameMeta() {
 }
 
 async function refreshBalance() {
-  if (!SL.address) { setText("#balance", "—"); return; }
+  if (!SL.address) { setText("#balance", "-"); return; }
   try {
     const bal = await provider().getBalance(SL.address);
     setText("#balance", fmtSTT(bal));
@@ -539,33 +538,19 @@ async function doSpin() {
   updateUI();
   try {
     await connect();
-    const cs = ethers.hexlify(ethers.randomBytes(32));
-    let tx;
-    if (wantFree) {
-      tx = await SL.casino.placeSlotsBet(cs, true, { value: 0 });
-    } else {
-      tx = await SL.casino.placeSlotsBet(cs, false, { value: ethers.parseEther(stake.toFixed(6)) });
-    }
-    const rcpt = await tx.wait();
-    // Find BetPlaced for betId
-    let betId;
-    for (const log of rcpt.logs) {
-      try {
-        const p = SL.casino.interface.parseLog(log);
-        if (p && p.name === "BetPlaced") { betId = p.args.betId; break; }
-      } catch (_) {}
-    }
-    populateFairPanel({ clientSeed: cs, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash: tx.hash });
+    // v15: VAULT.7 is its own module contract; the SDK resolves the betId.
+    const { betId, txHash, clientSeed: cs } = await SL.placeSlots(stake.toFixed(6), wantFree);
+    populateFairPanel({ clientSeed: cs, betId, nonce: betId, serverSeed: ethers.ZeroHash, txHash });
     $("#stagePill").querySelector("span:last-child").textContent = "REVEAL…";
     if (!wantFree) {
       totalWagered += stake;
       totalSpinsSession++;
     }
 
-    const settled = await pollForSettle(betId);
+    const settled = await pollForSpinSettle("vault7", betId);
     if (!settled || settled.refunded) {
       $("#stagePill").querySelector("span:last-child").textContent = settled?.refunded ? "REFUNDED" : "TIMED OUT";
-      setText("#lastWin", settled?.refunded ? "— refunded" : "— timed out");
+      setText("#lastWin", settled?.refunded ? "- refunded" : "- timed out");
       $("#lastWin").classList.add("zero");
       return;
     }
@@ -585,10 +570,10 @@ async function doSpin() {
       $("#lastWin").classList.remove("zero");
       if (decoded.scatCount >= 3) {
         await sleep(500);
-        // refresh loyalty (scatter doesn't grant FS on-chain — loyalty does)
+        // refresh loyalty (scatter doesn't grant FS on-chain · loyalty does)
       }
     } else {
-      setText("#lastWin", "— no win");
+      setText("#lastWin", "- no win");
       $("#lastWin").classList.add("zero");
     }
 

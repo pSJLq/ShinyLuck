@@ -14,8 +14,17 @@
 
 const TSTATUS = { REGISTERING: 0, RUNNING: 1, FINISHED: 2, CANCELLED: 3 };
 
+// FINISHED and CANCELLED are terminal on-chain: nothing can move them again.
+// Without this the pass re-read every tournament that ever existed on every
+// poll — 19 of them by the time the bot arenas were done, one RPC call each,
+// several times a second, forever growing. That pass is what the main sweep
+// waits on, so old history was quietly taxing every live table. Per-instance
+// (callers may pass their own set) so tests stay isolated from each other.
+const _doneDefault = new Set();
+
 /// Advance every tournament by at most one step. Returns log tags.
 async function tickTournaments(trn, room, opts = {}) {
+  const done = opts.doneSet || _doneDefault;
   const tags = [];
   let n = 0;
   try {
@@ -24,8 +33,10 @@ async function tickTournaments(trn, room, opts = {}) {
     return ["count failed: " + (e.shortMessage || e.message)];
   }
   for (let id = 0; id < n; id++) {
+    if (done.has(id)) continue;
     try {
       const tag = await tickTournament(trn, room, id, opts);
+      if (tag === "done") { done.add(id); continue; }
       if (tag && tag !== "idle") tags.push(`trn ${id}: ${tag}`);
     } catch (e) {
       tags.push(`trn ${id} error: ${e.shortMessage || e.message}`);
@@ -59,6 +70,9 @@ async function tickTournament(trn, room, id, opts = {}) {
     }
     return "idle";
   }
+  // Terminal: say so distinctly from "nothing to do right now", so the caller
+  // can stop reading this one for the rest of the process's life.
+  if (status === TSTATUS.FINISHED || status === TSTATUS.CANCELLED) return "done";
   if (status !== TSTATUS.RUNNING) return "idle";
 
   // MTT-aware: this tournament may span several controlled tables.
@@ -91,14 +105,30 @@ async function tickTournament(trn, room, id, opts = {}) {
   if (!due && freeze) for (const tid of tables) freeze.delete(tid);
 
   // 1. Busted seats → report one per tick (place is global). Idle tables only.
+  //    1b. Abandoned seats: a zk-unresponsive player gets sat out by the strike
+  //    path and a mental-poker table can't deal them dead hands — their stack
+  //    would freeze forever and block the finish. Once the contract's idle
+  //    window has elapsed, forfeit the seat at its current place.
+  let forfeitAfter = null; // lazily read only when a sat-out seat shows up
   for (let ti = 0; ti < tables.length; ti++) {
     if (await room.handInProgress(tables[ti])) continue;
     const cfg = await room.getTable(tables[ti]);
     for (let s = 0; s < Number(cfg.maxSeats); s++) {
       const seat = await room.getSeat(tables[ti], s);
-      if (seat.occupied && seat.stack === 0n) {
+      if (!seat.occupied) continue;
+      if (seat.stack === 0n) {
         await (await trn.reportBust(id, ti, s)).wait();
         return "bust:" + ti + ":" + s;
+      }
+      if (seat.sittingOut && Number(seat.sitOutSince ?? 0) > 0) {
+        if (forfeitAfter === null) forfeitAfter = Number(await trn.idleForfeitSecs().catch(() => 0)) || 0;
+        const nowSec = opts.now ? opts.now() : Math.floor(Date.now() / 1000);
+        if (forfeitAfter > 0 && nowSec >= Number(seat.sitOutSince) + forfeitAfter) {
+          try {
+            await (await trn.forfeitIdle(id, ti, s)).wait();
+            return "forfeit-idle:" + ti + ":" + s;
+          } catch (_) { /* raced a sit-in or an older contract — never fatal */ }
+        }
       }
     }
   }

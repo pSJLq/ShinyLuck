@@ -28,7 +28,10 @@ class SimClient {
     } else if (task.do === "shuffle") {
       const deck = task.deck.map(zkDealer.parseCt);
       const X = zkDealer.parsePt(task.aggKey);
-      zkDealer.zkPostShuffle(state, t, this.addr, { dealId, deck: this.zk.shuffleRemask(deck, X).deck.map(zkDealer.serCt) });
+      const out = this.zk.shuffleRemask(deck, X);
+      zkDealer.zkPostShuffle(state, t, this.addr, { dealId, deck: out.deck.map(zkDealer.serCt) });
+      const prf = this.zk.proveShuffle(`SPZK:${dealId}:shuffle:${task.participant}`, deck, out.deck, X, out.secret);
+      zkDealer.zkPostShuffleProof(state, t, this.addr, { dealId, turn: task.participant, proof: this.zk.shuffleProofToWire(prf) });
     } else if (task.do === "shares") {
       const sec = this.byDeal.get(dealId);
       const items = task.idxs.map((idx) => {

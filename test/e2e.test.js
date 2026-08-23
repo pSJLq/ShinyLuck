@@ -130,22 +130,60 @@ describe("E2E", function () {
     expect(settled.player).to.equal(perm.vault);
   });
 
-  it("[5] mines: place → reveal seed → open safe cell → cashout", async function () {
+  it("[5] mines: place → commit hidden root → open safe cell → cashout → finalize", async function () {
+    const coder = ethers.AbiCoder.defaultAbiCoder();
+    const selectMines = (randomness, mineCount) => {
+      let bits = 0n; const cells = [...Array(25).keys()]; let remaining = 25; let r = randomness;
+      for (let i = 0; i < mineCount; i++) {
+        r = ethers.keccak256(coder.encode(["bytes32", "uint8"], [r, i]));
+        const idx = Number(BigInt(r) % BigInt(remaining));
+        bits |= 1n << BigInt(cells[idx]); cells[idx] = cells[remaining - 1]; remaining--;
+      }
+      return bits;
+    };
+    const salt = (ss, id, i) => ethers.keccak256(coder.encode(["bytes32", "uint256", "uint256"], [ss, id, i]));
+    const buildTree = (id, bm, ss) => {
+      const leaves = [];
+      for (let i = 0; i < 25; i++)
+        leaves.push(ethers.keccak256(coder.encode(["uint256", "uint256", "bool", "bytes32"],
+          [id, i, ((bm >> BigInt(i)) & 1n) === 1n, salt(ss, id, i)])));
+      for (let i = 25; i < 32; i++) leaves.push(ethers.keccak256(coder.encode(["uint256", "uint256"], [id, i])));
+      const levels = [leaves];
+      while (levels[levels.length - 1].length > 1) {
+        const prev = levels[levels.length - 1]; const next = [];
+        for (let i = 0; i < prev.length; i += 2) next.push(ethers.keccak256(ethers.concat([prev[i], prev[i + 1]])));
+        levels.push(next);
+      }
+      return { root: levels[levels.length - 1][0], levels };
+    };
+    const proofFor = (levels, index) => {
+      const p = []; let idx = index;
+      for (let l = 0; l < 5; l++) { p.push(levels[l][idx ^ 1]); idx >>= 1; }
+      return p;
+    };
+
     const cs = ethers.hexlify(ethers.randomBytes(32));
     await casino.connect(alice).placeMinesBet(5, cs, { value: ethers.parseEther("0.1") });
     const betId = (await casino.totalBets()) - 1n;
     await mineN(REVEAL_DELAY + 1n);
-    const idx = (await casino.getBet(betId)).seedIdx;
-    await casino.connect(bob).revealMinesSeed(betId, seeds[Number(idx)]);
-    const ms = await casino.minesState(betId);
-    let safe = -1;
-    for (let i = 0; i < 25; i++) {
-      if (((ms.minesBitmap >> BigInt(i)) & 1n) === 0n) { safe = i; break; }
-    }
-    await casino.connect(alice).openMinesCell(betId, safe);
-    await casino.connect(alice).cashoutMines(betId);
     const bet = await casino.getBet(betId);
-    expect(bet.won).to.equal(true);
+    const ss = seeds[Number(bet.seedIdx)];
+    const blk = await ethers.provider.getBlock(Number(bet.commitBlock) + Number(REVEAL_DELAY));
+    const randomness = ethers.keccak256(ethers.solidityPacked(
+      ["bytes32", "bytes32", "bytes32", "uint256"], [ss, bet.clientSeed, blk.hash, bet.nonce]));
+    const bitmap = selectMines(randomness, 5);
+    const tree = buildTree(betId, bitmap, ss);
+    // owner is an allowed coordinator (owner() || houseManager)
+    await casino.connect(owner).commitMinesRoot(betId, tree.root);
+    let safe = -1;
+    for (let i = 0; i < 25; i++) if (((bitmap >> BigInt(i)) & 1n) === 0n) { safe = i; break; }
+    // player picks (intent), coordinator (owner) resolves with the proof
+    await casino.connect(alice).pickMinesCell(betId, safe);
+    await casino.connect(owner).resolveMinesCell(betId, false, salt(ss, betId, safe), proofFor(tree.levels, safe));
+    await casino.connect(alice).cashoutMines(betId);
+    expect((await casino.getBet(betId)).won).to.equal(true);
+    // post-game transparency: honest root → no fraud
+    await expect(casino.finalizeMines(betId, ss)).to.emit(casino, "MinesLayout");
   });
 
   it("[6] agent quorum verifier — match → QuorumOk", async function () {

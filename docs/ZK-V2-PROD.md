@@ -22,18 +22,38 @@ Phases between hands (happy path ~3–6s, overlaps the winner-banner pause):
    bot (sig-gated like /holes). Deadline 8s → unresponsive seat gets
    `sitOutIdle` (strike + sat out), phase restarts without them (needs ≥2).
 2. **SHUFFLE** — sequential relay: bot sends the current 52-ct deck to player
-   i, client shuffles+remasks (~200ms), returns. First shuffler sees plaintext
-   deck but each later shuffle destroys their knowledge; ≥1 honest shuffler ⇒
-   nobody knows the final order. Deadline 8s per player.
-3. **HOLE-SHARES pre-collect** — each client sends decryption shares for
-   *other players' hole cts only* (never board, never its own). Bot verifies
-   proofs, relays: each player ends with k−1 shares per own card → decrypts
-   locally, sees own cards instantly. Bot can't decrypt (owner's share
-   missing). Board shares are deliberately NOT pre-collected — otherwise the
-   bot would know the whole board at deal time.
+   i, client shuffles+remasks (~350ms), returns, then streams in a **Wikström
+   proof of shuffle** (~1s, pipelined behind the NEXT player's shuffle): a
+   zero-knowledge argument that the output deck is exactly a permutation +
+   re-encryption of the input deck (Haenni-Locher-Koenig-Dubuis FC'17
+   pseudo-code, Algorithms 4.3–4.6, on BN254 with NUMS Pedersen generators).
+   The bot verifies every proof before the deal proceeds, EVERY client
+   independently re-verifies the whole chain (see step 3), and the on-chain
+   deal commits to the transcript hash. Consequence: **the "≥1 honest
+   shuffler" assumption is no longer load-bearing for deck integrity** — even
+   the last shuffler, with every other shuffler colluding, cannot substitute,
+   duplicate or bias a single ciphertext; and since every honest player is
+   themselves one of the shufflers, the final ORDER is unpredictable to any
+   coalition that doesn't include… the victim themselves. Deadline 8s per
+   player + 15s for outstanding proofs; a missing/invalid proof = strike +
+   redeal without that seat (pre-money, free).
+3. **HOLE-SHARES pre-collect** — each client FIRST fetches the full shuffle
+   transcript (`/zk/chain`: every posted deck + every proof) and verifies all
+   k proofs itself — the coordinator's verification is not a trust point. It
+   also pins its OWN shuffle output inside the chain (a forked/equivocated
+   chain fails the pin). Only then does it send decryption shares for *other
+   players' hole cts only* (never board, never its own) — a share given on an
+   unproven deck could help decrypt a planted copy of one's own card. Bot
+   verifies proofs, relays: each player ends with k−1 shares per own card →
+   decrypts locally, sees own cards instantly. Bot can't decrypt (owner's
+   share missing). Board shares are deliberately NOT pre-collected — otherwise
+   the bot would know the whole board at deal time.
 4. **prepareDeal** on-chain (verifies k Schnorr PoKs, aggregates the table
-   key, commits the 2k+5 in-play cts) → `room.startHand` binds it. Betting
-   proceeds on the UNCHANGED engine (session keys etc.).
+   key, commits the 2k+5 in-play cts + the keccak of the full shuffle-proof
+   transcript — clients compare it against the hash of the chain THEY
+   verified; anyone holding the transcript can re-verify the shuffle forever)
+   → `room.startHand` binds it. Betting proceeds on the UNCHANGED engine
+   (session keys etc.).
 5. **BOARD per street** — when a betting round closes, the bot requests that
    street's board shares from ALL k clients (folded players' clients keep
    answering — automatic, background). Verify → `revealBoardCard` with all k
@@ -51,15 +71,34 @@ Phases between hands (happy path ~3–6s, overlaps the winner-banner pause):
 - Disconnect BEFORE money is in (keys/shuffle): strike + sit out + redeal
   without them. Free.
 - Disconnect MID-HAND (missing board/hole shares): after the share deadline
-  the bot calls **`cancelHandPenalized(tableId, offenderSeat)`** — everyone's
+  the bot opens an on-chain ACCUSATION — **`accuseAbandon(tableId, seat,
+  cardIdx, ctA, ctB)`** — naming the withheld share and embedding the committed
+  ciphertext (the dealer verifies it against the deal's commitment, so the
+  accusation itself carries everything the accused needs to defend). A
+  **self-rescue window** (`rescueWindow`, default 45s, owner-bounded 15–600s)
+  opens. The accused's client — watching the CHAIN, not the bot — answers with
+  **`proveResponsive(tableId, d, R1, R2, s)`**: the dealer CP-verifies the share
+  against the seat's own per-hand key, RECORDS it for the coordinator to
+  consume, and the accusation dismisses (the (seat, card) pair is vindicated
+  for the hand — it can't be re-accused). Only an EXPIRED, un-rescued
+  accusation lets **`cancelHandPenalized(tableId)`** finalize: everyone's
   committed chips are refunded EXCEPT the offender's, which are distributed
   pro-rata to the other committed seats. Closing your tab in a lost pot costs
   you exactly what folding would — the ragequit exploit is dead. Offender is
   sat out + struck (3 strikes on cash → kickIdle).
-- Trust surface: the operator could falsely blame a seat, but the forfeited
-  chips go to the OTHER PLAYERS, never to the operator — abuse requires
-  operator+player collusion and is visible on-chain. Strictly better than v1
-  (where the bot knew every card). Documented on the provably-fair page.
+- Trust surface: a compromised worker key can no longer confiscate a live
+  player's chips by false accusation — the contract only forfeits after a
+  self-rescue window the accused failed to use, and the dealer rejects
+  accusations for shares the protocol doesn't legitimately need right now
+  (a seat's own holes before showdown, future board cards, non-participants) —
+  so accusations can't be weaponized to force early card disclosure either.
+  A rescue also DELIVERS the withheld share on-chain, so "rescue then keep
+  stalling" just walks the griefer through handing over every share. What a
+  malicious operator can still do is bounded griefing: stall hands (players
+  can always exit via the permissionless paths / plain cancel refunds), or
+  penalize a player whose client is genuinely dead — the same outcome that
+  player would get from any honest timeout. Forfeits go to the OTHER PLAYERS,
+  never to the operator. Documented on the provably-fair page.
 - Tournaments: an AFK/keyless seat is sat out; sitting-out seats on controlled
   tables auto-post a dead big blind each hand (**blind-off**, new in room v3,
   swept into the pot like antes) → stack drains → `reportBust` fires →
@@ -74,7 +113,10 @@ PokerRoom v3 (fresh deploy, engine byte-identical):
 - `sitOutIdle(tableId, seat)` — onlyDealerOrOperator, not mid-hand for a
   committed seat; sets sittingOut + increments timeoutStreak. `setSitOut(false)`
   resets the streak (player came back).
-- `cancelHandPenalized(tableId, offenderSeat)` — as above.
+- `accuseAbandon` / `proveResponsive` / `cancelHandPenalized(tableId)` — the
+  accuse → self-rescue → forfeit pipeline above (`accusationOf` view for
+  clients; `ZkTableDealer.accusationAllowed` legitimacy check +
+  `rescueShare`/`rescuedShare` recording).
 - Blind-off: in `startHand`, on CONTROLLED tables, occupied+sittingOut seats
   with stack>0 post min(bb, stack) dead into the pot via committedTotal (so
   plain `cancelHand` still refunds them correctly).
@@ -85,10 +127,12 @@ ZkTableDealer prod:
   deal (length-only today — a seat-set race would corrupt the participant
   mapping).
 - **Revealed-card dupe guard**: uint64 bitmask per deal; a second reveal of
-  the same card value reverts. Closes the visible half of the "malicious
-  shuffler duplicates a card" hole (a dupe among in-play cards is caught at
-  reveal; the hand cancels instead of settling wrong). Full shuffle arguments
-  (Groth16) remain R2.
+  the same card value reverts. (Now defense-in-depth behind the Wikström
+  shuffle arguments — a duplicated card can no longer even enter a deal;
+  this tripwire stays as the last on-chain line.)
+- **`proofHash`**: prepareDeal stores the keccak of the full shuffle-proof
+  transcript; `proofHash(dealId)` view for client cross-checks and public
+  post-hoc auditability.
 - Deck/pubkey storage: measure prepareDeal gas at k=6 in hardhat ×~10 Somnia
   factor; if prohibitive, switch to per-ct hash commitments + calldata reveal.
 

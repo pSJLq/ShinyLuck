@@ -1,5 +1,5 @@
 /* =========================================================================
-   ShinyPoker — Lobby styles. Extends styles.css tokens.
+   ShinyPoker · Lobby styles. Extends styles.css tokens.
    ========================================================================= */
 
 .lobby { display: grid; grid-template-rows: 56px auto auto 1fr; }
@@ -94,7 +94,7 @@
 
 .drow { display: grid; align-items: center; padding: 13px 16px; border-bottom: 1px solid var(--hair);
   cursor: pointer; transition: background .14s, border-color .14s; border-left: 2px solid transparent; }
-.drow:hover { background: rgba(217,171,74,0.05); border-left-color: var(--accent); }
+.drow:hover { background: rgba(217,185,112,0.05); border-left-color: var(--accent); }
 .drow.sel { background: var(--accent-12); border-left-color: var(--accent); }
 
 /* PRIMARY: stakes */
@@ -117,7 +117,7 @@
 .seatdots .lbl { font-family: var(--mono); font-weight: 600; font-size: 12px; color: var(--white); margin-left: 6px; }
 .seatdots .lbl.full { color: var(--danger-soft); }
 
-/* SECONDARY: avg pot / players-per-flop / waitlist — dimmer, lighter */
+/* SECONDARY: avg pot / players-per-flop / waitlist · dimmer, lighter */
 .numcell { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; }
 .numcell .u { font-size: 9px; color: var(--muted); opacity: 0.7; margin-left: 2px; }
 .ppfbar { display: flex; flex-direction: column; gap: 3px; align-items: flex-end; }
@@ -152,12 +152,18 @@
 /* ---- tournaments ---- */
 .trow { display: grid; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--hair);
   cursor: pointer; transition: .14s; border-left: 2px solid transparent; }
-.trow:hover { background: rgba(217,171,74,0.05); border-left-color: var(--accent); }
+.trow:hover { background: rgba(217,185,112,0.05); border-left-color: var(--accent); }
 .trow.sel { background: var(--accent-12); border-left-color: var(--accent); }
+/* ---- one accent per row ----
+   A row used to carry five competing colours: a gold name, a gold buy-in, a
+   gold prize, a green "secured" badge and a coloured status chip. Nothing was
+   emphasised because everything was. The name is white, the money is white,
+   the ONE gold thing is the prize pool, and the status chip is the only other
+   colour — so the eye lands on "what can I win" and "can I join". */
 .cell-tname { display: flex; flex-direction: column; gap: 3px; }
-.cell-tname .nm { font-family: var(--label); font-size: 13.5px; color: var(--white); }
-.cell-tname .meta { font-family: var(--label); font-size: 10px; color: var(--muted); display: flex; gap: 8px; }
-.cell-tname .meta .bnt { color: var(--gold); }
+.cell-tname .nm { font-family: var(--label); font-size: 14px; font-weight: 600; color: var(--white); letter-spacing: -0.005em; }
+.cell-tname .meta { font-family: var(--label); font-size: 10.5px; color: var(--muted); display: flex; gap: 9px; flex-wrap: wrap; }
+.cell-tname .meta .bnt { color: var(--fg-dim, #A5A29B); }
 
 .countdown { display: flex; flex-direction: column; gap: 2px; }
 .countdown .cd { font-family: var(--mono); font-weight: 600; font-size: 15px; color: var(--white); }
@@ -166,31 +172,42 @@
 .countdown .when { font-family: var(--label); font-size: 9.5px; color: var(--muted); }
 
 .buyincell { display: flex; flex-direction: column; gap: 3px; }
-.buyincell .bi { font-family: var(--mono); font-weight: 600; font-size: 15px; color: var(--white); }
-.buyincell .bi .u { font-size: 10px; color: var(--muted); font-weight: 500; margin-left: 2px; }
-.buyincell .split { font-family: var(--label); font-size: 9.5px; color: var(--muted); }
-.buyincell .split b { color: var(--accent-soft); font-family: var(--mono); }
-.buyincell .split .fee { color: var(--gold); }
+.buyincell .bi { font-family: var(--mono); font-weight: 700; font-size: 15px; color: var(--white); }
+.buyincell .bi .u { font-size: 10px; color: var(--muted); font-weight: 500; margin-left: 3px; }
+.buyincell .bi.free { font-family: var(--label); font-weight: 600; font-size: 14px; color: var(--fg-dim, #A5A29B); }
+.buyincell .split { font-family: var(--label); font-size: 10px; color: var(--muted); }
+.buyincell .split b { color: var(--text-2); font-family: var(--mono); }
 
+/* the prize pool is the one gold thing in the row */
 .prizecell { display: flex; flex-direction: column; gap: 4px; }
-.prizecell .pp { font-family: var(--mono); font-weight: 600; font-size: 16px; color: var(--white); }
-.prizecell .pp .u { font-size: 10px; color: var(--accent-soft); margin-left: 2px; }
-.securechip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--label); font-size: 9px;
-  letter-spacing: 0.03em; color: var(--win); border: 1px solid rgba(43,212,128,0.3); background: rgba(43,212,128,0.08);
-  border-radius: 999px; padding: 2px 8px; width: fit-content; }
-.securechip svg { width: 10px; height: 10px; }
-.securechip a { color: var(--win); text-decoration: none; opacity: 0.7; }
-.securechip a:hover { opacity: 1; text-decoration: underline; }
+.prizecell .pp { font-family: var(--mono); font-weight: 700; font-size: 17px; color: var(--accent-soft); }
+.prizecell .pp .u { font-size: 10px; color: var(--muted); font-weight: 500; margin-left: 3px; }
+.prizecell .pp.empty { font-family: var(--label); font-weight: 500; font-size: 12px; color: var(--fg-ghost, #57554F); }
 
-.statuschip { font-family: var(--label); font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase;
-  border-radius: 999px; padding: 4px 10px; border: 1px solid; width: fit-content; }
+.statuschip { font-family: var(--label); font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; border-radius: 999px; padding: 4px 10px; border: 1px solid; width: fit-content; }
 .statuschip.registering { color: var(--accent-soft); border-color: var(--accent-32); background: var(--accent-12); }
-.statuschip.latereg { color: var(--gold); border-color: rgba(229,180,60,0.4); background: rgba(229,180,60,0.1); }
-.statuschip.running { color: var(--win); border-color: rgba(43,212,128,0.4); background: rgba(43,212,128,0.08); }
-.statuschip.finished { color: var(--muted); border-color: var(--line-2); }
+.statuschip.latereg { color: var(--gold); border-color: rgba(233,204,133,0.4); background: rgba(233,204,133,0.1); }
+.statuschip.running { color: var(--win); border-color: rgba(111,207,151,0.4); background: rgba(111,207,151,0.08); }
+.statuschip.finished { color: var(--fg-ghost, #57554F); border-color: var(--line-2); background: transparent; }
 
-.regcell { font-family: var(--mono); font-size: 13px; color: var(--text-2); text-align: center; }
-.regcell .u { font-family: var(--label); font-size: 9px; color: var(--muted); display: block; }
+.regcell { font-family: var(--mono); font-size: 13.5px; font-weight: 600; color: var(--text-2); text-align: center; }
+.regcell .u { font-family: var(--label); font-size: 9.5px; font-weight: 500; color: var(--muted); display: block; }
+
+/* finished rows are receipts · they are readable, not loud */
+.drow.past { opacity: 0.62; }
+.drow.past:hover { opacity: 1; }
+
+.pasttoggle { display: block; margin: 14px auto 4px; font-family: var(--label); font-size: 11.5px;
+  font-weight: 500; color: var(--muted); background: transparent; border: 1px solid var(--line-2);
+  border-radius: 999px; padding: 8px 18px; cursor: pointer; transition: .14s; }
+.pasttoggle:hover { color: var(--text-2); border-color: var(--accent-32); background: rgba(255,255,255,0.03); }
+
+.emptystate { text-align: center; padding: 64px 20px; color: var(--muted); font-family: var(--label); }
+.emptystate.tight { padding: 34px 20px 26px; }
+.emptystate .glyph { font-size: 30px; margin-bottom: 10px; opacity: 0.5; }
+.emptystate .ttl { font-family: var(--label); font-weight: 600; font-size: 16px; color: var(--text-2); }
+.emptystate .sub { margin-top: 7px; font-size: 12.5px; line-height: 1.5; }
 
 /* tournament detail drawer */
 .drawer { border-left: 1px solid var(--line); background: #08080a; overflow-y: auto; min-height: 0;
@@ -321,47 +338,56 @@
 .balbanner .spacerflex { flex: 1; }
 
 /* ---- cash tab: mini-felt table cards (plan view of the actual table) ---- */
-.tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; padding-top: 8px; }
-.tcard { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px 12px; text-decoration: none;
-  background: linear-gradient(180deg, rgba(255,255,255,0.028), rgba(255,255,255,0.012));
-  border: 1px solid var(--line); border-radius: 16px;
+/* ---- cash table cards ----
+   The preview is a small copy of the real table, in the same emerald and with
+   the same gold rail, so a player recognises where they are about to sit. It
+   used to be a brown ellipse that looked like nothing on the site. */
+.tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(288px, 1fr)); gap: 16px; padding-top: 10px; }
+.tcard { position: relative; display: flex; flex-direction: column; gap: 11px; padding: 15px 16px 13px; text-decoration: none;
+  background: linear-gradient(180deg, rgba(255,255,255,0.032), rgba(255,255,255,0.012));
+  border: 1px solid var(--line-2); border-radius: 16px;
   transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
 .tcard:hover { transform: translateY(-3px); border-color: var(--accent-32);
-  box-shadow: 0 16px 44px rgba(0,0,0,0.45); }
-.tcard:hover .tc-felt { border-color: rgba(217,171,74,0.45); }
-.tcard.live { border-color: rgba(217,171,74,0.26); }
+  box-shadow: 0 16px 44px rgba(0,0,0,0.5); }
+.tcard:hover .tc-felt { box-shadow: 0 0 0 4px var(--rail), 0 0 0 5px rgba(217,185,112,0.65), inset 0 0 34px rgba(0,0,0,0.5); }
+.tcard.live { border-color: rgba(111,207,151,0.28); }
 
-.tc-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.tc-stakes { font-family: "Bricolage Grotesque", var(--mono), monospace; font-weight: 800; font-size: 19px;
+.tc-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tc-stakes { font-family: var(--mono); font-weight: 800; font-size: 20px;
   color: var(--white); letter-spacing: -0.01em; }
-.tc-stakes .u { font-family: var(--label); font-size: 10px; font-weight: 500; color: var(--accent-soft); margin-left: 4px; }
+.tc-stakes .u { font-family: var(--label); font-size: 10.5px; font-weight: 500; color: var(--muted); margin-left: 4px; }
 .tc-tags { display: inline-flex; gap: 7px; align-items: center; }
-.tc-size { font-family: var(--label); font-size: 10.5px; color: var(--muted); }
+.tc-size { font-family: var(--label); font-size: 11px; font-weight: 500; color: var(--muted); }
 
-.tc-felt { position: relative; height: 128px; margin: 2px 12px; border-radius: 50% / 46%;
-  background: radial-gradient(95% 110% at 50% 18%, #201b10 0%, #141008 56%, #0b0905 100%);
-  border: 1px solid rgba(217,171,74,0.2);
-  box-shadow: 0 0 0 5px rgba(0,0,0,0.35), inset 0 0 30px rgba(0,0,0,0.55);
-  transition: border-color .18s ease; }
+.tc-felt { position: relative; height: 132px; margin: 2px 12px; border-radius: 50% / 46%;
+  background:
+    repeating-linear-gradient(52deg, rgba(255,255,255,0.014) 0 1px, transparent 1px 3px),
+    radial-gradient(62% 68% at 50% 26%, var(--felt-hi) 0%, var(--felt) 48%, var(--felt-lo) 100%);
+  box-shadow: 0 0 0 4px var(--rail), 0 0 0 5px rgba(217,185,112,0.4), inset 0 0 34px rgba(0,0,0,0.5);
+  transition: box-shadow .18s ease; }
 .tc-suit { position: absolute; left: 50%; top: 50%; font-size: 62px; line-height: 1; user-select: none; pointer-events: none; }
 .tc-seat { position: absolute; width: 13px; height: 13px; border-radius: 50%; transform: translate(-50%, -50%);
-  border: 1.5px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.45); }
+  border: 1.5px solid rgba(255,255,255,0.18); background: rgba(0,0,0,0.4); }
 .tc-seat.on { background: linear-gradient(160deg, var(--accent), #8a6420); border-color: var(--accent-soft);
   box-shadow: 0 0 9px var(--accent-55); }
 .tc-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 4px; }
-.tc-pot { font-family: "Bricolage Grotesque", var(--mono), monospace; font-weight: 800; font-size: 21px;
-  color: var(--accent-soft); text-shadow: 0 0 18px rgba(217,171,74,0.35); }
-.tc-pot .u { font-family: var(--label); font-size: 9.5px; font-weight: 500; color: var(--muted); margin-left: 3px; }
-.tc-live { display: inline-flex; gap: 5px; align-items: center; font-family: var(--label); font-size: 9px;
-  letter-spacing: 0.14em; text-transform: uppercase; color: var(--win); }
+.tc-pot { font-family: var(--mono); font-weight: 800; font-size: 21px;
+  color: var(--white); text-shadow: 0 2px 10px rgba(0,0,0,0.6); }
+.tc-pot .u { font-family: var(--label); font-size: 9.5px; font-weight: 500; color: rgba(255,255,255,0.6); margin-left: 3px; }
+.tc-live { display: inline-flex; gap: 5px; align-items: center; font-family: var(--label); font-size: 9.5px;
+  font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--win); }
 .tc-live .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--win); animation: livePulse 1.6s infinite; }
-.tc-wait { font-family: var(--label); font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--muted); }
+.tc-wait { font-family: var(--label); font-size: 10px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase;
+  color: rgba(255,255,255,0.42); }
 
-.tc-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.tc-rake { font-family: var(--label); font-size: 9px; color: var(--muted); opacity: 0.82; }
-.tc-rake b { color: var(--accent-soft); font-family: var(--mono); }
+/* The rake line used to be 9px grey type reading "rake 10% · cap 1000 · no
+   flop no drop" — three facts, two of them jargon, wrapped onto two lines and
+   colliding with the button. It is one fact now, and the rest is a tooltip. */
+.tc-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tc-rake { font-family: var(--label); font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+.tc-rake b { color: var(--text-2); font-family: var(--mono); font-weight: 700; }
 .tc-actions { display: inline-flex; gap: 6px; flex-shrink: 0; }
+.tc-actions .btn-sm { font-size: 12px; font-weight: 600; padding: 8px 16px; }
 
 /* lobby dev HUD reuses .hud */

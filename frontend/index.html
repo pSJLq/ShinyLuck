@@ -3,646 +3,487 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ShinyLuck - The house is an AI Agent</title>
+<title>ShinyLuck · Provably-fair casino on Somnia</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css">
-<!-- Loaded synchronously BEFORE everything else so console.warn/error
-     monkey-patches are in place when Privy / ethers / MetaMask boot. -->
-<script src="lib/console-filter.js"></script>
-<script src="partials.js" defer></script>
-<script src="vendor/privy.bundle.js"></script>
-<script type="module" src="lib/wallet.js"></script>
-<script type="module" src="lib/livedata.js"></script>
-<script type="module" src="lib/agent-activity.js"></script>
-<script type="module" src="lib/cost-ledger.js"></script>
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/v2.css">
+<script src="/lib/console-filter.js"></script>
+<script src="/partials.js" defer></script>
+<script src="/vendor/privy.bundle.js"></script>
+<script type="module" src="/lib/wallet.js"></script>
+<script type="module" src="/lib/livedata.js"></script>
+  <script type="module" src="/lib/i18n.js"></script>
 </head>
-<body data-active-page="games">
+<body data-active-page="lobby">
 <div data-page-shell>
 <div data-mount="nav"></div>
 
-<!-- ========== HERO ========== -->
-<section class="hero">
-  <div class="dot-grid"></div>
-  <div class="hero-glow"></div>
-  <div class="hero-inner">
-    <div class="eyebrow">
-      <span class="dot-blink"></span>
-      <span>SOMNIA · BLOCK <span data-sl="blockNumber">-</span> · <span data-sl="finality">-</span> FINALITY</span>
-    </div>
-    <h1>The <span class="underline">house</span> is an<br>
-      <span class="accent">AI Agent.</span>
-    </h1>
-    <p>Six provably fair games. Four autonomous agents settling every bet on-chain in real time.
-      No pit boss, no closed RNG, no excuses - just deterministic consensus across Somnia's agent registry.</p>
-    <div class="hero-cta">
-      <button class="btn btn-primary" data-hover data-sl-enter-lobby>Enter Lobby →</button>
-      <a class="btn btn-ghost" data-hover href="docs.html" data-link>Read Whitepaper</a>
-      <div class="ticker">
-        <span class="label">CASINO</span>
-        <span class="value mono"><span data-sl-contract="casino">-</span></span>
-      </div>
-    </div>
+<div style="display:flex;align-items:flex-start">
+  <div data-mount="side"></div>
 
-    <div class="stat-row" data-reveal>
-      <div class="stat">
-        <div class="label"><span>BANKROLL</span><span>STT</span></div>
-        <div class="value mono"><span data-sl="bankroll" data-count="42718304" data-sl-role="bankroll" data-prefix="">- STT</span></div>
-        <div class="delta">free of locked reserves</div>
-        <span class="stat-corner"></span>
-      </div>
-      <div class="stat">
-        <div class="label"><span>BONUS MODE</span><span>HOUSE EDGE × 0.5</span></div>
-        <div class="value mono"><span data-sl="bonusMode">-</span></div>
-        <div class="delta">activated by HM agent</div>
-        <span class="stat-corner"></span>
-      </div>
-      <div class="stat">
-        <div class="label"><span>BETS SETTLED</span><span>TOTAL</span></div>
-        <div class="value mono"><span data-sl="totalBets" data-count="2841726" data-sl-role="totalBets">0</span></div>
-        <div class="delta">since deploy</div>
-        <span class="stat-corner"></span>
-      </div>
-      <div class="stat">
-        <div class="label"><span>PLAYERS</span><span>RECENT</span></div>
-        <div class="value mono"><span data-sl="playersOnline" data-count="48319" data-sl-role="playersOnline">0</span></div>
-        <div class="delta">unique addrs · last 30 settles</div>
-        <span class="stat-corner"></span>
-      </div>
-    </div>
-  </div>
-</section>
+  <main data-r-padb-m style="flex:1;min-width:0">
 
-<!-- ========== GAMES ========== -->
-<section class="section" id="games">
-  <div class="wrap">
-    <div class="section-head">
-      <h2><span class="num">[01]</span>Game lobby.</h2>
-      <p class="sub">Every game is a smart contract. Every roll is an agent call. Six floors, one consensus.</p>
-    </div>
+    <!-- ==================== LOBBY VIEW ==================== -->
+    <div id="view-lobby">
+    <section style="max-width:1400px;margin:0 auto;padding:10px 36px 0" data-r-pad-m>
 
-    <div class="game-grid">
-      <!-- ===== CRASH ===== -->
-      <a class="game" href="games/crash.html" data-link data-hover>
-        <div class="game-preview-wrap">
-          <span class="game-corner-tag purple">MULTIPLIER</span>
-          <svg class="crash-preview" viewBox="0 0 400 220" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="crashFill" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stop-color="#8B5CF6" stop-opacity=".5"/>
-                <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0"/>
-              </linearGradient>
-              <linearGradient id="crashLine" x1="0" x2="1" y1="0" y2="0">
-                <stop offset="0%" stop-color="#22D3EE"/>
-                <stop offset="100%" stop-color="#8B5CF6"/>
-              </linearGradient>
-            </defs>
-            <!-- grid -->
-            <g stroke="#18181b" stroke-width="1">
-              <line x1="0" y1="55" x2="400" y2="55"/>
-              <line x1="0" y1="110" x2="400" y2="110"/>
-              <line x1="0" y1="165" x2="400" y2="165"/>
-              <line x1="100" y1="0" x2="100" y2="220"/>
-              <line x1="200" y1="0" x2="200" y2="220"/>
-              <line x1="300" y1="0" x2="300" y2="220"/>
-            </g>
-            <!-- area -->
-            <path d="M0,210 C60,205 100,180 150,150 C200,120 250,80 320,40 L320,210 Z"
-              fill="url(#crashFill)"
-              style="animation: fill-area 2.4s ease forwards"/>
-            <!-- line -->
-            <path d="M0,210 C60,205 100,180 150,150 C200,120 250,80 320,40"
-              fill="none" stroke="url(#crashLine)" stroke-width="2.2"
-              stroke-linecap="round"
-              stroke-dasharray="600" stroke-dashoffset="600"
-              style="animation: draw-line 2.6s ease forwards"/>
-            <!-- end dot -->
-            <circle cx="320" cy="40" r="4" fill="#22D3EE">
-              <animate attributeName="r" values="4;7;4" dur="1.4s" repeatCount="indefinite"/>
-            </circle>
-          </svg>
-          <div class="crash-mult"><span id="crash-mult-val">3.24</span><span class="x">×</span></div>
-        </div>
-        <div class="game-body">
-          <div class="game-title-row">
-            <div class="game-title">Crash</div>
-            <div class="game-num">// 01</div>
-          </div>
-          <div class="game-desc">Watch the curve climb. Cash out before the agent calls the crash. Simple. Cruel. Fast.</div>
-          <div class="agent-pill"><span class="dot purple"></span> POWERED · LLM Inference Agent</div>
-          <div class="game-meta">
-            <div class="game-meta-item">House Edge<b class="cyan" data-sl="houseEdge" data-game="crash">3.00 %</b></div>
-            <div class="game-meta-item">Max Bet<b data-sl="maxBet" data-game="crash">10 STT</b></div>
-            <div class="game-meta-item">Max Win<b>100×</b></div>
-          </div>
-          <div class="game-cta"><span>Open Crash</span><span class="arrow">→</span></div>
-        </div>
-      </a>
+      <!-- ============ LATEST WINS (casino + poker, live) ============ -->
+      <div style="display:flex;align-items:center;gap:10px;margin:26px 0 12px">
+        <svg width="15" height="15" viewBox="0 0 24 24" style="flex:none;color:var(--gold)"><path d="M12 1.7c.72 5.85 3.58 8.7 9.4 9.4-5.82.7-8.68 3.55-9.4 9.4-.72-5.85-3.58-8.7-9.4-9.4 5.82-.7 8.68-3.55 9.4-9.4Z" fill="currentColor"></path></svg><span style="font:600 8.5px var(--mono);letter-spacing:.22em;color:#57554F">FLOOR</span>
+        <h2 style="margin:0;font:600 17px var(--sans);letter-spacing:-0.01em;color:var(--fg-strong)">Latest wins</h2>
+        <span class="live-tag"><span class="live-dot"></span>LIVE</span>
+        <span style="flex:1;height:1px;background:var(--line)"></span>
+      </div>
+      <div data-wins-strip data-rail="true" style="display:flex;gap:10px;overflow-x:auto;scrollbar-width:none;padding:2px 2px 6px;min-height:118px">
+        <span style="font:400 11px var(--mono);color:var(--fg-ghost);padding:8px 2px">loading on-chain wins…</span>
+      </div>
 
-      <!-- ===== VAULT.7 (Classic Slots) ===== -->
-      <a class="game" href="games/vault7/" data-link data-hover>
-        <div class="game-preview-wrap">
-          <span class="game-corner-tag">SLOT · 5×3</span>
-          <div style="height:220px; position:relative; display:flex; align-items:center; justify-content:center; background: radial-gradient(circle at 50% 50%, rgba(34,211,238,0.10), rgba(0,0,0,0.0) 60%); overflow:hidden;">
-            <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap: 4px; padding: 12px; width: 86%;">
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #4ee3ff;">◆</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #b794ff;">⬢</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #fff;">∞</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #ffc847;">⚡</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #ffc847;">✦</div>
-              <div style="aspect-ratio:1; background: rgba(34,211,238,0.18); border: 1px solid rgba(34,211,238,0.4); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #4ee3ff;">⬣</div>
-              <div style="aspect-ratio:1; background: rgba(34,211,238,0.18); border: 1px solid rgba(34,211,238,0.4); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #4ee3ff;">⬣</div>
-              <div style="aspect-ratio:1; background: rgba(34,211,238,0.18); border: 1px solid rgba(34,211,238,0.4); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #4ee3ff;">⬣</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #ffc847;">⚡</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #b794ff;">A</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #b794ff;">D</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #fff;">∞</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #4ee3ff;">⬢</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #ffc847;">✦</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size: 18px; color: #b794ff;">F</div>
+      <!-- ============ HERO CAROUSEL ============ -->
+      <div data-r-pad-m style="margin-top:24px;margin-bottom:44px">
+        <div data-r-hero id="hero-car" style="position:relative;height:238px;border-radius:20px;border:1px solid #1A1A20;background:radial-gradient(760px 380px at 85% -10%,rgba(217,185,112,.1),transparent 62%),linear-gradient(165deg,#111114,#0B0B0E 70%);overflow:hidden">
+
+          <div data-hero-slide="0" style="position:absolute;inset:0;display:flex;align-items:center;gap:28px;padding:34px 44px;opacity:1;transition:opacity .55s ease" data-r-pad-m>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:13px">
+              <span style="font:600 10.5px var(--sans);letter-spacing:.2em;color:var(--gold);text-transform:uppercase">Stay in the loop</span>
+              <h2 data-r-fs-m style="margin:0;font:600 33px/1.08 var(--sans);color:var(--fg-strong)">Follow <span style="color:var(--gold-mid)">@ShinyLuck_</span> on X</h2>
+              <p style="margin:0;font:400 13.5px/1.6 var(--sans);color:var(--fg-dim);max-width:440px">Turn on all notifications so you never miss a Bonus Mode window, a jackpot, or a drop.</p>
+              <div><a href="https://x.com/ShinyLuck_" target="_blank" rel="noopener" class="hv-bright" style="display:inline-flex;align-items:center;gap:9px;height:44px;padding:0 20px;border-radius:10px;background:#F2EEE6;color:#0A0A0C;font:600 13px var(--sans);text-decoration:none"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M3 3h4.7l4.3 6 5-6H20l-6.7 7.9L21 21h-4.7l-4.6-6.5L6.2 21H3.4l7.1-8.4Z" fill="currentColor"></path></svg>Follow &amp; turn on notifications</a></div>
             </div>
+            <div data-r-hide-m style="flex:none;width:124px;height:124px;border-radius:22px;background:#050506;border:1px solid #24242C;display:flex;align-items:center;justify-content:center;box-shadow:0 14px 34px rgba(0,0,0,.45)"><svg width="58" height="58" viewBox="0 0 24 24"><path d="M3 3h4.7l4.3 6 5-6H20l-6.7 7.9L21 21h-4.7l-4.6-6.5L6.2 21H3.4l7.1-8.4Z" fill="#F6F1E7"></path></svg></div>
           </div>
-        </div>
-        <div class="game-body">
-          <div class="game-title-row">
-            <div class="game-title">VAULT.7</div>
-            <div class="game-num">// 02</div>
-          </div>
-          <div class="game-desc">5 reels, 20 paylines. Wilds substitute, scatters drop free spins. Loyalty: 150 spins → +5 free.</div>
-          <div class="agent-pill"><span class="dot purple"></span> POWERED · LLM Inference Agent</div>
-          <div class="game-meta">
-            <div class="game-meta-item">RTP<b class="cyan" data-sl="rtp" data-game="slots">…</b></div>
-            <div class="game-meta-item">Max Bet<b data-sl="maxBet" data-game="slots">5 STT</b></div>
-            <div class="game-meta-item">Max Win<b>2 000×</b></div>
-          </div>
-          <div class="game-cta"><span>Crack the vault</span><span class="arrow">→</span></div>
-        </div>
-      </a>
 
-      <!-- ===== SUGAR.LAB (Cluster Cascade) ===== -->
-      <a class="game" href="games/sugar/" data-link data-hover>
-        <div class="game-preview-wrap">
-          <span class="game-corner-tag" style="background: linear-gradient(135deg, #ff5e8a, #b794ff);">CLUSTER · 7×7</span>
-          <div style="height:220px; position:relative; display:flex; align-items:center; justify-content:center; background: radial-gradient(circle at 50% 50%, rgba(255,94,138,0.10), rgba(0,0,0,0.0) 60%); overflow:hidden;">
-            <div style="display:grid; grid-template-columns: repeat(7, 1fr); gap: 2px; padding: 8px; width: 76%;">
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ff5e8a;">♥</div>
-              <div style="aspect-ratio:1; background: rgba(255,94,138,0.18); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ff5e8a;">♥</div>
-              <div style="aspect-ratio:1; background: rgba(255,94,138,0.18); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ff5e8a;">♥</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#4ee3ff;">◆</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ffc847;">●</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#7f8aa5;">✕</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#8fb3d0;">◯</div>
-              <div style="aspect-ratio:1; background: rgba(255,94,138,0.18); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ff5e8a;">♥</div>
-              <div style="aspect-ratio:1; background: rgba(255,94,138,0.18); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ff5e8a;">♥</div>
-              <div style="aspect-ratio:1; background: rgba(255,94,138,0.18); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ffffff;">✦</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#b794ff;">⬡</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#4ade80;">▲</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#7f8aa5;">✕</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#8fb3d0;">◯</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#8fb3d0;">◯</div>
-              <div style="aspect-ratio:1; background: rgba(255,94,138,0.18); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ff5e8a;">♥</div>
-              <div style="aspect-ratio:1; background: rgba(255,94,138,0.18); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ff5e8a;">♥</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ff9a3c;">◼</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ffc847;">●</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#b794ff;">⬡</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#7f8aa5;">✕</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#8fb3d0;">◯</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#4ade80;">▲</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ff9a3c;">◼</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ffc847;">●</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#7f8aa5;">✕</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#8fb3d0;">◯</div>
-              <div style="aspect-ratio:1; background: rgba(255,94,138,0.18); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ffc847;">✺</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#b794ff;">⬡</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#4ade80;">▲</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ff9a3c;">◼</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ffc847;">●</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#7f8aa5;">✕</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#8fb3d0;">◯</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#4ade80;">▲</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ff9a3c;">◼</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ffc847;">●</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#b794ff;">⬡</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#7f8aa5;">✕</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#8fb3d0;">◯</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#4ade80;">▲</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ff9a3c;">◼</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#ffc847;">●</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#b794ff;">⬡</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#4ee3ff;">◆</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#7f8aa5;">✕</div>
-              <div style="aspect-ratio:1; background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:#8fb3d0;">◯</div>
+          <div data-hero-slide="1" style="position:absolute;inset:0;display:flex;align-items:center;gap:28px;padding:34px 44px;opacity:0;pointer-events:none;transition:opacity .55s ease" data-r-pad-m>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:13px">
+              <span style="font:600 10.5px var(--sans);letter-spacing:.2em;color:var(--gold);text-transform:uppercase">ShinyPoker · Host &amp; Earn</span>
+              <h2 data-r-fs-m style="margin:0;font:600 33px/1.08 var(--sans);color:var(--fg-strong)">Host a tournament, <span style="color:var(--gold-mid)">earn up to 10%</span></h2>
+              <p style="margin:0;font:400 13.5px/1.6 var(--sans);color:var(--fg-dim);max-width:450px">Gather players into your own tournament and take a host cut of the prize pool · paid out on-chain.</p>
+              <div><a href="/poker?tab=tournaments" data-link class="btn2 btn2-gold" style="height:44px;padding:0 22px;text-decoration:none">Create a tournament</a></div>
             </div>
+            <div data-r-hide-m style="flex:none;width:124px;height:124px;border-radius:22px;background:radial-gradient(120% 120% at 50% 20%,#17130B,#050506 78%);border:1px solid #24242C;display:flex;align-items:center;justify-content:center;box-shadow:0 14px 34px rgba(0,0,0,.45)"><svg width="52" height="52" viewBox="0 0 24 24"><path d="M12 3c3.2 3.8 6.8 5.8 6.8 9.3a3.9 3.9 0 0 1-6.8 2.6 3.9 3.9 0 0 1-6.8-2.6C5.2 8.8 8.8 6.8 12 3Z" fill="#D9B970"></path><path d="M9.5 20.5h5M12 15v5.5" fill="none" stroke="#D9B970" stroke-width="1.6" stroke-linecap="round"></path></svg></div>
           </div>
-        </div>
-        <div class="game-body">
-          <div class="game-title-row">
-            <div class="game-title">SUGAR.LAB</div>
-            <div class="game-num">// 07</div>
-          </div>
-          <div class="game-desc">7×7 cluster cascade. 5+ touching symbols detonate, gravity refills, chain forever.</div>
-          <div class="agent-pill"><span class="dot purple"></span> POWERED · LLM Inference Agent</div>
-          <div class="game-meta">
-            <div class="game-meta-item">RTP<b class="cyan" data-sl="rtp" data-game="cluster">…</b></div>
-            <div class="game-meta-item">Max Bet<b data-sl="maxBet" data-game="cluster">5 STT</b></div>
-            <div class="game-meta-item">Max Win<b>2 500×</b></div>
-          </div>
-          <div class="game-cta"><span>Detonate</span><span class="arrow">→</span></div>
-        </div>
-      </a>
 
-      <!-- ===== DICE ===== -->
-      <a class="game" href="games/dice.html" data-link data-hover>
-        <div class="game-preview-wrap">
-          <span class="game-corner-tag purple">PROBABILITY</span>
-          <div class="dice-stage">
-            <div class="dice">
-              <div class="pip"></div><div class="pip empty"></div><div class="pip"></div>
-              <div class="pip empty"></div><div class="pip"></div><div class="pip empty"></div>
-              <div class="pip"></div><div class="pip empty"></div><div class="pip"></div>
+          <div data-hero-slide="2" style="position:absolute;inset:0;display:flex;align-items:center;gap:28px;padding:34px 44px;opacity:0;pointer-events:none;transition:opacity .55s ease" data-r-pad-m>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:13px">
+              <span style="font:600 10.5px var(--sans);letter-spacing:.2em;color:var(--gold);text-transform:uppercase">Provably fair</span>
+              <h2 data-r-fs-m style="margin:0;font:600 33px/1.08 var(--sans);color:var(--fg-strong)">Every bet <span style="color:var(--gold-mid)">verifiable on-chain</span></h2>
+              <p style="margin:0;font:400 13.5px/1.6 var(--sans);color:var(--fg-dim);max-width:450px">Commit-reveal randomness, settled by an open bot, auditable from the genesis block. No trust required.</p>
+              <div><a href="/fair" data-link class="btn2 btn2-line" style="height:44px;padding:0 20px;text-decoration:none">How it works</a></div>
             </div>
-            <div class="dice-readout">ROLL OVER <b>52</b>  ·  PAYOUT <b>1.96×</b>  ·  WIN CHANCE <b>50.0%</b></div>
+            <div data-r-hide-m style="flex:none;width:124px;height:124px;border-radius:22px;overflow:hidden;background:radial-gradient(120% 120% at 50% 30%,#17130B,#050506 78%);border:1px solid #24242C;box-shadow:0 14px 34px rgba(0,0,0,.45);position:relative"><img src="/assets/spark.png" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;mix-blend-mode:screen"></div>
           </div>
         </div>
-        <div class="game-body">
-          <div class="game-title-row">
-            <div class="game-title">Dice</div>
-            <div class="game-num">// 03</div>
-          </div>
-          <div class="game-desc">Set the threshold. The agent commits a hash, you reveal a number. Pure probability.</div>
-          <div class="agent-pill"><span class="dot cyan"></span> POWERED · JSON API Agent</div>
-          <div class="game-meta">
-            <div class="game-meta-item">House Edge<b class="cyan" data-sl="houseEdge" data-game="dice">1.00 %</b></div>
-            <div class="game-meta-item">Max Bet<b data-sl="maxBet" data-game="dice">10 STT</b></div>
-            <div class="game-meta-item">Max Win<b>49.5×</b></div>
-          </div>
-          <div class="game-cta"><span>Roll Dice</span><span class="arrow">→</span></div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px" id="hero-dots">
+          <button data-hero-dot="0" aria-label="Slide 1" style="height:8px;width:30px;border-radius:999px;border:none;background:var(--gold);cursor:pointer;padding:0;transition:width .35s ease,background .35s ease"></button>
+          <button data-hero-dot="1" aria-label="Slide 2" style="height:8px;width:8px;border-radius:999px;border:none;background:#2C2C38;cursor:pointer;padding:0;transition:width .35s ease,background .35s ease"></button>
+          <button data-hero-dot="2" aria-label="Slide 3" style="height:8px;width:8px;border-radius:999px;border:none;background:#2C2C38;cursor:pointer;padding:0;transition:width .35s ease,background .35s ease"></button>
         </div>
-      </a>
-
-      <!-- ===== PLINKO ===== -->
-      <a class="game" href="games/plinko.html" data-link data-hover>
-        <div class="game-preview-wrap">
-          <span class="game-corner-tag">PHYSICS</span>
-          <svg class="plinko-svg" viewBox="0 0 400 220" preserveAspectRatio="xMidYMid meet">
-            <!-- pegs (5 rows) -->
-            <g class="peg">
-              <circle cx="200" cy="30"  r="2"/>
-              <circle cx="180" cy="60"  r="2"/><circle cx="220" cy="60"  r="2"/>
-              <circle cx="160" cy="90"  r="2"/><circle cx="200" cy="90"  r="2"/><circle cx="240" cy="90"  r="2"/>
-              <circle cx="140" cy="120" r="2"/><circle cx="180" cy="120" r="2"/><circle cx="220" cy="120" r="2"/><circle cx="260" cy="120" r="2"/>
-              <circle cx="120" cy="150" r="2"/><circle cx="160" cy="150" r="2"/><circle cx="200" cy="150" r="2"/><circle cx="240" cy="150" r="2"/><circle cx="280" cy="150" r="2"/>
-            </g>
-            <!-- buckets -->
-            <g>
-              <rect class="bucket-rect" x="100" y="180" width="40" height="30"/>
-              <rect class="bucket-rect" x="142" y="180" width="40" height="30"/>
-              <rect class="bucket-rect high" x="184" y="180" width="40" height="30"/>
-              <rect class="bucket-rect" x="226" y="180" width="40" height="30"/>
-              <rect class="bucket-rect" x="268" y="180" width="40" height="30"/>
-              <text class="bucket" x="120" y="200" text-anchor="middle">0.2x</text>
-              <text class="bucket mid" x="162" y="200" text-anchor="middle">1x</text>
-              <text class="bucket high" x="204" y="200" text-anchor="middle">5x</text>
-              <text class="bucket mid" x="246" y="200" text-anchor="middle">1x</text>
-              <text class="bucket" x="288" y="200" text-anchor="middle">0.2x</text>
-            </g>
-            <!-- ball with animateMotion -->
-            <path id="plinkoPath" d="M 200,15 Q 195,45 180,60 Q 165,75 160,90 Q 175,105 200,120 Q 215,135 200,150 L 204,180" fill="none" stroke="none"/>
-            <circle r="4" class="plinko-ball">
-              <animateMotion dur="3.2s" repeatCount="indefinite" rotate="auto">
-                <mpath href="#plinkoPath"/>
-              </animateMotion>
-            </circle>
-          </svg>
-        </div>
-        <div class="game-body">
-          <div class="game-title-row">
-            <div class="game-title">Plinko</div>
-            <div class="game-num">// 04</div>
-          </div>
-          <div class="game-desc">Drop a chip, let physics settle. 16 rows, deterministic bounces seeded on-chain.</div>
-          <div class="agent-pill"><span class="dot amber"></span> POWERED · Parse Website Agent</div>
-          <div class="game-meta">
-            <div class="game-meta-item">House Edge<b class="cyan" data-sl="houseEdge" data-game="plinko">1.50 %</b></div>
-            <div class="game-meta-item">Max Bet<b data-sl="maxBet" data-game="plinko">10 STT</b></div>
-            <div class="game-meta-item">Max Win<b>1 000×</b></div>
-          </div>
-          <div class="game-cta"><span>Drop Chip</span><span class="arrow">→</span></div>
-        </div>
-      </a>
-
-      <!-- ===== MINES ===== -->
-      <a class="game" href="games/mines.html" data-link data-hover>
-        <div class="game-preview-wrap">
-          <span class="game-corner-tag amber">RISK · 5×5</span>
-          <div class="mines">
-            <div class="tile safe revealed">✓</div>
-            <div class="tile"></div>
-            <div class="tile safe revealed">✓</div>
-            <div class="tile bomb revealed">💣</div>
-            <div class="tile"></div>
-
-            <div class="tile"></div>
-            <div class="tile safe revealed">✓</div>
-            <div class="tile"></div>
-            <div class="tile"></div>
-            <div class="tile safe revealed">✓</div>
-
-            <div class="tile safe revealed">✓</div>
-            <div class="tile"></div>
-            <div class="tile bomb revealed">💣</div>
-            <div class="tile safe revealed">✓</div>
-            <div class="tile"></div>
-
-            <div class="tile"></div>
-            <div class="tile safe revealed">✓</div>
-            <div class="tile"></div>
-            <div class="tile"></div>
-            <div class="tile bomb revealed">💣</div>
-
-            <div class="tile bomb revealed">💣</div>
-            <div class="tile"></div>
-            <div class="tile safe revealed">✓</div>
-            <div class="tile"></div>
-            <div class="tile safe revealed">✓</div>
-          </div>
-        </div>
-        <div class="game-body">
-          <div class="game-title-row">
-            <div class="game-title">Mines</div>
-            <div class="game-num">// 05</div>
-          </div>
-          <div class="game-desc">Pick gems, dodge bombs. Cash out anytime - every safe tile compounds the multiplier.</div>
-          <div class="agent-pill"><span class="dot red"></span> POWERED · House Manager Agent</div>
-          <div class="game-meta">
-            <div class="game-meta-item">House Edge<b class="cyan" data-sl="houseEdge" data-game="mines">1.20 %</b></div>
-            <div class="game-meta-item">Max Bet<b data-sl="maxBet" data-game="mines">10 STT</b></div>
-            <div class="game-meta-item">Max Win<b>100×</b></div>
-          </div>
-          <div class="game-cta"><span>Open Field</span><span class="arrow">→</span></div>
-        </div>
-      </a>
-
-      <!-- ===== ROULETTE ===== -->
-      <a class="game" href="games/roulette.html" data-link data-hover>
-        <div class="game-preview-wrap">
-          <span class="game-corner-tag">AMERICAN · 0/00-36</span>
-          <div class="roulette-stage">
-            <svg viewBox="0 0 200 200" width="180" height="180" class="roulette-wheel">
-              <defs>
-                <radialGradient id="rouletteCenter" r="50%">
-                  <stop offset="0%" stop-color="#22D3EE"/>
-                  <stop offset="100%" stop-color="#0e7490"/>
-                </radialGradient>
-              </defs>
-              <g transform="translate(100,100)">
-                <!-- 18 segments alternating red/black + 1 green -->
-                <g id="segments"></g>
-                <circle r="78" fill="none" stroke="#27272d" stroke-width="1"/>
-                <circle r="58" fill="#0a0a0c" stroke="#27272d" stroke-width="1"/>
-                <!-- spokes -->
-                <g stroke="#18181b" stroke-width="1">
-                  <line x1="-58" y1="0" x2="58" y2="0"/>
-                  <line y1="-58" x1="0" y2="58" x2="0"/>
-                  <line x1="-41" y1="-41" x2="41" y2="41"/>
-                  <line x1="41" y1="-41" x2="-41" y2="41"/>
-                </g>
-                <circle r="18" fill="url(#rouletteCenter)"/>
-                <circle r="6" fill="#080808"/>
-              </g>
-            </svg>
-            <div class="roulette-pointer"></div>
-            <script>
-              // Build wheel segments inline
-              (function() {
-                const wheel = document.querySelector('#segments');
-                if (!wheel) return;
-                const N = 18;
-                const colors = ['#dc2626', '#0a0a0c'];
-                const R = 78, r = 58;
-                let path = '';
-                for (let i = 0; i < N; i++) {
-                  const a1 = (i / N) * Math.PI * 2;
-                  const a2 = ((i + 1) / N) * Math.PI * 2;
-                  const x1 = Math.cos(a1) * R, y1 = Math.sin(a1) * R;
-                  const x2 = Math.cos(a2) * R, y2 = Math.sin(a2) * R;
-                  const x3 = Math.cos(a2) * r, y3 = Math.sin(a2) * r;
-                  const x4 = Math.cos(a1) * r, y4 = Math.sin(a1) * r;
-                  const seg = document.createElementNS('http://www.w3.org/2000/svg','path');
-                  seg.setAttribute('d', `M${x1},${y1} A${R},${R} 0 0 1 ${x2},${y2} L${x3},${y3} A${r},${r} 0 0 0 ${x4},${y4} Z`);
-                  seg.setAttribute('fill', colors[i % 2]);
-                  seg.setAttribute('stroke', '#27272d');
-                  seg.setAttribute('stroke-width', '0.5');
-                  wheel.appendChild(seg);
-                }
-              })();
-            </script>
-          </div>
-        </div>
-        <div class="game-body">
-          <div class="game-title-row">
-            <div class="game-title">Roulette</div>
-            <div class="game-num">// 06</div>
-          </div>
-          <div class="game-desc">Double zero, full felt. One wheel for everyone, every result settled on-chain by the agent.</div>
-          <div class="agent-pill"><span class="dot red"></span> POWERED · House Manager Agent</div>
-          <div class="game-meta">
-            <div class="game-meta-item">House Edge<b class="cyan" data-sl="houseEdge" data-game="roulette">5.26 %</b></div>
-            <div class="game-meta-item">Max Bet<b data-sl="maxBet" data-game="roulette">10 STT</b></div>
-            <div class="game-meta-item">Max Win<b>36×</b></div>
-          </div>
-          <div class="game-cta"><span>Take Seat</span><span class="arrow">→</span></div>
-        </div>
-      </a>
-    </div>
-  </div>
-</section>
-
-<!-- ========== LIVE FEED ========== -->
-<section class="section" id="live">
-  <div class="wrap">
-    <div class="section-head">
-      <h2><span class="num">[02]</span>Live bets feed.</h2>
-      <p class="sub">Every settled bet streams here straight from the contract. No filtering, no delay.</p>
-    </div>
-    <div class="feed-head">
-      <span class="live-pill"><span class="dot"></span> LIVE</span>
-      <span class="feed-count">games settled · <span data-sl="totalBets">0</span></span>
-      <span class="feed-count" style="margin-left: 16px;">bonus mode · <b data-sl="bonusMode" style="color:var(--cyan);">-</b></span>
-      <span class="feed-count" style="margin-left: 16px;">bankroll · <b data-sl="bankroll">-</b></span>
-      <a href="leaderboard.html" data-link style="margin-left:auto; color: var(--cyan); font-size: 11px; letter-spacing: 2px; text-transform: uppercase;">Open leaderboard →</a>
-    </div>
-    <table class="feed-table">
-      <thead>
-        <tr>
-          <th>Game</th>
-          <th>Player</th>
-          <th>Bet</th>
-          <th>Mult</th>
-          <th>P&amp;L</th>
-        </tr>
-      </thead>
-      <tbody id="feed-body"></tbody>
-    </table>
-  </div>
-</section>
-
-<!-- ========== AGENTS ========== -->
-<section class="section">
-  <div class="wrap">
-    <div class="section-head">
-      <h2><span class="num">[03]</span>Somnia agents.</h2>
-      <p class="sub">Four autonomous agents form the house. Each is registered on Somnia, addressable by ID, callable by anyone.</p>
-    </div>
-
-    <div class="agents">
-      <!-- JSON API -->
-      <div class="agent-card" data-hover>
-        <div class="agent-head">
-          <span class="agent-dot cyan"></span>
-          <h3>JSON API Agent</h3>
-        </div>
-        <div class="agent-id">ID: <b data-sl-agent-id="json">-</b></div>
-        <p class="agent-desc">Fetches competitor casino RTP from a public JSON endpoint. The House Manager calls it before every RTP decision so its edge is set against the live market, not a guess.</p>
-        <div class="chips">
-          <span class="chip">competitor RTP</span>
-          <span class="chip">market data</span>
-          <span class="chip">oracle</span>
-        </div>
-        <div class="agent-stats">
-          <div class="agent-stat"><div class="l">Status</div><div class="v cyan">REGISTERED</div></div>
-          <div class="agent-stat"><div class="l">Role</div><div class="v">RTP benchmark</div></div>
-          <div class="agent-stat"><div class="l">Money path</div><div class="v">yes</div></div>
-        </div>
-        <div class="agent-bar" style="color: var(--cyan)"></div>
       </div>
 
-      <!-- LLM Inference -->
-      <div class="agent-card" data-hover>
-        <div class="agent-head">
-          <span class="agent-dot purple"></span>
-          <h3>LLM Inference Agent</h3>
+      <!-- ============ GAME RAILS ============ -->
+      <div id="sl-rails" style="display:flex;flex-direction:column;gap:46px"><!-- rails render here --></div>
+
+      <!-- ============ TOP PLAYERS ============ -->
+      <div data-top-players style="margin-top:54px;display:none">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <svg width="17" height="17" viewBox="0 0 24 24" style="flex:none;color:var(--gold)"><path d="M7 4.5h10v2.8a5 5 0 0 1-10 0V4.5Z M7 5.5H4.5V7A3 3 0 0 0 7.5 10 M17 5.5h2.5V7a3 3 0 0 1-3 3 M12 12.3V16 M10 16h4v4h-4Z M8 20h8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <span style="font:600 8.5px var(--mono);letter-spacing:.22em;color:#57554F">HALL OF FAME</span>
+            <h2 style="margin:0;font:600 19px var(--sans);letter-spacing:-0.01em;color:var(--fg-strong)">Top players</h2>
+          </div>
+          <span style="flex:1;height:1px;background:var(--line)"></span>
         </div>
-        <div class="agent-id">ID: <b data-sl-agent-id="llm">-</b></div>
-        <p class="agent-desc">The brain. Via inferToolsChat it reads each player-agent's on-chain strategy and calls placeBet itself as an on-chain tool. It also sets slot RTP, narrates House Manager decisions, and backs the 3-of-4 quorum re-derive of every result.</p>
-        <div class="chips">
-          <span class="chip">qwen3-30b</span>
-          <span class="chip">inferToolsChat</span>
-          <span class="chip">on-chain tool calls</span>
-        </div>
-        <div class="agent-stats">
-          <div class="agent-stat"><div class="l">Quorum cfg</div><div class="v purple">3 of 4</div></div>
-          <div class="agent-stat"><div class="l">Drives</div><div class="v">player bets + RTP</div></div>
-          <div class="agent-stat"><div class="l">Money path</div><div class="v">yes</div></div>
-        </div>
-        <div class="agent-bar" style="color: var(--purple-2)"></div>
+        <div data-top-players-body></div>
       </div>
 
-      <!-- Parse Website -->
-      <div class="agent-card" data-hover>
-        <div class="agent-head">
-          <span class="agent-dot amber"></span>
-          <h3>Parse Website Agent</h3>
+      <!-- ============ BIGGEST WINS ============ -->
+      <div data-biggest-wins style="margin-top:54px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <svg width="17" height="17" viewBox="0 0 24 24" style="flex:none;color:var(--gold)"><path d="M12 1.7c.72 5.85 3.58 8.7 9.4 9.4-5.82.7-8.68 3.55-9.4 9.4-.72-5.85-3.58-8.7-9.4-9.4 5.82-.7 8.68-3.55 9.4-9.4Z" fill="currentColor"></path></svg>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <span style="font:600 8.5px var(--mono);letter-spacing:.22em;color:#57554F">ON-CHAIN · CASINO + POKER</span>
+            <h2 style="margin:0;font:600 19px var(--sans);letter-spacing:-0.01em;color:var(--fg-strong)">Biggest wins</h2>
+          </div>
+          <span class="live-tag"><span class="live-dot"></span>LIVE</span>
+          <span style="flex:1;height:1px;background:var(--line)"></span>
         </div>
-        <div class="agent-id">ID: <b data-sl-agent-id="parse">-</b></div>
-        <p class="agent-desc">Scrapes a live crypto-news feed each cron tick. A bullish headline lets the House Manager flip Bonus Mode on (house edge × 0.5) - the market literally moves the odds, autonomously.</p>
-        <div class="chips">
-          <span class="chip">news feed</span>
-          <span class="chip">bonus trigger</span>
-          <span class="chip">sentiment</span>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px">
+          <button data-bw-tab="24h" class="bw-tab on">Last 24 Hours</button>
+          <button data-bw-tab="7d" class="bw-tab">Last 7 Days</button>
+          <button data-bw-tab="30d" class="bw-tab">Last 30 Days</button>
+          <button data-bw-tab="all" class="bw-tab">All Time</button>
+          <button data-bw-tab="latest" class="bw-tab">Latest Games Played</button>
         </div>
-        <div class="agent-stats">
-          <div class="agent-stat"><div class="l">Status</div><div class="v" style="color:var(--amber)">REGISTERED</div></div>
-          <div class="agent-stat"><div class="l">Role</div><div class="v">bonus signal</div></div>
-          <div class="agent-stat"><div class="l">Money path</div><div class="v">yes</div></div>
+        <div class="card2 feed2" style="position:relative">
+          <table>
+            <thead><tr>
+              <th>GAME</th>
+              <th>BET</th>
+              <th>PAYOUT</th>
+              <th>PLAYER</th>
+              <th style="text-align:right">TIME</th>
+            </tr></thead>
+            <tbody data-bw-body>
+              <tr><td colspan="5" style="padding:20px;font:400 11px var(--mono);color:var(--fg-ghost)">loading on-chain history…</td></tr>
+            </tbody>
+          </table>
+          <div data-bw-pager style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid var(--line)"></div>
         </div>
-        <div class="agent-bar" style="color: var(--amber)"></div>
       </div>
 
-      <!-- House Manager -->
-      <div class="agent-card" data-hover>
-        <div class="agent-head">
-          <span class="agent-dot red"></span>
-          <h3>House Manager Agent <span class="badge-mainnet" style="margin-left:8px; color:var(--red); border-color:var(--red)">AUTONOMOUS</span></h3>
-        </div>
-        <div class="agent-id">ID: <b data-sl-agent-id="hm">-</b></div>
-        <p class="agent-desc">Rebalances bankroll, sizes max bets, activates Bonus Mode, and triggers circuit breakers when variance exceeds tolerance. Writes reasoning logs on-chain.</p>
-        <div class="chips">
-          <span class="chip">treasury</span>
-          <span class="chip">risk</span>
-          <span class="chip">circuit-breaker</span>
-        </div>
-        <div class="agent-stats" data-sl-agent-stats="hm">
-          <div class="agent-stat"><div class="l">Reasoning logs / 24h</div><div class="v" style="color:var(--red)">-</div></div>
-          <div class="agent-stat"><div class="l">Bonus mode</div><div class="v" data-sl="bonusMode">-</div></div>
-          <div class="agent-stat"><div class="l">Bankroll</div><div class="v" data-sl="bankroll">-</div></div>
-        </div>
-        <div class="agent-bar" style="color: var(--red)"></div>
+    </section>
+    </div>
+
+    <!-- ==================== POKER VIEW ==================== -->
+    <div id="view-poker" style="display:none">
+      <div class="view-frame-wrap">
+        <iframe id="poker-frame" title="ShinyPoker" allow="clipboard-write"></iframe>
       </div>
     </div>
 
-    <!-- Unified live agent decision feed: every autonomous action from all four
-         agents in one stream, newest first, straight from on-chain events. This
-         is the single place a visitor SEES the agents acting in real time. -->
-    <div class="agent-stream" data-hover>
-      <div class="agent-stream-head">
-        <div>
-          <h3>Agent activity · live</h3>
-          <span class="agent-stream-sub">every autonomous decision, on-chain, newest first</span>
-        </div>
-        <span class="agent-stream-pill"><span class="dot"></span> LIVE</span>
-      </div>
-      <div class="agent-stream-body" data-sl-agent-stream>
-        <div class="agent-stream-empty">connecting to on-chain agent events…</div>
+    <!-- ==================== GAME VIEW (dice / roulette / vault7 / sugar) ==================== -->
+    <div id="view-game" style="display:none">
+      <div class="view-frame-wrap">
+        <iframe id="game-frame" title="ShinyLuck game" allow="clipboard-write"></iframe>
       </div>
     </div>
 
-    <!-- Cost ledger: real economics of the agent stack, derived from on-chain
-         events in the last 24h. Click any row to see receipts. -->
-    <div class="cost-ledger" data-hover>
-      <div class="cost-ledger-head">
-        <div>
-          <h3>Agent economics</h3>
-          <span class="cost-ledger-sub">last 24 hours · on-chain events · every call is a Somnia Agent Platform receipt</span>
-        </div>
-        <span class="cost-ledger-pill" data-sl-cost-live>LIVE</span>
-      </div>
-      <div class="cost-ledger-grid">
-        <div class="cost-stat">
-          <div class="cost-l">Total spent</div>
-          <div class="cost-v" data-sl-cost-total>-</div>
-          <div class="cost-sub" data-sl-cost-total-usd></div>
-        </div>
-        <div class="cost-stat">
-          <div class="cost-l">Agent calls</div>
-          <div class="cost-v" data-sl-cost-count>-</div>
-          <div class="cost-sub">across all 4 agents</div>
-        </div>
-        <div class="cost-stat">
-          <div class="cost-l">Avg / call</div>
-          <div class="cost-v" data-sl-cost-avg>-</div>
-          <div class="cost-sub">platform-billed</div>
-        </div>
-        <div class="cost-stat">
-          <div class="cost-l">HM runway</div>
-          <div class="cost-v" data-sl-cost-runway>-</div>
-          <div class="cost-sub" data-sl-cost-runway-detail></div>
-        </div>
-      </div>
-      <div class="cost-breakdown" data-sl-cost-breakdown>
-        <div class="cost-empty">awaiting first 24h of events…</div>
-      </div>
-    </div>
-  </div>
-</section>
+    <div data-mount="footer"></div>
+  </main>
+</div>
+</div>
 
-<!-- Legacy inline Provably-Fair section removed - see fair.html for the
-     full live receipt + browser-side verifier. -->
+<style>
+  /* ONE SCROLLBAR: the frame never scrolls itself · it is sized to the height
+     its content reports (postMessage 'sl-height'), so only this page scrolls.
+     The starting height is the viewport so nothing jumps before the first
+     report lands. */
+  .view-frame-wrap { position: relative; width: 100%; }
+  .view-frame-wrap iframe { display: block; width: 100%; height: calc(100vh - 64px); min-height: 420px; border: 0; background: #070708; }
+  @media (max-width: 860px) { .view-frame-wrap iframe { height: calc(100vh - 64px - 66px); } }
+</style>
 
-</div> <!-- end data-page-shell -->
-<div data-mount="footer"></div>
+<script type="module">
+import { initWins } from "/lib/wins.js";
+initWins().catch((e) => console.warn("[lobby] wins:", e.message));
+</script>
 
-<script src="app.js"></script>
+<script>
+/* ---------------- lobby: game rails (all 7 · offline ones marked BETA) ---------------- */
+(function () {
+  const GAMES = [
+    { id: 'dice',     name: 'Dice',      cat: 'orig',  href: '/dice',     live: true },
+    { id: 'mines',    name: 'Mines',     cat: 'orig',  href: '/mines',    live: true },
+    { id: 'plinko',   name: 'Plinko',    cat: 'orig',  href: '/plinko',   live: true },
+    { id: 'roulette', name: 'Roulette',  cat: 'multi', href: '/roulette', live: true },
+    { id: 'crash',    name: 'Crash',     cat: 'multi', href: '/crash',    live: true },
+    { id: 'vault7',   name: 'VAULT.7',   cat: 'slots', href: '/vault7',   live: true },
+    { id: 'sugarlab', name: 'SUGAR.LAB', cat: 'slots', href: '/sugar',    live: true },
+  ];
+  const RAILS = [
+    { id: 'orig',  title: 'Originals',   sub: 'IN-HOUSE · PROVABLY FAIR' },
+    { id: 'multi', title: 'Multiplayer', sub: 'SHARED ROUNDS · ONE CHAIN' },
+    { id: 'slots', title: 'Slots',       sub: 'STRAIGHT FROM THE LAB' },
+  ];
+
+  const card = (g, i) => {
+    const inner = `
+      <span data-shine-bar aria-hidden="true" style="position:absolute;top:0;bottom:0;left:0;width:44%;z-index:2;background:linear-gradient(105deg,transparent,rgba(246,241,231,.08),transparent);transform:translateX(-180%) skewX(-18deg);animation:sl-nosheen 1.7s ease-in-out infinite;pointer-events:none"></span>
+      <div style="position:relative;aspect-ratio:1/1.04;background:radial-gradient(130% 110% at 50% -18%,#16130C,#0B0B0E 75%)">
+        <img src="/assets/games/${g.id}.png" alt="${g.name}" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover${g.live ? '' : ';filter:grayscale(.55) brightness(.55)'}">
+        ${g.live ? '' : '<span style="position:absolute;top:10px;left:10px;z-index:3;font:600 8px var(--mono);letter-spacing:.18em;color:var(--gold);border:1px solid rgba(217,185,112,.4);background:rgba(5,5,6,.72);padding:3.5px 7px;border-radius:6px">BETA</span>'}
+        <div style="position:absolute;left:0;right:0;bottom:0;z-index:3;padding:46px 12px 14px;text-align:center;background:linear-gradient(180deg,rgba(5,5,6,0),rgba(5,5,6,.85) 70%);font:700 17px var(--sans);letter-spacing:.03em;color:${g.live ? 'var(--fg)' : 'var(--fg-faint)'}">${g.name}</div>
+      </div>`;
+    const box = g.live
+      ? `<a href="${g.href}" data-link class="hv-cardline" style="display:block;position:relative;border:1px solid #1C1C22;background:#0E0E11;border-radius:16px;overflow:hidden;cursor:pointer;color:inherit;text-decoration:none">${inner}</a>`
+      : `<div style="display:block;position:relative;border:1px solid #17171C;background:#0B0B0E;border-radius:16px;overflow:hidden;cursor:default" title="${g.name} is offline while it gets production-ready">${inner}</div>`;
+    return `
+    <div ${g.live ? 'data-shine class="hv-lift"' : ''} style="flex:none;width:208px;scroll-snap-align:start;animation:sl-pop .5s ${(i % 7) * 70}ms cubic-bezier(.22,.61,.2,1) both">${box}</div>`;
+  };
+
+  const railsEl = document.getElementById('sl-rails');
+  railsEl.innerHTML = RAILS.map((rl) => {
+    const list = GAMES.filter((g) => g.cat === rl.id);
+    return `
+    <div style="animation:sl-up .6s both">
+      <div style="display:flex;align-items:center;gap:13px;margin-bottom:18px">
+        <svg width="17" height="17" viewBox="0 0 24 24" style="flex:none;color:var(--gold)"><path d="M12 1.7c.72 5.85 3.58 8.7 9.4 9.4-5.82.7-8.68 3.55-9.4 9.4-.72-5.85-3.58-8.7-9.4-9.4 5.82-.7 8.68-3.55 9.4-9.4Z" fill="currentColor"></path></svg>
+        <div style="display:flex;flex-direction:column;gap:2px;flex:none">
+          <span style="font:600 8.5px var(--mono);letter-spacing:.22em;color:#57554F">${rl.sub}</span>
+          <h2 style="margin:0;font:600 19px var(--sans);letter-spacing:-0.01em;color:var(--fg-strong)">${rl.title}</h2>
+        </div>
+        <span style="flex:1;height:1px;background:linear-gradient(90deg,#23232C,transparent)"></span>
+        <span data-r-hide-m style="font:600 9.5px var(--mono);letter-spacing:.14em;color:#57554F">${String(list.length).padStart(2, '0')}</span>
+      </div>
+      <div data-rail="true" style="display:flex;gap:14px;overflow-x:auto;scrollbar-width:none;padding:6px 2px 12px;scroll-snap-type:x proximity">
+        ${list.map(card).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  /* hero carousel · slow rotation, stops for good once the user picks a slide */
+  let idx = 0;
+  const N = 3;
+  let stopped = false;
+  function show(i) {
+    idx = i;
+    document.querySelectorAll('[data-hero-slide]').forEach((s) => {
+      const on = Number(s.dataset.heroSlide) === i;
+      s.style.opacity = on ? '1' : '0';
+      s.style.pointerEvents = on ? 'auto' : 'none';
+    });
+    document.querySelectorAll('[data-hero-dot]').forEach((d) => {
+      const on = Number(d.dataset.heroDot) === i;
+      d.style.width = on ? '30px' : '8px';
+      d.style.background = on ? 'var(--gold)' : '#2C2C38';
+    });
+  }
+  document.getElementById('hero-dots').addEventListener('click', (e) => {
+    const d = e.target.closest('[data-hero-dot]');
+    if (!d) return;
+    stopped = true;             // user chose a slide · hold it until reload
+    clearInterval(timer);
+    show(Number(d.dataset.heroDot));
+  });
+  const timer = setInterval(() => { if (!stopped && !document.hidden) show((idx + 1) % N); }, 12_000);
+})();
+
+/* ---------------- view router: '/', '/poker', game pages · no reloads ---------------- */
+(function () {
+  const TITLES = {
+    '/': 'ShinyLuck · Provably-fair casino on Somnia',
+    '/poker': 'Poker · ShinyLuck',
+    '/dice': 'Dice · ShinyLuck',
+    '/mines': 'Mines · ShinyLuck',
+    '/plinko': 'Plinko · ShinyLuck',
+    '/crash': 'Crash · ShinyLuck',
+    '/roulette': 'Roulette · ShinyLuck',
+    '/vault7': 'VAULT.7 · ShinyLuck',
+    '/sugar': 'SUGAR.LAB · ShinyLuck',
+    '/docs': 'Docs · ShinyLuck',
+    '/fair': 'Provably Fair · ShinyLuck',
+    '/zk-lab': 'ZK Lab · ShinyLuck',
+    '/predictions': 'Predictions · ShinyLuck',
+    '/infofi': 'InfoFi · ShinyLuck',
+  };
+  // Every non-lobby view is an iframe · that is what keeps navigation free of
+  // full page reloads. The framed page detects `embed=1` and drops its own
+  // chrome (see partials.js EMBED), so the shell's nav/sidebar/footer are the
+  // only ones on screen.
+  const GAME_SRC = {
+    '/dice': '/games/dice.html',
+    '/mines': '/games/mines.html',
+    '/plinko': '/games/plinko.html',
+    '/crash': '/games/crash.html',
+    '/roulette': '/games/roulette.html',
+    '/vault7': '/games/vault7/index.html',
+    '/sugar': '/games/sugar/index.html',
+    '/docs': '/docs.html',
+    '/fair': '/fair.html',
+    '/zk-lab': '/poker/zk-lab.html',
+    '/predictions': '/predictions.html',
+    '/infofi': '/infofi.html',
+  };
+  const ROUTES = new Set(Object.keys(TITLES));
+  window.__slRoutes = ROUTES;
+
+  function normPath() {
+    let p = location.pathname.replace(/\/index\.html$/, '/');
+    if (p !== '/' && p.endsWith('/')) p = p.slice(0, -1);
+    return p || '/';
+  }
+
+  // legacy '#/poker…' hash links → path routing
+  (function translateLegacyHash() {
+    const h = location.hash || '';
+    const m = h.match(/^#\/poker(?:\/(.*))?$/);
+    if (!m) return;
+    let url = '/poker';
+    if (m[1]) {
+      const [pg, qs] = m[1].split('?');
+      if (pg === 'tournament') url = '/poker?v=tournament' + (qs ? '&' + qs : '');
+      else if (pg === 'table') url = '/poker?v=table' + (qs ? '&' + qs : '');
+      else if (qs) url = '/poker?' + qs;
+    }
+    history.replaceState(null, '', url);
+  })();
+
+  function setActive(poker) {
+    const here = normPath();
+    const pred = here === '/predictions', info = here === '/infofi';
+    document.querySelectorAll('[data-side="predictions"]').forEach((el) => el.classList.toggle('active', pred));
+    document.querySelectorAll('[data-side="infofi"]').forEach((el) => el.classList.toggle('active', info));
+    document.querySelectorAll('[data-side="lobby"]').forEach((el) => el.classList.toggle('active', !poker && !pred && !info));
+    document.querySelectorAll('[data-side="poker"]').forEach((el) => el.classList.toggle('active', poker));
+    document.querySelectorAll('.mob2 a[href="/"]').forEach((el) => el.classList.toggle('active', !poker));
+    document.querySelectorAll('.mob2 a[href="/poker"]').forEach((el) => el.classList.toggle('active', poker));
+  }
+
+  function route() {
+    const p = normPath();
+    const isPoker = p === '/poker';
+    const isGame = !!GAME_SRC[p];
+    document.getElementById('view-lobby').style.display = (isPoker || isGame) ? 'none' : '';
+    document.getElementById('view-poker').style.display = isPoker ? '' : 'none';
+    document.getElementById('view-game').style.display = isGame ? '' : 'none';
+    document.title = TITLES[p] || TITLES['/'];
+    setActive(isPoker);
+
+    /* Tear down the view we just left. Collapsing an iframe to 0x0 does NOT
+       stop it: the document stays live, and a hidden frame still reports
+       visibilityState "visible" because that follows the TAB, not the element.
+       So touring the site left every app visited still running on top of the
+       one on screen - the poker lobby alone keeps Babel + a React tree + three
+       4s chain polls + a 400ms re-fit going forever. */
+    if (!isPoker) {
+      const f = document.getElementById('poker-frame');
+      const at = f.dataset.target || '';
+      /* EXCEPT a seated player: the table client answers the dealer's key and
+         share requests every hand, and killing it mid-hand reads as a
+         disconnect - that is a sit-out strike and, in a tournament, a bust. */
+      if (at && at.indexOf('table.html') === -1) {
+        f.src = 'about:blank'; f.dataset.target = ''; f.style.height = '';
+      }
+    }
+    if (!isGame) {
+      const f = document.getElementById('game-frame');
+      if (f.dataset.target) { f.src = 'about:blank'; f.dataset.target = ''; f.style.height = ''; }
+    }
+
+    if (isPoker) {
+      const f = document.getElementById('poker-frame');
+      const q = new URLSearchParams(location.search);
+      const v = q.get('v');
+      let target;
+      if (v === 'table' && q.get('t') != null) target = '/poker/table.html?t=' + encodeURIComponent(q.get('t')) + '&embed=1';
+      else if (v === 'tournament' && q.get('id') != null) target = '/poker/tournament.html?id=' + encodeURIComponent(q.get('id')) + '&embed=1';
+      else {
+        const tab = q.get('tab');
+        target = '/poker/lobby.html?' + (tab ? 'tab=' + encodeURIComponent(tab) + '&' : '') + 'embed=1';
+      }
+      if (f.dataset.target !== target) { f.src = target; f.dataset.target = target; f.style.height = ''; watchPokerFrame(f, target); }
+      /* A table is a full-screen app view on a phone: the site header hides
+         and the felt gets those 64px (see .sl-at-table in v2.css). The lobby
+         keeps the header — that is where the wallet chip lives. */
+      document.body.classList.toggle('sl-at-table', v === 'table');
+    } else {
+      document.body.classList.remove('sl-at-table');
+    }
+    if (isGame) {
+      const f = document.getElementById('game-frame');
+      // Forward the page's own query params (e.g. /fair?betId=N pins one
+      // bet on the fair page) - they used to be dropped here.
+      const gq = location.search.replace(/^\?/, '');
+      const target = GAME_SRC[p] + '?' + (gq ? gq + '&' : '') + 'embed=1';
+      if (f.dataset.target !== target) { f.src = target; f.dataset.target = target; f.style.height = ''; }
+    }
+    window.scrollTo(0, 0);
+  }
+
+  /* The poker frame reports its own failures (frontend/poker/poker-boot.js) —
+     but only once its HTML has arrived and run. If the DOCUMENT itself never
+     loads, the player sees an empty poker tab and nobody hears anything at all,
+     which is exactly the blind spot that made the last one so expensive to
+     chase. So the shell watches from outside: if, well after the frame should
+     be up, nothing has mounted AND the frame's own guard never ran, the SHELL
+     files the report. Same origin, so the check is a plain property read. */
+  function watchPokerFrame(f, target, attempt = 1) {
+    setTimeout(() => {
+      if (f.dataset.target !== target) return;          // navigated away since
+      let inner = null, mounted = -1, guard = 'none';
+      try {
+        const w = f.contentWindow, d = f.contentDocument;
+        inner = d ? (d.readyState || '?') : 'no-document';
+        if (w && w.SPBoot) guard = 'ran';               // the frame speaks for itself
+        const root = d && d.getElementById('root');
+        mounted = root ? root.childElementCount : -1;
+      } catch (e) { inner = 'blocked:' + (e && e.name); }
+      if (guard === 'ran' || mounted > 0) return;
+      /* The frame's own guard never ran, so its document never arrived — it
+         cannot retry itself and cannot report. Give it one clean reload before
+         writing it off; a single failed fetch on a phone's network is the most
+         ordinary reason for this, and a reload is what a player would have done
+         if they had known to. */
+      if (attempt === 1) {
+        f.src = target + (target.indexOf('?') >= 0 ? '&' : '?') + '_shellretry=1';
+        watchPokerFrame(f, target, 2);
+        return;
+      }
+      try {
+        const x = new XMLHttpRequest();
+        x.open('POST', '/dealer/clientlog', true);
+        x.setRequestHeader('Content-Type', 'application/json');
+        x.send(JSON.stringify({
+          k: 'frame', m: 'poker frame never came up, even after a reload: ' + target,
+          p: location.pathname + location.search, ua: navigator.userAgent.slice(0, 200), t: attempt * 14000,
+          d: { inner: inner, guard: guard, root: mounted, src: f.getAttribute('src') || '', attempt: attempt, from: 'shell' },
+        }));
+      } catch (e) {}
+    }, 14000);
+  }
+
+  // capture-phase click routing: route-links switch views with NO reload
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('a[href]');
+    if (!a || a.target === '_blank') return;
+    const href = a.getAttribute('href');
+    if (!href || !href.startsWith('/') || href.startsWith('//')) return;
+    const path = href.split('?')[0].split('#')[0] || '/';
+    if (!ROUTES.has(path)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (location.pathname + location.search !== href) history.pushState(null, '', href);
+    route();
+  }, true);
+
+  // iframes ask the shell to navigate (poker table links, game back-links)
+  window.addEventListener('message', (ev) => {
+    const d = ev.data;
+    // Frame grew/shrank · match it so the frame never needs its own scrollbar.
+    if (d && d.type === 'sl-height' && typeof d.h === 'number') {
+      const f = ev.source === document.getElementById('poker-frame')?.contentWindow
+        ? document.getElementById('poker-frame')
+        : ev.source === document.getElementById('game-frame')?.contentWindow
+          ? document.getElementById('game-frame')
+          : null;
+      if (f) {
+        // header 64 (hidden at a table on a phone) + bottom tab bar 66
+        const hidesHeader = document.body.classList.contains('sl-at-table') && window.innerWidth <= 860;
+        const floor = window.innerHeight - (hidesHeader ? 0 : 64) - (window.innerWidth <= 860 ? 66 : 0);
+        f.style.height = Math.max(d.h, floor) + 'px';
+      }
+      return;
+    }
+    if (!d || d.type !== 'sl-nav' || typeof d.href !== 'string') return;
+    const href = d.href;
+    if (!href.startsWith('/')) return;
+    const path = href.split('?')[0].split('#')[0] || '/';
+    if (ROUTES.has(path)) {
+      history.pushState(null, '', href);
+      route();
+    } else {
+      location.href = href;
+    }
+  });
+
+  window.addEventListener('popstate', route);
+  document.addEventListener('shinyluck:chrome-ready', () => route()); // sidebar mounts async
+  route();
+
+  /* if the user connects in the shell while an iframe is open, reload it so
+     its Privy session picks up */
+  document.addEventListener('shinyluck:connected', () => {
+    for (const id of ['poker-frame', 'game-frame']) {
+      const f = document.getElementById(id);
+      try {
+        if (f && f.dataset.target && f.contentWindow && !f.contentWindow.SP?.sdk?.address && !f.contentWindow.__slConnected) {
+          f.contentWindow.location.reload();
+        }
+      } catch (_) {}
+    }
+  });
+})();
+</script>
 </body>
 </html>

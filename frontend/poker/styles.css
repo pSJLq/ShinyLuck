@@ -1,51 +1,72 @@
 /* =========================================================================
-   ShinyPoker — Design System
-   Mapped from Somnia brand tokens. Dark, terminal, monospace, purple accent.
+   ShinyPoker · Design System
+   Matte black + gold, shared with the casino (frontend/v2.css).
+
+   TYPE — one family, not four. The poker pages used to load DM Sans, IBM Plex
+   Mono, Source Code Pro AND Bricolage Grotesque, none of which the casino
+   loads: every label, stack and button was literally set in a different
+   typeface from the rest of the site, which is what made poker read as a
+   bolted-on foreign app. `--mono` keeps its name (it is referenced ~80 times
+   for MONEY, where all that was ever wanted is tabular digits) but now points
+   at the same Inter as everywhere else; `--code` is the real monospace, kept
+   for the two things that need it — addresses and commitment hashes.
    ========================================================================= */
 
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Source+Code+Pro:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Bricolage+Grotesque:opsz,wght@12..96,600..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  /* ---- Somnia core palette (authoritative) ---- */
-  --bg:        #070707;
+  /* ---- surfaces (matched to the casino's v2.css) ---- */
+  --bg:        #0A0A0B;
   --surface:   #111111;
   --elevated:  #252525;
-  --muted:     #4C4C4C;
+  --muted:     #8F8C85;
   --text-2:    #E6E6E6;
   --offwhite:  #F5F5F5;
   --white:     #FFFFFF;
-  --accent:    #d9ab4a;   /* Somnia purple */
-  --accent-ink:#0a0a1f;
+  --accent:    #D9B970;   /* the casino's gold, to the digit */
+  --accent-ink:#241A05;
 
   /* ---- derived ---- */
-  --accent-12: rgba(217,171,74,0.12);
-  --accent-20: rgba(217,171,74,0.20);
-  --accent-32: rgba(217,171,74,0.32);
-  --accent-55: rgba(217,171,74,0.55);
-  --accent-soft: #f2d78a;
+  --accent-12: rgba(217,185,112,0.12);
+  --accent-20: rgba(217,185,112,0.20);
+  --accent-32: rgba(217,185,112,0.32);
+  --accent-55: rgba(217,185,112,0.55);
+  --accent-soft: #F4DD9E;
   --line:      rgba(255,255,255,0.08);
   --line-2:    rgba(255,255,255,0.14);
   --hair:      rgba(255,255,255,0.05);
 
   /* ---- semantic ---- */
-  --win:       #2BD480;   /* secured / winner */
+  --win:       #6FCF97;   /* secured / winner · the casino's green */
   --win-dim:   #16623f;
   --win-ink:   #06150d;
-  --danger:    #E5562A;   /* fold / all-in heat (brand orange-red) */
-  --danger-soft:#FF7A4D;
-  --gold:      #E5B43C;
-  --cyan:      #3CC9E5;
+  --danger:    #E56B6B;   /* fold / all-in heat · the casino's red */
+  --danger-soft:#FF8A8A;
+  --gold:      #E9CC85;
+  --cyan:      #D9B970;
+
+  /* ---- felt (emerald) ----
+     The table used to be a black oval with a gold thread on a black page, so
+     it read as a hole rather than a surface. These are the only colours that
+     are allowed to be green; gold stays the accent of the whole site. */
+  --felt-hi:   #14503C;   /* lit centre, under the ceiling light */
+  --felt:      #0E3A2E;
+  --felt-lo:   #08241C;   /* shaded rail edge */
+  --rail:      #13110C;   /* padded rail the arms rest on · warm near-black */
+  --rail-hi:   #D9B970;
+  --rail-lo:   #A6822F;
 
   /* card suit colors */
   --suit-spade: #1b1b22;
-  --suit-heart: #E5562A;
-  --suit-diamond:#4F86F7;  /* 4-color */
+  --suit-heart: #D9463F;
+  --suit-diamond:#2C6FE0;  /* 4-color */
   --suit-club:  #1f9d5e;   /* 4-color */
 
   /* ---- type ---- */
-  --mono: 'IBM Plex Mono', ui-monospace, monospace;     /* numbers / display */
-  --label:'Source Code Pro', ui-monospace, monospace;   /* labels / meta */
-  --body: 'DM Sans', system-ui, sans-serif;             /* long-form */
+  --mono: 'Inter', system-ui, sans-serif;               /* money / figures */
+  --label:'Inter', system-ui, sans-serif;               /* labels / meta */
+  --body: 'Inter', system-ui, sans-serif;               /* long-form */
+  --code: 'JetBrains Mono', ui-monospace, monospace;    /* addresses / hashes */
 
   /* ---- spacing / radius ---- */
   --r-xs: 3px;  --r-sm: 5px;  --r-md: 8px;  --r-lg: 12px;  --r-xl: 18px;
@@ -62,7 +83,18 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden;
+  /* Every figure on this page is money that ticks: stacks, pot, bets, the
+     clock. Proportional digits make them jitter sideways on each update, which
+     is most of why the old table felt unsettled. One declaration fixes it for
+     the whole app now that the numbers are set in Inter rather than a
+     monospace. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
+
+/* Real monospace, kept for the two things that genuinely need character-cell
+   alignment: wallet addresses and commitment hashes. */
+.code, .commit, .lt-modal .mono, .lt-modal .fundbox .fa .mono { font-family: var(--code); }
 
 /* ---------- brand wordmark ---------- */
 .brace-logo { display: inline-flex; align-items: center; gap: 0; line-height: 1; color: var(--white); }
@@ -134,12 +166,40 @@ body {
 .switcher button.on.casino { background: var(--gold); color: #1a1405; }
 .switcher button:not(.on):hover { color: var(--text-2); }
 
+/* table identity (stakes + format) in the top bar */
+.tableid { display: flex; flex-direction: column; gap: 1px; line-height: 1.15; }
+.tableid .stakes { display: inline-flex; align-items: center; gap: 7px; }
+.tableid .stakes svg { flex-shrink: 0; }
+.tableid .stakes b { font-family: var(--mono); font-weight: 700; font-size: 17px; color: var(--white); }
+.tableid .sub { font-family: var(--label); font-size: 11px; font-weight: 500; color: var(--muted); }
+
 /* meta pills in top bar */
-.metapill { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 11px;
+.metapill { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px;
   border: 1px solid var(--line); border-radius: var(--r-sm); background: rgba(255,255,255,0.015);
   font-family: var(--label); font-size: 11px; color: var(--text-2); }
-.metapill b { font-family: var(--mono); font-weight: 600; color: var(--white); }
+/* the blinds live in here and inherited the 11px LABEL size — the value now
+   gets its own, larger size, like every other number that matters */
+.metapill b { font-family: var(--mono); font-weight: 700; font-size: 14px; color: var(--white); }
 .metapill .k { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* "Larger interface" — an EXTRA step on top of the default, for players who
+   told us the money was hard to read. The stage scale alone cannot help here:
+   on phones it is skipped entirely, and everywhere else it enlarges labels and
+   numbers by the same factor, so a stack that reads small next to its label
+   still reads small. These rules push the figures that matter — stacks, pot,
+   blinds, bets — past everything around them. The data attribute was already
+   on .app and simply had nothing hanging off it. */
+.app[data-bigui="1"] .seatinfo .stack { font-size: 21px; }
+.app[data-bigui="1"] .seatinfo .stack .u { font-size: 12px; }
+.app[data-bigui="1"] .seatinfo .nm { font-size: 13.5px; max-width: 124px; }
+.app[data-bigui="1"] .heroinfo .meta .stack { font-size: 25px; }
+.app[data-bigui="1"] .heroinfo .meta .stack .u { font-size: 13px; }
+.app[data-bigui="1"] .tableid .stakes b { font-size: 19px; }
+.app[data-bigui="1"] .tableid .sub { font-size: 12px; }
+.app[data-bigui="1"] .tableid .sub b { font-size: 13px; }
+.app[data-bigui="1"] .pot .potmain .v { font-size: 23px; }
+.app[data-bigui="1"] .pot .potmain .u { font-size: 12.5px; }
+.app[data-bigui="1"] .betchips .amt { font-size: 13px; }
 
 /* wallet + session */
 .wallet { display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 12px 0 10px;
@@ -168,8 +228,16 @@ body {
   border-radius: var(--r-sm); background: rgba(255,255,255,0.015); color: var(--text-2); cursor: pointer; transition: .15s; }
 .iconbtn:hover { background: rgba(255,255,255,0.05); color: var(--white); border-color: var(--line-2); }
 .iconbtn svg { width: 16px; height: 16px; }
-.leavebtn { color: var(--danger-soft); border-color: rgba(229,86,42,0.25); }
-.leavebtn:hover { background: rgba(229,86,42,0.12); border-color: rgba(229,86,42,0.45); }
+.leavebtn { color: var(--danger-soft); border-color: rgba(229,107,107,0.28); }
+.leavebtn:hover { background: rgba(229,107,107,0.12); border-color: rgba(229,107,107,0.5); }
+/* the exit is armed and waiting for the hand to end · click again to stay */
+.leavebtn.pending { background: rgba(229,107,107,0.16); border-color: var(--danger);
+  animation: leavePulse 1.5s ease-in-out infinite; }
+@keyframes leavePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(229,107,107,0.5); }
+  50%      { box-shadow: 0 0 0 5px rgba(229,107,107,0); }
+}
+@media (prefers-reduced-motion: reduce) { .leavebtn.pending { animation: none; } }
 
 /* =========================================================================
    Felt / table area
@@ -177,64 +245,73 @@ body {
 .mainrow { display: grid; grid-template-columns: 1fr 332px; min-height: 0; }
 .feltwrap { position: relative; overflow: hidden; }
 .feltcanvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* The room light that the table sits under. Warm, above and slightly behind
+   the felt, so the surface has a top and a bottom instead of being evenly lit
+   like a screenshot of a rectangle. */
 .feltglow { position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(58% 46% at 50% 44%, var(--accent-12), transparent 70%); }
+  background:
+    radial-gradient(46% 34% at 50% 26%, rgba(255,236,190,0.10), transparent 72%),
+    radial-gradient(70% 58% at 50% 42%, rgba(24,90,68,0.20), transparent 76%); }
 .feltvignette { position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(120% 100% at 50% 40%, transparent 50%, rgba(0,0,0,0.55) 100%); }
+  background: radial-gradient(120% 100% at 50% 34%, transparent 46%, rgba(0,0,0,0.62) 100%); }
 
-/* the oval surface */
+/* ---- the table ----
+   Three physical layers, because that is what makes a table read as furniture
+   rather than as a shape: the RAIL (padded leather edge, catches the light on
+   its upper curve), a gold piping between rail and cloth, and the CLOTH
+   itself, lit from the same lamp as the room and falling off toward the rail.
+   One rule for every data-dir: the theme picker that those variants belonged
+   to was removed from the settings panel long ago, so the only thing three
+   felts still did was let two of them rot. */
 .felt { position: absolute; inset: 92px 150px 188px; border-radius: 280px;
-  display: grid; place-items: center; }
-
-/* Direction A — Terminal felt. Same footprint as Premium (the seat ring is
-   tuned to it); the rim must stay VISIBLE or seats read as floating in void. */
-[data-dir="a"] .felt {
+  display: grid; place-items: center;
   background:
-    radial-gradient(120% 120% at 50% 30%, rgba(217,171,74,0.10), transparent 60%),
-    #0b0b0e;
-  border: 10px solid #0d0d11;
+    /* cloth weave · barely-there, breaks the plastic flatness of a gradient */
+    repeating-linear-gradient(52deg, rgba(255,255,255,0.014) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(-52deg, rgba(0,0,0,0.05) 0 1px, transparent 1px 3px),
+    radial-gradient(58% 62% at 50% 30%, var(--felt-hi) 0%, var(--felt) 46%, var(--felt-lo) 100%);
+  border: 16px solid var(--rail);
   box-shadow:
-    inset 0 0 0 1px rgba(217,171,74,0.28),
-    inset 0 0 90px rgba(0,0,0,0.7),
-    0 0 0 1px rgba(255,255,255,0.06),
-    0 24px 70px rgba(0,0,0,0.5),
-    0 0 60px rgba(217,171,74,0.07);
+    /* gold piping where the cloth meets the rail */
+    inset 0 0 0 2px rgba(217,185,112,0.55),
+    inset 0 0 0 4px rgba(0,0,0,0.45),
+    /* the cloth sinks below the rail */
+    inset 0 14px 34px rgba(0,0,0,0.45),
+    inset 0 -10px 40px rgba(0,0,0,0.4),
+    /* gold edge around the outside of the rail */
+    0 0 0 2px rgba(217,185,112,0.55),
+    0 0 0 3px rgba(0,0,0,0.65),
+    0 34px 90px rgba(0,0,0,0.6),
+    0 0 90px rgba(20,80,60,0.14),
+    0 0 46px rgba(217,185,112,0.10);
 }
-[data-dir="a"] .felt::before { content:""; position:absolute; inset:16px; border-radius: 260px;
-  border: 1px dashed rgba(217,171,74,0.14); }
+/* The sheen along the rail. Gold, not white: this ring is the one place the
+   brand colour touches the table, and a white highlight on a warm-black rail
+   just read as grey plastic. */
+.felt::after { content: ""; position: absolute; inset: -16px; border-radius: inherit;
+  pointer-events: none; padding: 0;
+  background: linear-gradient(170deg,
+    rgba(244,221,158,0.55) 0%, rgba(217,185,112,0.26) 22%,
+    rgba(120,96,44,0.10) 48%, rgba(0,0,0,0.42) 78%, rgba(0,0,0,0.55) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  border: 16px solid transparent; }
+/* faint house line inside the cloth, the way a real table has one printed */
+.felt::before { content: ""; position: absolute; inset: 22px; border-radius: inherit;
+  border: 1px solid rgba(217,185,112,0.07); pointer-events: none; }
 
-/* Direction B — Premium oval */
-[data-dir="b"] .felt {
-  background:
-    radial-gradient(70% 70% at 50% 38%, #211a3f 0%, #171208 38%, #0d0a05 78%, #070510 100%);
-  border: 14px solid #0c0c10;
-  box-shadow:
-    inset 0 0 0 2px rgba(217,171,74,0.22),
-    inset 0 8px 60px rgba(0,0,0,0.6),
-    0 0 0 1px rgba(255,255,255,0.05),
-    0 30px 80px rgba(0,0,0,0.55),
-    0 0 80px rgba(217,171,74,0.10);
+/* the house mark on the cloth · sits UNDER everything (.center is z-index 6) */
+.feltmark { position: absolute; left: 50%; top: 54%; transform: translate(-50%,-50%); z-index: 1;
+  display: flex; align-items: center; gap: 14px; pointer-events: none; user-select: none;
+  opacity: 0.075; white-space: nowrap; }
+.feltmark .fm-spark { width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0; }
+.feltmark .fm-word { font-family: var(--label); font-weight: 800; font-size: 34px;
+  letter-spacing: 0.17em; color: #F7EFD8; }
+@media (max-width: 760px) {
+  .feltmark { gap: 9px; opacity: 0.07; }
+  .feltmark .fm-spark { width: 30px; height: 30px; }
+  .feltmark .fm-word { font-size: 19px; letter-spacing: 0.15em; }
 }
-[data-dir="b"] .felt::before { content:""; position:absolute; inset:0; border-radius: inherit;
-  background: radial-gradient(60% 50% at 50% 30%, rgba(255,255,255,0.04), transparent 60%); }
-
-/* Direction C — Minimal grid. Keeps its clean-rect identity but on the SHARED
-   table footprint (it used to be a smaller square — the seat ring orbited it
-   in dead space, "seats outside the table"). */
-[data-dir="c"] .felt {
-  border-radius: 140px;
-  background: linear-gradient(180deg, #0e0e11, #0a0a0c);
-  border: 8px solid #0c0c10;
-  box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,0.09),
-    inset 0 1px 0 rgba(255,255,255,0.03),
-    0 0 0 1px rgba(255,255,255,0.04),
-    0 24px 70px rgba(0,0,0,0.5);
-}
-[data-dir="c"] .felt::before { content:""; position:absolute; inset:0; border-radius: inherit;
-  background-image: linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
-  background-size: 26px 26px; mask-image: radial-gradient(70% 70% at 50% 45%, #000 30%, transparent 75%); }
 
 /* center console: board + pot */
 .center { position: absolute; left: 50%; top: 43%; transform: translate(-50%,-50%);
@@ -242,17 +319,46 @@ body {
 
 /* zkShuffle badge */
 .zkbadge { display: inline-flex; align-items: center; gap: 8px; padding: 5px 11px;
-  border: 1px solid var(--accent-32); background: rgba(217,171,74,0.10);
+  border: 1px solid var(--accent-32); background: rgba(217,185,112,0.10);
   border-radius: 999px; font-family: var(--label); font-size: 10.5px; letter-spacing: 0.04em;
   color: var(--accent-soft); backdrop-filter: blur(3px); cursor: pointer; }
 .zkbadge .chk { width: 13px; height: 13px; color: var(--accent); }
 .zkbadge:hover { border-color: var(--accent-55); }
 .zkbadge.shuffling { color: var(--white); border-color: var(--accent-55); }
 
-/* community board */
-.board { display: flex; gap: 9px; }
-.board .slot { width: 62px; height: 88px; border-radius: var(--r-md); }
-.board .slot.empty { border: 1px dashed rgba(255,255,255,0.10); background: rgba(255,255,255,0.012); }
+/* community board · the cards are the thing everyone is looking at, so they
+   get the size to match. 62px was small enough that the rank had to be read
+   rather than recognised. */
+.board { display: flex; gap: 10px; }
+.board .slot { width: 74px; height: 104px; border-radius: 10px; }
+.board .slot.empty { border: 1px dashed rgba(255,255,255,0.09); background: rgba(255,255,255,0.015); }
+.board .card { width: 74px; height: 104px; border-radius: 10px; }
+.board .card .rank { font-size: 26px; top: 6px; left: 8px; }
+.board .card .center-suit svg { width: 34px; height: 34px; }
+.board .card .pip svg { width: 13px; height: 13px; }
+
+/* A card whose street has opened but which is still being decrypted by the
+   players and proven on-chain. Without this the felt just stays empty while the
+   action moves to you, which reads as a broken table rather than a card on its
+   way. Deliberately a real face-down card, not a spinner: it says "this is your
+   flop, arriving", and it occupies the exact slot the card will land in. */
+.board .card.revealing { position: relative; overflow: hidden;
+  animation: sp-revealpulse 1s ease-in-out infinite; }
+.board .card.revealing::before { content: ""; position: absolute; inset: 0;
+  background: linear-gradient(105deg, transparent 30%, rgba(217,185,112,0.34) 50%, transparent 70%);
+  transform: translateX(-100%); animation: sp-revealsweep 1.15s ease-in-out infinite; }
+@keyframes sp-revealpulse { 0%, 100% { opacity: 0.72; } 50% { opacity: 1; } }
+@keyframes sp-revealsweep { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+.revealnote { font-family: var(--label); font-size: 9.5px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--accent-soft); opacity: 0.85; margin-top: -2px; }
+/* Buttons are held back visually, never disabled: the acting clock runs
+   on-chain, so folding must stay possible even if a reveal drags. */
+.barwrap.revealing .actionbar { opacity: 0.55; filter: saturate(0.65); transition: opacity .16s ease; }
+.barwrap .actionbar { transition: opacity .16s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .board .card.revealing, .board .card.revealing::before { animation: none; }
+  .board .card.revealing { opacity: 0.8; }
+}
 
 /* second board for run-it-twice */
 .boards { display: flex; flex-direction: column; gap: 8px; align-items: center; }
@@ -263,12 +369,14 @@ body {
 
 /* pot */
 .pot { display: flex; flex-direction: column; align-items: center; gap: 5px; }
-.pot .potmain { display: inline-flex; align-items: baseline; gap: 7px; padding: 6px 16px;
-  border: 1px solid var(--line-2); border-radius: 999px;
-  background: rgba(0,0,0,0.45); backdrop-filter: blur(4px); }
-.pot .potmain .k { font-family: var(--label); font-size: 9.5px; letter-spacing: 0.12em;
-  color: var(--muted); text-transform: uppercase; }
-.pot .potmain .v { font-family: var(--mono); font-weight: 600; font-size: 19px; color: var(--white); }
+.pot .potmain { display: inline-flex; align-items: center; gap: 8px; padding: 7px 17px;
+  border: 1px solid rgba(217,185,112,0.26); border-radius: 999px;
+  background: rgba(4,10,8,0.62); backdrop-filter: blur(4px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.45); }
+.pot .potmain .k { font-family: var(--label); font-size: 10px; font-weight: 600; letter-spacing: 0.13em;
+  color: var(--accent-soft); text-transform: uppercase; }
+.pot .potmain svg { flex-shrink: 0; }
+.pot .potmain .v { font-family: var(--mono); font-weight: 700; font-size: 20px; color: var(--white); }
 .pot .potmain .u { font-family: var(--mono); font-size: 11px; color: var(--accent-soft); }
 .pot .sides { display: flex; gap: 6px; }
 .pot .side { font-family: var(--label); font-size: 9.5px; color: var(--muted);
@@ -298,15 +406,39 @@ body {
 [data-deck="2"] .card.s-heart,
 [data-deck="2"] .card.s-diamond { color: var(--suit-heart); }
 
-.card.back { background:
-   linear-gradient(135deg, #221b0e 0%, #120e08 100%);
-   border: 1px solid rgba(217,171,74,0.35); }
-.card.back .bk { position:absolute; inset:6px; border-radius: 5px; border: 1px solid rgba(217,171,74,0.25);
-   background-image: radial-gradient(rgba(217,171,74,0.5) 1px, transparent 1.4px);
-   background-size: 8px 8px; opacity: 0.5; display:grid; place-items:center; }
-.card.back .mk { width: 40%; color: rgba(242,215,138,0.85); }
+/* ---- the house card back ----
+   A deck belongs to a room. This one is the room's own: deep emerald, a gold
+   double frame, a fine diamond lattice and the spark at the centre — so a
+   face-down card is recognisably OURS at a glance, at any size, on the felt or
+   in a hand. It used to be a brown rectangle with a faint dot grid. */
+.card.back {
+  background:
+    radial-gradient(64% 58% at 50% 40%, rgba(217,185,112,0.13), transparent 70%),
+    linear-gradient(160deg, #10402F 0%, #0A2B20 52%, #061B14 100%);
+  border: 1px solid rgba(217,185,112,0.55);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.35);
+}
+.card.back .bk {
+  position: absolute; inset: 5px; border-radius: 5px;
+  border: 1px solid rgba(217,185,112,0.45);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4), inset 0 0 14px rgba(0,0,0,0.35);
+  background-image:
+    repeating-linear-gradient(45deg, rgba(217,185,112,0.16) 0 1px, transparent 1px 7px),
+    repeating-linear-gradient(-45deg, rgba(217,185,112,0.16) 0 1px, transparent 1px 7px);
+  display: grid; place-items: center; overflow: hidden;
+}
+/* the mark sits on its own darker medallion so the lattice never runs through it */
+.card.back .bk::before { content: ""; position: absolute; width: 62%; aspect-ratio: 1; border-radius: 50%;
+  background: radial-gradient(circle, rgba(4,16,11,0.92) 55%, transparent 72%); }
+/* The mark is the real logo file now, and the logo carries its own dark
+   field — round it so that field reads as the logo's disc instead of a
+   black square sitting on the card. */
+.card.back .mk { border-radius: 50%; position: relative; width: 52%; color: rgba(244,221,158,0.95);
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6)); }
 
 .card.folded { filter: grayscale(1) brightness(0.5); opacity: 0.5; }
+/* plays no part in the winning combination · the used five stay bright */
+.card.offcombo { filter: grayscale(0.85) brightness(0.55); opacity: 0.8; transition: filter 0.35s ease, opacity 0.35s ease; }
 .card.dealing { animation: dealIn .32s cubic-bezier(.2,.7,.3,1) both; }
 @keyframes dealIn { from { transform: translateY(-16px) scale(.9); opacity: 0 } to { transform: none; opacity: 1 } }
 
@@ -317,69 +449,123 @@ body {
 .board .card .pip svg { width: 11px; height: 11px; }
 
 /* hero hole cards */
-.hole { display: flex; gap: 6px; }
-.hole .card { width: 74px; height: 104px; }
-.hole .card .rank { font-size: 21px; }
-.hole .card .center-suit svg { width: 32px; height: 32px; }
-.hole .card .pip svg { width: 12px; height: 12px; }
+.hole { display: flex; gap: 7px; }
+.hole .card { width: 82px; height: 115px; border-radius: 10px; }
+.hole .card .rank { font-size: 25px; top: 6px; left: 8px; }
+.hole .card .center-suit svg { width: 37px; height: 37px; }
+.hole .card .pip svg { width: 13px; height: 13px; }
 .hole.peek .card:last-child { transform: rotate(4deg) translateY(-2px); }
 .hole.peek .card:first-child { transform: rotate(-2deg); }
 
 /* =========================================================================
    Seats
    ========================================================================= */
-.seat { position: absolute; transform: translate(-50%,-50%); z-index: 8; width: 196px; }
-.seatcard { position: relative; display: flex; align-items: center; gap: 10px;
-  padding: 9px 11px; border-radius: var(--r-md);
-  background: linear-gradient(180deg, rgba(26,26,32,0.96), rgba(15,15,19,0.96));
-  border: 1px solid var(--line); backdrop-filter: blur(6px);
-  box-shadow: 0 10px 28px rgba(0,0,0,0.5); transition: border-color .2s, box-shadow .2s; }
+/* ---- seat pod ----
+   A round portrait sitting ON the top edge of a plaque that carries the name
+   and the money. The old pod was a rectangle with the avatar tucked inside it,
+   which gave six identical grey boxes around the rail and no way to tell at a
+   glance whose seat you were looking at. The portrait breaking the outline is
+   what makes each seat a PERSON. */
+.seat { position: absolute; transform: translate(-50%,-50%); z-index: 8; width: auto; }
+.seatcard { position: relative; display: flex; flex-direction: column; align-items: center;
+  text-align: center; gap: 2px; width: 138px; padding: 28px 12px 9px; border-radius: 13px;
+  background: linear-gradient(180deg, rgba(22,24,26,0.97), rgba(10,11,12,0.98));
+  border: 1px solid rgba(255,255,255,0.10); backdrop-filter: blur(6px);
+  box-shadow: 0 12px 26px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05);
+  transition: border-color .2s, box-shadow .2s; }
 
-/* Direction B: rounder seat pods */
-[data-dir="b"] .seat { width: auto; }
-[data-dir="b"] .seatcard { flex-direction: column; gap: 6px; padding: 8px 14px 10px; border-radius: 14px;
-  width: 150px; align-items: center; text-align: center; }
-[data-dir="b"] .seatcard .avatar { width: 52px; height: 52px; }
-[data-dir="b"] .seatcard .seatinfo { align-items: center; }
-
-/* Direction C: minimal seats */
-[data-dir="c"] .seatcard { background: rgba(255,255,255,0.025); border-color: var(--line);
-  box-shadow: none; padding: 7px 12px; }
-
-.avatar { width: 44px; height: 44px; border-radius: var(--r-sm); flex-shrink: 0; position: relative;
+.avatar { width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0; position: relative;
   background: linear-gradient(135deg, var(--accent-20), #15151c); display: grid; place-items: center;
-  font-family: var(--mono); font-weight: 600; font-size: 16px; color: var(--accent-soft);
-  border: 1px solid var(--line-2); overflow: hidden; }
-[data-dir="b"] .avatar { border-radius: 50%; }
+  font-family: var(--mono); font-weight: 700; font-size: 16px; color: var(--accent-soft);
+  border: 2px solid #0C0D0E; overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12), 0 4px 12px rgba(0,0,0,0.6); }
+/* half the portrait stands above the plaque */
+.seatcard > .avatar { position: absolute; top: -23px; left: 50%; margin-left: -23px; }
 .avatar .ava-grid { position:absolute; inset:0; opacity:.45; pointer-events:none;
   background-image: radial-gradient(rgba(242,215,138,0.6) 1px, transparent 1.3px);
   background-size: 6px 6px; mix-blend-mode: screen; }
 /* emoji avatar glyph (AvatarIcon preset mode) */
-.avatar .em { font-size: 24px; line-height: 1; }
-[data-dir="b"] .seatcard .avatar .em { font-size: 29px; }
+.avatar .em { font-size: 26px; line-height: 1; }
 .heroinfo .avatar .em { font-size: 22px; }
 
 @keyframes deplete { from { transform: scaleX(1) } to { transform: scaleX(0) } }
 
-.seatinfo { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
-.seatinfo .nm { font-family: var(--label); font-size: 12px; color: var(--text-2);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
-.seatinfo .stack { font-family: var(--mono); font-weight: 600; font-size: 15px; color: var(--white); }
-.seatinfo .stack .u { font-size: 10px; color: var(--muted); font-weight: 500; margin-left: 2px; }
+.seatinfo { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; width: 100%; }
+.seatinfo .nm { font-family: var(--label); font-size: 12px; font-weight: 500; color: var(--fg-dim, #A5A29B);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 114px; letter-spacing: 0; }
+/* The money is the loudest thing in the pod, and it wears its mark. */
+.seatinfo .stack { display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--mono); font-weight: 700; font-size: 18.5px; color: var(--white); line-height: 1.15; }
+.seatinfo .stack svg { flex-shrink: 0; }
+.seatinfo .stack .u { font-size: 11px; color: var(--muted); font-weight: 500; margin-left: 2px; }
+.seatinfo .stack .bbcount { font-size: 11.5px; color: var(--muted); font-weight: 600; }
 .seatinfo .status { font-family: var(--label); font-size: 9.5px; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--muted); }
+.seatinfo .status:empty { display: none; }
 
-/* states */
+/* ---- states ----
+   Whose turn it is has to be readable from across the room, so it is carried
+   by a LIT RING around the portrait and a breathing halo, not by a one-pixel
+   border change on a grey box. */
 .seat.active .seatcard { border-color: var(--accent-55);
-  box-shadow: 0 0 0 1px var(--accent-32), 0 0 28px rgba(217,171,74,0.28), 0 10px 28px rgba(0,0,0,0.5); }
+  box-shadow: 0 0 0 1px var(--accent-32), 0 0 34px rgba(217,185,112,0.30), 0 12px 26px rgba(0,0,0,0.55); }
+.seat.active .avatar, .heroinfo.active .avatar {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 18px rgba(217,185,112,0.75), 0 4px 12px rgba(0,0,0,0.6);
+  animation: seatTurn 1.6s ease-in-out infinite; }
+@keyframes seatTurn {
+  0%, 100% { box-shadow: 0 0 0 2px var(--accent), 0 0 16px rgba(217,185,112,0.6), 0 4px 12px rgba(0,0,0,0.6); }
+  50%      { box-shadow: 0 0 0 3px var(--accent), 0 0 30px rgba(217,185,112,0.95), 0 4px 12px rgba(0,0,0,0.6); }
+}
 .seat.hero .seatcard { border-color: var(--line-2); }
-.seat.folded .seatcard { opacity: 0.42; filter: saturate(0.4); }
-.seat.allin .seatcard { border-color: rgba(229,86,42,0.5); box-shadow: 0 0 24px rgba(229,86,42,0.22); }
+.seat.folded .seatcard { opacity: 0.4; filter: saturate(0.25); }
+.seat.folded .avatar { filter: grayscale(1); }
+.seat.allin .seatcard { border-color: rgba(229,107,107,0.55); box-shadow: 0 0 26px rgba(229,107,107,0.22), 0 12px 26px rgba(0,0,0,0.55); }
+.seat.allin .avatar { border-color: var(--danger); box-shadow: 0 0 0 2px var(--danger), 0 0 16px rgba(229,107,107,0.6); }
 .seat.allin .status { color: var(--danger-soft); }
-.seat.winner .seatcard { border-color: var(--win); box-shadow: 0 0 0 1px var(--win), 0 0 40px rgba(43,212,128,0.4); }
+/* ---- the result of a hand, told without words ----
+   Every seat used to keep its own glow through the settle, so the winner was
+   identifiable only by reading the banner in the middle of the felt. Now the
+   winner is the ONLY lit thing: crown, green ring, the amount won on the
+   plaque — and everyone else steps back for those few seconds. */
+.seat.winner .seatcard { border-color: var(--win); background: linear-gradient(180deg, rgba(21,44,33,0.97), rgba(9,17,13,0.98));
+  box-shadow: 0 0 0 1px var(--win), 0 0 50px rgba(111,207,151,0.45), 0 12px 26px rgba(0,0,0,0.55); }
+.seat.winner .avatar, .heroinfo.winner .avatar { border-color: var(--win);
+  box-shadow: 0 0 0 2px var(--win), 0 0 24px rgba(111,207,151,0.85); animation: none; }
 .seat.winner .status { color: var(--win); }
+
+.crown { position: absolute; top: -40px; left: 50%; transform: translateX(-50%); z-index: 13;
+  font-size: 19px; line-height: 1; pointer-events: none; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.7));
+  animation: crownDrop .34s cubic-bezier(.2,1.5,.4,1) both; }
+/* over the hero's own portrait, like every other seat — centred it landed on
+   the combo badge that sits just above the bar and hid it */
+.heroinfo .crown { top: -15px; left: 29px; }
+@keyframes crownDrop { from { opacity: 0; transform: translateX(-50%) translateY(10px) scale(.6); }
+  to { opacity: 1; transform: translateX(-50%); } }
+
+.wonchip { display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-weight: 800; font-size: 13px; letter-spacing: 0.01em;
+  color: #06150D; background: var(--win); border-radius: 999px; padding: 2px 10px; margin-top: 2px;
+  box-shadow: 0 0 16px rgba(111,207,151,0.55); white-space: nowrap;
+  animation: wonPop .3s cubic-bezier(.2,1.4,.4,1) both; }
+@keyframes wonPop { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: none; } }
+
+/* the losers of this hand, for the length of the result beat only */
+.seat.dimmed .seatcard, .heroinfo.dimmed { opacity: 0.34; filter: saturate(0.25); }
+.seat.dimmed .seatreveal { opacity: 0.5; }
+/* the action badge hangs off .seat, not .seatcard · without this a bright
+   "CHECK" pill floated over a seat that had just been dimmed */
+.seat.dimmed .actchip { opacity: 0.3; filter: saturate(0.2); }
+.seat.dimmed .betchips { opacity: 0.4; }
+.seat .seatcard, .heroinfo { transition: opacity .28s ease, filter .28s ease, border-color .2s, box-shadow .2s; }
+@media (prefers-reduced-motion: reduce) {
+  .crown, .wonchip { animation: none; }
+}
 .seat.sittingout .seatcard, .seat.disc .seatcard { opacity: 0.5; }
 .seat.disc .status { color: var(--gold); }
+@media (prefers-reduced-motion: reduce) {
+  .seat.active .avatar, .heroinfo.active .avatar { animation: none; }
+}
 
 /* timer ring */
 .timer { position: absolute; inset: -3px; border-radius: inherit; pointer-events: none; }
@@ -392,24 +578,23 @@ body {
 .timerbar i { position: absolute; inset: 0; background: var(--accent); transform-origin: left;
   box-shadow: 0 0 8px var(--accent-55); }
 
-/* dealer + blind markers */
-.btnmark { position: absolute; width: 22px; height: 22px; border-radius: 50%; display: grid;
-  place-items: center; font-family: var(--mono); font-weight: 700; font-size: 10px; z-index: 9;
-  border: 1px solid; }
-.btnmark.dealer { background: var(--white); color: #111; border-color: #fff;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
-.btnmark.sb { background: var(--elevated); color: var(--text-2); border-color: var(--line-2); }
-.btnmark.bb { background: var(--accent); color: #fff; border-color: var(--accent); }
+/* dealer + blind markers · pinned to the pod's top-left so they read as a
+   button lying beside the player, not as a chip floating in the layout flow */
+.btnmark { position: absolute; top: -12px; left: -7px; z-index: 10;
+  min-width: 21px; height: 21px; padding: 0 5px; border-radius: 999px; display: grid;
+  place-items: center; font-family: var(--mono); font-weight: 700; font-size: 9.5px;
+  letter-spacing: 0.02em; border: 1px solid; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+.btnmark.dealer { background: #F5F3EE; color: #111; border-color: #fff; }
+.btnmark.sb { background: #1B1D20; color: var(--text-2); border-color: rgba(255,255,255,0.28); }
+.btnmark.bb { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 
 /* bet chips in front of seat */
-.betchips { position: absolute; display: flex; align-items: center; gap: 7px; z-index: 7;
-  padding: 3px 9px 3px 5px; border-radius: 999px; background: rgba(0,0,0,0.55);
-  border: 1px solid var(--line); backdrop-filter: blur(3px); }
-.betchips .stackimg { display: flex; }
-.chipdot { width: 14px; height: 14px; border-radius: 50%; border: 1.5px dashed rgba(255,255,255,0.55);
-  margin-left: -7px; box-shadow: 0 1px 3px rgba(0,0,0,.5); }
-.chipdot:first-child { margin-left: 0; }
-.betchips .amt { font-family: var(--mono); font-weight: 600; font-size: 12px; color: var(--white); }
+.betchips { position: absolute; display: flex; align-items: center; gap: 6px; z-index: 7;
+  padding: 4px 11px 4px 6px; border-radius: 999px; background: rgba(6,10,8,0.82);
+  border: 1px solid rgba(217,185,112,0.28); backdrop-filter: blur(3px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
+.betchips svg { flex-shrink: 0; }
+.betchips .amt { font-family: var(--mono); font-weight: 700; font-size: 12.5px; color: var(--white); }
 
 /* hero hole cards anchored under hero seat */
 .heroHole { position: absolute; left: 50%; bottom: 150px; transform: translateX(-50%); z-index: 9; }
@@ -417,19 +602,29 @@ body {
 /* hero zone: cards + identity bar */
 .herozone { position: absolute; left: 50%; bottom: 132px; transform: translateX(-50%); z-index: 12;
   display: flex; flex-direction: column; align-items: center; gap: 9px; }
-.heroinfo { display: flex; align-items: center; gap: 12px; padding: 7px 9px 7px 7px; border-radius: 10px;
-  background: linear-gradient(180deg, rgba(26,26,32,0.96), rgba(13,13,18,0.96));
-  border: 1px solid var(--line-2); box-shadow: 0 12px 30px rgba(0,0,0,0.5); }
-.heroinfo.active { border-color: var(--accent-55); box-shadow: 0 0 0 1px var(--accent-32), 0 0 30px rgba(217,171,74,0.3); }
-.heroinfo.winner { border-color: var(--win); box-shadow: 0 0 0 1px var(--win), 0 0 40px rgba(43,212,128,0.4); }
-.heroinfo.allin { border-color: rgba(229,86,42,0.5); box-shadow: 0 0 26px rgba(229,86,42,0.22); }
-.heroinfo .avatar { width: 40px; height: 40px; }
-.heroinfo .meta { display: flex; flex-direction: column; gap: 2px; }
-.heroinfo .meta .nm { font-family: var(--label); font-size: 11px; color: var(--accent-soft); letter-spacing: 0.04em; }
-.heroinfo .meta .stack { font-family: var(--mono); font-weight: 600; font-size: 16px; color: var(--white); }
-.heroinfo .meta .stack .u { font-size: 10px; color: var(--muted); margin-left: 3px; }
+.heroinfo { display: flex; align-items: center; gap: 12px; padding: 8px 12px 8px 8px; border-radius: 13px;
+  background: linear-gradient(180deg, rgba(24,26,28,0.97), rgba(10,11,12,0.98));
+  border: 1px solid rgba(255,255,255,0.12); box-shadow: 0 14px 30px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05); }
+.heroinfo.active { border-color: var(--accent-55); box-shadow: 0 0 0 1px var(--accent-32), 0 0 34px rgba(217,185,112,0.30), 0 14px 30px rgba(0,0,0,0.55); }
+.heroinfo.winner { border-color: var(--win);
+  background: linear-gradient(180deg, rgba(21,44,33,0.97), rgba(9,17,13,0.98));
+  box-shadow: 0 0 0 1px var(--win), 0 0 50px rgba(111,207,151,0.45), 0 14px 30px rgba(0,0,0,0.55); }
+.heroinfo.allin { border-color: rgba(229,107,107,0.55); box-shadow: 0 0 26px rgba(229,107,107,0.22); }
+.heroinfo .avatar { width: 42px; height: 42px; position: relative; top: 0; left: 0; margin-left: 0; }
+.heroinfo .meta { display: flex; flex-direction: column; gap: 1px; }
+.heroinfo .meta .nm { font-family: var(--label); font-size: 11px; font-weight: 500; color: var(--accent-soft); letter-spacing: 0.02em; }
+.heroinfo .meta .stack { display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-weight: 700; font-size: 22px; color: var(--white); line-height: 1.1; }
+.heroinfo .meta .stack svg { flex-shrink: 0; }
+.heroinfo .meta .stack .u { font-size: 12px; color: var(--muted); margin-left: 3px; }
+/* the hero's marker sits inline, not pinned like a seat pod's */
+.heroinfo .hmark .btnmark { position: static; }
 .heroinfo .hstatus { font-family: var(--label); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--muted); padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; }
+/* it is empty on every normal hand · an empty bordered pill looked like a
+   loading slot that never filled */
+.heroinfo .hstatus:empty { display: none; }
+.heroinfo .hmark:empty { display: none; }
 .heroinfo.active .hstatus { color: var(--accent-soft); border-color: var(--accent-32); }
 .heroinfo.winner .hstatus { color: var(--win); border-color: var(--win); }
 .heroinfo .hmark { display: flex; gap: 4px; }
@@ -458,7 +653,7 @@ body {
 .railbody::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; }
 
 /* provably-fair widget pinned in rail */
-.pfwidget { border-top: 1px solid var(--line); padding: 12px; background: rgba(217,171,74,0.04); }
+.pfwidget { border-top: 1px solid var(--line); padding: 12px; background: rgba(217,185,112,0.04); }
 .pfhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
 .pfhead .ttl { display: flex; align-items: center; gap: 7px; font-family: var(--label); font-size: 11px;
   color: var(--accent-soft); letter-spacing: 0.04em; }
@@ -489,8 +684,54 @@ body {
    Action bar
    ========================================================================= */
 .actionbar { position: absolute; left: 0; right: 332px; bottom: 0; z-index: 25;
-  padding: 14px 22px 16px; display: flex; align-items: flex-end; gap: 16px;
-  background: linear-gradient(180deg, transparent, rgba(7,7,7,0.85) 38%, #070708 100%); }
+  padding: 14px 22px 18px; display: flex; align-items: flex-end; justify-content: center; gap: 16px;
+  background: linear-gradient(180deg, transparent, rgba(6,8,7,0.86) 40%, #060807 100%); }
+
+/* ---- the card that holds a decision ---- */
+.actbar { position: relative; width: min(860px, 100%); display: flex; flex-direction: column; gap: 10px;
+  padding: 13px 14px 14px; border-radius: 16px; overflow: hidden;
+  background: linear-gradient(180deg, rgba(20,24,22,0.97), rgba(9,11,10,0.98));
+  border: 1px solid rgba(217,185,112,0.30);
+  box-shadow: 0 18px 46px rgba(0,0,0,0.6), 0 0 34px rgba(217,185,112,0.09), inset 0 1px 0 rgba(255,255,255,0.05); }
+.actbar.urgent { border-color: rgba(229,107,107,0.5); box-shadow: 0 18px 46px rgba(0,0,0,0.6), 0 0 34px rgba(229,107,107,0.16); }
+/* the check/call-only bar (no legal raise) needs no width for a slider */
+.actbar.narrow { width: min(520px, 100%); }
+.actbar.waiting { border-color: var(--line-2); box-shadow: 0 14px 34px rgba(0,0,0,0.5); padding: 14px 18px; }
+.actbar.prebar { width: min(680px, 100%); }
+.prehead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.prehead .ttl { font-family: var(--label); font-size: 12px; font-weight: 600; color: var(--text-2); }
+.prehead .youhave { margin-left: 0; }
+.waitline { text-align: center; font-family: var(--label); font-size: 12.5px; letter-spacing: 0.04em;
+  color: var(--muted); }
+.waitsub { text-align: center; font-family: var(--body); font-size: 12px; color: var(--muted); opacity: 0.85; }
+/* pre-select buttons: same shape as the real ones so the hand learns one target */
+.abtn.pre { height: 46px; }
+.abtn.pre .lbl { font-size: 12.5px; }
+.abtn.pre.armed { background: linear-gradient(180deg, #E7CE8C, #C09B47); border-color: var(--accent-soft); }
+.abtn.pre.armed .lbl { color: var(--accent-ink); }
+
+/* the clock as the card draining, not as a dial to decode */
+.acttimer { position: absolute; top: 0; left: 0; right: 0; height: 2px; background: rgba(255,255,255,0.06); }
+.acttimer i { display: block; height: 100%; background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-55); transition: width 1s linear; }
+.actbar.urgent .acttimer i { background: var(--danger); box-shadow: 0 0 10px rgba(229,107,107,0.7); }
+
+.actrow { display: flex; align-items: center; gap: 9px; }
+.actrow.sizing { flex-wrap: nowrap; }
+.actrow.actions { gap: 10px; }
+
+.nudge { width: 32px; height: 32px; flex-shrink: 0; border-radius: 9px; cursor: pointer;
+  border: 1px solid var(--line-2); background: rgba(255,255,255,0.04); color: var(--text-2);
+  font-family: var(--label); font-size: 17px; font-weight: 600; line-height: 1; display: grid; place-items: center; }
+.nudge:hover { border-color: var(--accent-32); color: var(--white); background: var(--accent-12); }
+
+.youhave { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding-left: 6px;
+  font-family: var(--label); font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.youhave .k { text-transform: uppercase; letter-spacing: 0.09em; font-weight: 600; }
+.youhave b { font-family: var(--mono); font-weight: 700; font-size: 12.5px; color: var(--accent-soft); margin-right: 4px; }
+.youhave .secs { font-family: var(--mono); font-weight: 700; font-size: 13px; color: var(--text-2);
+  padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-2); }
+.youhave .secs.hot { color: var(--danger-soft); border-color: rgba(229,107,107,0.45); }
 
 /* helper cluster (left) */
 .helpers { display: flex; flex-direction: column; gap: 7px; flex-shrink: 0; }
@@ -502,50 +743,84 @@ body {
 .helperchip.best { border-color: var(--accent-32); color: var(--accent-soft); }
 .helperchip.best b { color: var(--white); }
 
-/* bet controls (center) */
-.betcontrols { flex: 1; display: flex; flex-direction: column; gap: 9px; max-width: 560px; }
-.quickchips { display: flex; gap: 7px; }
-.quickchips button { flex: 1; padding: 7px 0; font-family: var(--label); font-size: 11px;
-  text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2);
-  background: rgba(255,255,255,0.025); border: 1px solid var(--line); border-radius: var(--r-sm);
+/* sizing controls */
+.quickchips { display: flex; gap: 6px; flex-shrink: 0; }
+.quickchips button { min-width: 46px; padding: 8px 10px; font-family: var(--label); font-size: 11.5px;
+  font-weight: 600; letter-spacing: 0.02em; color: var(--text-2);
+  background: rgba(255,255,255,0.04); border: 1px solid var(--line-2); border-radius: 9px;
   cursor: pointer; transition: .14s; }
 .quickchips button:hover { background: var(--accent-12); border-color: var(--accent-32); color: var(--white); }
-.quickchips button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.quickchips button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
-.sliderrow { display: flex; align-items: center; gap: 12px; }
-.bslider { flex: 1; position: relative; height: 26px; display: flex; align-items: center; }
-.bslider input { width: 100%; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 4px;
-  background: linear-gradient(90deg, var(--accent) var(--fill,40%), rgba(255,255,255,0.1) var(--fill,40%));
-  outline: none; }
-.bslider input::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
-  background: var(--white); border: 4px solid var(--accent); cursor: grab; box-shadow: 0 0 10px var(--accent-55);
-  margin-top: 0; }
-.bslider input::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #fff;
-  border: 4px solid var(--accent); cursor: grab; }
-.betinput { display: flex; align-items: center; gap: 6px; width: 130px; height: 38px; padding: 0 12px;
-  border: 1px solid var(--line-2); border-radius: var(--r-sm); background: #000; }
+/* ---- range track fill ----
+   THE THUMB AND THE FILL MUST END AT THE SAME PLACE. A thumb's centre travels
+   from thumbW/2 to width-thumbW/2, while a percentage in a gradient measures
+   the FULL width — so a naive `gold var(--fill)%` fill runs ahead of the thumb
+   at the left end and behind it at the right, worst at both extremes. `--fill`
+   is a unitless 0..1 ratio and the stop is placed on the thumb's own travel. */
+.bslider, .buyslider { --thumb: 19px; }
+/* `input[type=range]` and not plain `input`: the modal's own `.lt-modal input`
+   rule (same specificity, declared later) was winning and painting the track
+   flat — which is why the fill never appeared inside the buy-in panel. */
+.bslider input[type="range"], .buyslider input[type="range"] {
+  background: linear-gradient(90deg,
+    var(--accent) calc(var(--fill, 0.4) * (100% - var(--thumb)) + var(--thumb) / 2),
+    rgba(255,255,255,0.1) calc(var(--fill, 0.4) * (100% - var(--thumb)) + var(--thumb) / 2));
+}
+.bslider { flex: 1; min-width: 90px; position: relative; height: 32px; display: flex; align-items: center; }
+.bslider input { width: 100%; -webkit-appearance: none; appearance: none; height: 5px; border-radius: 4px;
+  outline: none; cursor: pointer; }
+.bslider input::-webkit-slider-thumb { -webkit-appearance: none; width: 19px; height: 19px; border-radius: 50%;
+  background: var(--accent); border: 3px solid #0C0E0D; cursor: grab;
+  box-shadow: 0 0 0 1px var(--accent), 0 0 12px var(--accent-55); margin-top: 0; }
+.bslider input::-moz-range-thumb { width: 19px; height: 19px; box-sizing: border-box; border-radius: 50%;
+  background: var(--accent); border: 3px solid #0C0E0D; cursor: grab; box-shadow: 0 0 0 1px var(--accent); }
+.betinput { display: flex; align-items: center; gap: 6px; width: 116px; flex-shrink: 0; height: 34px; padding: 0 12px;
+  border: 1px solid var(--line-2); border-radius: 9px; background: rgba(0,0,0,0.5); }
 .betinput input { width: 100%; background: transparent; border: 0; outline: none; color: var(--white);
-  font-family: var(--mono); font-weight: 600; font-size: 16px; text-align: right; }
+  font-family: var(--mono); font-weight: 700; font-size: 15px; text-align: right; }
 .betinput .u { font-family: var(--mono); font-size: 11px; color: var(--accent-soft); }
 
-/* action buttons (right) */
-.actions { display: flex; gap: 9px; flex-shrink: 0; }
-.abtn { min-width: 116px; height: 84px; padding: 0 18px; border-radius: var(--r-md); cursor: pointer;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
-  border: 1px solid var(--line-2); background: linear-gradient(180deg, #16161c, #0d0d11);
+/* ---- action buttons ----
+   Wide and short rather than tall and narrow, so four of them fit one row and
+   the amount can sit under the verb instead of beside it. */
+.actions { display: flex; gap: 10px; width: 100%; }
+.abtn { flex: 1; min-width: 0; height: 60px; padding: 0 14px; border-radius: 11px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  border: 1px solid var(--line-2); background: linear-gradient(180deg, #17191B, #0D0F10);
   font-family: var(--label); transition: .15s; position: relative; overflow: hidden; }
-.abtn .lbl { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-2); }
-.abtn .amt { font-family: var(--mono); font-weight: 700; font-size: 17px; color: var(--white); }
-.abtn:hover { transform: translateY(-2px); border-color: var(--line-2); }
+.abtn .lbl { font-size: 13px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-2); }
+.abtn .amt { font-family: var(--mono); font-weight: 700; font-size: 15px; color: var(--white); line-height: 1.1; }
+.abtn:hover { border-color: rgba(255,255,255,0.28); }
 .abtn .key { position: absolute; top: 6px; right: 7px; font-family: var(--label); font-size: 8.5px;
   color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 1px 4px; }
-.abtn.fold { background: linear-gradient(180deg, #1d1411, #140c0a); border-color: rgba(229,86,42,0.3); }
+.abtn.fold { background: linear-gradient(180deg, #1C1315, #120C0D); border-color: rgba(229,107,107,0.32); }
 .abtn.fold .lbl { color: var(--danger-soft); }
-.abtn.fold:hover { border-color: rgba(229,86,42,0.6); box-shadow: 0 0 24px rgba(229,86,42,0.18); }
-.abtn.call:hover { border-color: var(--line-2); box-shadow: 0 0 20px rgba(255,255,255,0.06); }
-.abtn.raise { background: linear-gradient(180deg, #d9ab4a, #5757d4); border-color: var(--accent); }
-.abtn.raise .lbl, .abtn.raise .amt { color: #fff; }
-.abtn.raise:hover { box-shadow: 0 0 30px var(--accent-55); }
+.abtn.fold:hover { border-color: rgba(229,107,107,0.65); box-shadow: 0 0 22px rgba(229,107,107,0.16); }
+.abtn.call:hover { box-shadow: 0 0 20px rgba(255,255,255,0.06); }
+/* CHECK is the free action · the same green its badge uses on the felt */
+.abtn.call.check { background: linear-gradient(180deg, #131C18, #0B120E); border-color: rgba(111,207,151,0.30); }
+.abtn.call.check .lbl { color: var(--win, #6FCF97); }
+.abtn.call.check:hover { border-color: rgba(111,207,151,0.6); box-shadow: 0 0 22px rgba(111,207,151,0.14); }
+/* THE RAISE IS NOT A CALL TO ACTION.
+   It used to be the one FILLED button — a slab of gold beside a flat Check —
+   on the theory that the eye needs somewhere to land. At a poker table that is
+   the wrong thing to optimise: the eye already knows where to look, and what
+   the loudest button actually buys you is a player who meant to check and put
+   chips in instead. Money should never be the path of least resistance.
+   So all four are now the same weight and the colour says what the button
+   MEANS, matching the badge each action leaves on the felt: fold red-grey,
+   check green, raise gold, all-in red. */
+.abtn.raise { background: linear-gradient(180deg, rgba(217,185,112,0.15), rgba(217,185,112,0.055));
+  border-color: var(--accent-32); }
+.abtn.raise .lbl { color: var(--accent-soft); }
+.abtn.raise .amt { color: var(--white); }
+.abtn.raise:hover { background: linear-gradient(180deg, rgba(217,185,112,0.24), rgba(217,185,112,0.10));
+  border-color: var(--accent); box-shadow: 0 0 22px rgba(217,185,112,0.16); }
+.abtn.allin { background: linear-gradient(180deg, #1E1416, #130C0E); border-color: rgba(229,107,107,0.42); }
+.abtn.allin .lbl { color: var(--danger-soft); }
+.abtn.allin .amt { color: #FFD9D9; }
+.abtn.allin:hover { border-color: rgba(229,107,107,0.7); box-shadow: 0 0 24px rgba(229,107,107,0.2); }
 
 /* time bank */
 .timebank { display: flex; flex-direction: column; align-items: center; gap: 6px; flex-shrink: 0; }
@@ -568,20 +843,37 @@ body {
 /* =========================================================================
    Banners / overlays
    ========================================================================= */
-.winbanner { position: absolute; left: 50%; top: 64%; transform: translate(-50%,-50%); z-index: 18;
-  display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
-.winbanner .hand { font-family: var(--mono); font-weight: 700; font-size: 26px; color: var(--white);
-  text-shadow: 0 0 24px rgba(43,212,128,0.6); }
-.winbanner .won { font-family: var(--label); font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--win); }
-.winbanner.lose .hand { text-shadow: 0 0 24px rgba(0,0,0,0.6); color: var(--text-2); }
+/* The result of the hand, in the band of felt between the board and the hero's
+   cards. It used to float at 64% as bare glowing text and landed on the hole
+   cards; now it is a plaque with its own ground, so the cards behind it stay
+   readable and the announcement stops looking like a rendering fault. */
+.winbanner { position: absolute; left: 50%; top: 59.5%; transform: translate(-50%,-50%); z-index: 18;
+  display: flex; flex-direction: row; align-items: center; gap: 12px; pointer-events: none;
+  white-space: nowrap; padding: 8px 18px; border-radius: 999px;
+  background: linear-gradient(180deg, rgba(8,14,11,0.94), rgba(4,7,6,0.96));
+  border: 1px solid rgba(111,207,151,0.40);
+  box-shadow: 0 14px 40px rgba(0,0,0,0.65), 0 0 36px rgba(111,207,151,0.18); }
+.winbanner .hand { font-family: var(--mono); font-weight: 800; font-size: 20px; color: var(--white);
+  letter-spacing: -0.01em; line-height: 1.15; }
+/* NOT uppercased: the winner is often a wallet address, and 0xD66B…07C1 set in
+   caps with 0.12em tracking is a wall of hex nobody parses. */
+.winbanner .won { font-family: var(--label); font-size: 12.5px; font-weight: 700; letter-spacing: 0.01em;
+  color: var(--win); max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.winbanner .paid { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+  border-radius: 999px; border: 1px solid rgba(111,207,151,0.35); background: rgba(111,207,151,0.10);
+  font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--win); }
+.winbanner .paid .chk { width: 12px; height: 12px; display: inline-flex; }
+.winbanner .paid .chk svg { width: 100%; height: 100%; }
+.winbanner.lose { border-color: rgba(229,107,107,0.36); box-shadow: 0 14px 40px rgba(0,0,0,0.65); }
+.winbanner.lose .hand { color: var(--text-2); }
 .winbanner.lose .won { color: var(--danger-soft); }
+.winbanner.lose .paid { border-color: rgba(229,107,107,0.35); background: rgba(229,107,107,0.10); color: var(--danger-soft); }
 
 /* run-it-twice prompt */
 .ritprompt { position: absolute; left: 50%; bottom: 200px; transform: translateX(-50%); z-index: 26;
   display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-radius: var(--r-lg);
   background: rgba(13,13,18,0.96); border: 1px solid var(--accent-32);
-  box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 40px rgba(217,171,74,0.15); backdrop-filter: blur(8px); }
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 40px rgba(217,185,112,0.15); backdrop-filter: blur(8px); }
 .ritprompt .q { font-family: var(--body); font-size: 14px; color: var(--white); }
 .ritprompt .q small { display: block; font-family: var(--label); font-size: 10.5px; color: var(--muted);
   margin-top: 2px; }
@@ -624,7 +916,7 @@ body {
 .anno .pin { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 999px;
   font-family: var(--label); font-size: 9.5px; letter-spacing: 0.04em; white-space: nowrap;
   border: 1px solid; backdrop-filter: blur(4px); cursor: default; }
-.anno.chain .pin   { background: rgba(217,171,74,0.16); border-color: var(--accent-55); color: var(--accent-soft); }
+.anno.chain .pin   { background: rgba(217,185,112,0.16); border-color: var(--accent-55); color: var(--accent-soft); }
 .anno.session .pin { background: rgba(229,180,60,0.14);  border-color: rgba(229,180,60,0.55); color: var(--gold); }
 .anno.off .pin     { background: rgba(120,120,130,0.14);  border-color: var(--muted); color: #b9b9c2; }
 .anno .pin .d { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -639,12 +931,12 @@ body {
   font-size: 11px; color: var(--text-2); }
 .annoLegend .lr:last-child { margin-bottom: 0; }
 .annoLegend .sw { width: 11px; height: 11px; border-radius: 3px; border: 1px solid; flex-shrink: 0; }
-.annoLegend .sw.chain { background: rgba(217,171,74,0.2); border-color: var(--accent); }
+.annoLegend .sw.chain { background: rgba(217,185,112,0.2); border-color: var(--accent); }
 .annoLegend .sw.session { background: rgba(229,180,60,0.18); border-color: var(--gold); }
 .annoLegend .sw.off { background: rgba(120,120,130,0.18); border-color: var(--muted); }
 
 /* =========================================================================
-   Review HUD (meta control — outside the product)
+   Review HUD (meta control · outside the product)
    ========================================================================= */
 .hud { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 100;
   display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 11px;
@@ -659,14 +951,19 @@ body {
 .hud .hgroup button:hover { color: var(--text-2); }
 .hud .hgroup button.on { background: var(--accent); color: #fff; }
 .hud .hsep { width: 1px; height: 22px; background: var(--line); }
-.hud .htoggle { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-2);
-  cursor: pointer; padding: 5px 8px; }
-.hud .htoggle .sw { width: 30px; height: 17px; border-radius: 999px; background: #222; position: relative;
-  transition: .18s; border: 1px solid var(--line); }
-.hud .htoggle .sw i { position: absolute; top: 1px; left: 1px; width: 13px; height: 13px; border-radius: 50%;
-  background: var(--muted); transition: .18s; }
-.hud .htoggle.on .sw { background: var(--accent); border-color: var(--accent); }
-.hud .htoggle.on .sw i { left: 14px; background: #fff; }
+/* Toggle switch · GLOBAL (not just inside .hud) so the table-settings panel
+   gets the real pill switch instead of an unstyled "dot". Clear off/on states:
+   off = grey track, knob left; on = accent track, knob slid right. */
+.htoggle { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-2);
+  cursor: pointer; padding: 5px 8px; background: none; border: 0; }
+.htoggle .sw { width: 42px; height: 24px; border-radius: 999px; background: #2b2b33; position: relative;
+  transition: background .18s, border-color .18s; border: 1px solid var(--line-2, #3a3a42);
+  box-sizing: border-box; flex: 0 0 auto; }
+.htoggle .sw i { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #8a8a94; transition: transform .18s, background .18s; box-shadow: 0 1px 3px rgba(0,0,0,.55); }
+.htoggle.on .sw { background: var(--accent); border-color: var(--accent); }
+.htoggle.on .sw i { transform: translateX(18px); background: #fff; }
+.htoggle:hover .sw { border-color: var(--accent); }
 .hud .hkey { font-size: 9px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px;
   padding: 1px 4px; margin-left: 1px; }
 

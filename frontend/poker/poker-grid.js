@@ -2,7 +2,7 @@
    Renders the brand's animated pixel/dot-matrix field: dim cells on black with
    moving diagonal bands of accent light. Powers ambient backgrounds, the felt
    texture, the zkShuffle "scramble" reveal, and glow pulses.
-   Vanilla JS — instantiate with new GridField(canvas, opts). */
+   Vanilla JS · instantiate with new GridField(canvas, opts). */
 (function () {
   "use strict";
 
@@ -24,12 +24,19 @@
     this.speed = opts.speed != null ? opts.speed : 1;     // flow speed multiplier
     this.density = opts.density != null ? opts.density : 1; // how much of grid lights
     this.base = hexToRgb(opts.base || '#101014');         // dim cell color
-    this.accent = hexToRgb(opts.accent || '#d9ab4a');     // hero accent
-    this.accent2 = hexToRgb(opts.accent2 || '#d9ab4a');   // secondary band
+    this.accent = hexToRgb(opts.accent || '#D9B970');     // hero accent
+    this.accent2 = hexToRgb(opts.accent2 || '#D9B970');   // secondary band
     this.bg = opts.bg || '#070707';
     this.shape = opts.shape || 'square';   // square | dot
     this.maxAlpha = opts.maxAlpha != null ? opts.maxAlpha : 1;
     this.minBright = opts.minBright != null ? opts.minBright : 0.05;
+    // Redraw budget. _draw walks rows*cols and does five transcendental calls
+    // plus a fresh fillStyle string PER CELL: on a 1600x1000 stage at cell=20
+    // that is 4000 cells, so at vsync it burned ~240k cells/second - a steady
+    // core of CPU behind an ambient background. 15fps is indistinguishable for
+    // a slow glow field; interactions (scramble/pulse) still run at full rate.
+    this.frameMs = opts.frameMs != null ? opts.frameMs : 66;
+    this._acc = 0;
     this.scrambleT = 0;                    // scramble countdown (ms)
     this.scrambleDur = 0;
     this.pulse = 0;                        // glow pulse 0..1
@@ -89,7 +96,14 @@
     this.t += dt * 0.001 * this.speed;
     if (this.scrambleT > 0) this.scrambleT -= dt;
     if (this.pulse > 0) this.pulse = Math.max(0, this.pulse - dt * 0.0016);
-    this._draw(this.t);
+    // `t` keeps accumulating from real elapsed time, so throttling the redraw
+    // does not slow the motion down - it just samples it less often.
+    this._acc += dt;
+    var busy = this.scrambleT > 0 || this.pulse > 0;   // reveals stay smooth
+    if (busy || this._acc >= this.frameMs) {
+      this._acc = 0;
+      if (!document.hidden) this._draw(this.t);
+    }
     this._raf = requestAnimationFrame(this._frame);
   };
 

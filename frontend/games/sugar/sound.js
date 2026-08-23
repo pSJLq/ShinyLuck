@@ -18,6 +18,7 @@ function init() {
     master.gain.value = 0.35;
     master.connect(ctx.destination);
     inited = true;
+    applyPrefs();
   } catch (e) { /* no audio */ }
 }
 function ensure() {
@@ -61,8 +62,34 @@ function noiseBurst({ dur=0.18, vol=0.22, freq=1200, q=4, lowpass=true }) {
   src.start(); src.stop(ctx.currentTime + dur + 0.05);
 }
 
+// ── shell-linked prefs ──────────────────────────────────────────────────────
+// The site chrome (partials.js) owns the mute button + the FX volume slider and
+// persists them in localStorage. Games run inside the shell's iframe, so we
+// read the prefs on boot AND listen for `storage`, which fires in every other
+// same-origin document when the shell writes · that is what makes the header
+// mute button silence a running slot instantly.
+const PREF_ON = "sl-sound-on";
+const PREF_VOL = "sl-vol-fx";
+const BASE_GAIN = 0.35; // gain that the hand-tuned effects were mixed against
+function prefOn() { try { return localStorage.getItem(PREF_ON) !== "0"; } catch (_) { return true; } }
+function prefVol() {
+  try { const v = parseInt(localStorage.getItem(PREF_VOL) || "40", 10); return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) / 100 : 0.4; }
+  catch (_) { return 0.4; }
+}
+function applyPrefs() {
+  enabled = prefOn();
+  if (master) master.gain.value = BASE_GAIN * (prefVol() / 0.4); // 40% slider == original mix
+  if (!enabled) stopReelLoop();
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => { if (e.key === PREF_ON || e.key === PREF_VOL) applyPrefs(); });
+  document.addEventListener("shinyluck:sound", () => applyPrefs());
+}
+
 export const SFX = {
   init, setEnabled(v){ enabled = !!v; if(!v) stopReelLoop(); }, isEnabled(){ return enabled; },
+  setVolume(pct){ if (master) master.gain.value = BASE_GAIN * (Math.min(100, Math.max(0, pct)) / 100 / 0.4); },
+  syncPrefs(){ applyPrefs(); },
   click() { tone({ freq:220, type:'square', dur:0.04, vol:0.18, attack:.001, decay:.02, release:.03 }); },
   hover() { tone({ freq:660, type:'sine', dur:0.03, vol:0.04, attack:.001, decay:.02, release:.02 }); },
   reelStop(i=0) {

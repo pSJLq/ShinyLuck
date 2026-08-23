@@ -1,20 +1,57 @@
-/* ShinyPoker — LIVE lobby. Design look (lobby.css) driven by on-chain tables
+/* ShinyPoker · LIVE lobby. Design look (lobby.css) driven by on-chain tables
    via window.SP. Cash tab is live; other tabs are flagged coming-soon. */
-const { useState: uS, useEffect: uE, useRef: uR } = React;
+// `var`, not `const`: the cashier and the page app both bind these and now
+// share one global script scope — a second `const` would kill the page.
+var { useState: uS, useEffect: uE, useRef: uR } = React;
 // Render modals to <body> so they escape the scaled/transformed .app (a CSS
 // transform makes position:fixed resolve against .app, not the viewport).
-const Portal = ({ children }) => (window.ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(children, document.body) : children);
+// `var`, not `const`: the lobby loads this file alongside another that
+// defines the same two helpers, and as plain scripts they share one global
+// scope — a duplicate `const` is a SyntaxError that blanks the page.
+var Portal = ({ children }) => (window.ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(children, document.body) : children);
 // Little circular "?" with a hover explanation (native title tooltip).
-const Hint = ({ text }) => <span title={text} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", border: "1px solid var(--muted)", color: "var(--muted)", fontSize: 9, cursor: "help", marginLeft: 5, verticalAlign: "middle" }}>?</span>;
+var Hint = ({ text }) => <span title={text} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", border: "1px solid var(--muted)", color: "var(--muted)", fontSize: 9, cursor: "help", marginLeft: 5, verticalAlign: "middle" }}>?</span>;
 const Ln = (wei) => Number(SP.fmt(wei, 6));
 const lshort = (a) => (a && a !== "0x0000000000000000000000000000000000000000" ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const stakeOf = (bb) => (bb <= 0.05 ? "micro" : bb <= 1 ? "low" : bb <= 5 ? "mid" : "high");
 
+// Three separate components poll the tournament list on the same 4s cadence.
+// Un-shared, that is three independent chain reads per cycle - and each one
+// then fired one isRegisteredIn per tournament SEQUENTIALLY, so a connected
+// wallet looking at ten tournaments drove ~23 awaited reads every 4 seconds.
+// One in-flight read is shared for a beat; actions bust it so a freshly
+// created or joined tournament still shows up immediately.
+let _trnCache = { at: 0, p: null };
+function trnList() {
+  const now = Date.now();
+  if (_trnCache.p && now - _trnCache.at < 3000) return _trnCache.p;
+  _trnCache = { at: now, p: SP.sdk.tournaments().catch((e) => { _trnCache = { at: 0, p: null }; throw e; }) };
+  return _trnCache.p;
+}
+function bustTrnCache() { _trnCache = { at: 0, p: null }; }
+// registration lookups run together instead of one-at-a-time
+async function regMap(ts) {
+  const pairs = await Promise.all(ts.map(async (t) => [t.id, await SP.sdk.isRegisteredIn(t.id)]));
+  const m = {}; for (const [id, v] of pairs) m[id] = v;
+  return m;
+}
+
 function LobbyApp() {
-  // footer/nav deep-links: lobby?tab=tournaments|sng|clubs|cash
+  // Language is owned by the casino's Settings · repaint the WHOLE tree when it
+  // changes so every SPT() below re-runs at once. It has to sit on the root:
+  // the lobby's own stats live here, and a tab-level hook would leave them
+  // waiting on the 4s poll to catch up (measured: ~2s of stale labels).
+  const [, setLangTick] = uS(0);
+  uE(() => {
+    const on = () => setLangTick((n) => n + 1);
+    window.addEventListener("sp-lang-changed", on);
+    return () => window.removeEventListener("sp-lang-changed", on);
+  }, []);
+
+  // footer/nav deep-links: lobby?tab=tournaments|cash
   const [tab, setTab] = uS(() => {
     const t = new URLSearchParams(location.search).get("tab");
-    return ["cash", "tournaments", "sng", "clubs"].includes(t) ? t : "cash";
+    return ["cash", "tournaments"].includes(t) ? t : "cash";
   });
   const [rows, setRows] = uS([]);
   const [loaded, setLoaded] = uS(false);
@@ -27,17 +64,15 @@ function LobbyApp() {
   const [trnSeated, setTrnSeated] = uS(0);
   const [showCreate, setShowCreate] = uS(false);
   const [showCashier, setShowCashier] = uS(false);
-  const [theme] = uS(() => localStorage.getItem("sp_theme") || "b");
-  const canvasRef = uR(null);
+  // try/catch, not a bare read: in a framed WKWebView (Telegram on iOS with
+  // tracking prevention on) `localStorage` THROWS instead of returning null.
+  // Thrown from a state initializer, that blanks the whole lobby with no error
+  // on screen — the exact failure §26 chased. poker-boot.js also shims the
+  // whole object; this is the second lock on the same door.
+  const [theme] = uS(() => { try { return localStorage.getItem("sp_theme") || "b"; } catch (e) { return "b"; } });
 
-  // ambient grid
-  uE(() => {
-    if (!canvasRef.current || !window.GridField) return;
-    const f = new GridField(canvasRef.current, { cell: 20, gap: 6, speed: 0.4, density: 0.5, accent: "#d9ab4a", accent2: "#f2d78a", maxAlpha: 0.7, minBright: 0.01, shape: "square" });
-    f.start();
-    const r = setTimeout(() => f._resize(), 300);
-    return () => { clearTimeout(r); f.destroy(); };
-  }, []);
+  // Ambient backdrop is poker-dust.js now (six composited sparks) instead of a
+  // GridField canvas repainting thousands of cells every frame at 16% opacity.
 
   // restore Privy session
   uE(() => {
@@ -60,7 +95,7 @@ function LobbyApp() {
       try {
         let out;
         // dealer cache first: ONE GET for the whole lobby instead of ~5 RPC
-        // calls per table per client — the difference between 20 and 200 users
+        // calls per table per client · the difference between 20 and 200 users
         const lob = await SP.sdk.lobbySnapshot();
         if (lob && Array.isArray(lob.tables)) {
           out = lob.tables
@@ -86,7 +121,7 @@ function LobbyApp() {
         if (!stop) { setRows(out); setLoaded(true); }
         if (SP.sdk.hasTournaments()) {
           try {
-            const ts = await SP.sdk.tournaments();
+            const ts = await trnList();
             if (!stop) {
               setTrnCount(ts.filter((t) => t.status <= 1).length);
               setTrnSeated(ts.filter((t) => t.status === 1).reduce((a, t) => a + t.remaining, 0)); // tournament players count as seated
@@ -110,7 +145,6 @@ function LobbyApp() {
   if (size !== "all") cash = cash.filter((r) => String(r.size) === size);
   const totalSeated = rows.reduce((a, r) => a + r.seated, 0);
   const running = rows.filter((r) => r.inHand).length;
-  const biggest = rows.reduce((m, r) => Math.max(m, r.pot), 0);
   const sym = SP.NETWORK.currency.symbol;
 
   return (
@@ -125,45 +159,46 @@ function LobbyApp() {
           <div className="sep" />
           <div className="spacer" />
           {connected ? (
-            <div className="wallet" style={{ cursor: "pointer" }} title="Cashier · nickname" onClick={() => setShowCashier(true)}><BraceLogo size={16} /><span className="bal tnum">{bal.toFixed(1)}</span><span className="net">{lshort(addr)}</span></div>
+            <div className="wallet" style={{ cursor: "pointer" }} title="Cashier · nickname" onClick={() => setShowCashier(true)}><BraceLogo size={16} /><span className="bal tnum">{fmtMoney(bal)}</span><span className="net">{lshort(addr)}</span></div>
           ) : (
-            <button className="metapill" style={{ cursor: "pointer", color: "var(--accent-soft)", borderColor: "var(--accent-32)", background: "var(--accent-12)" }} onClick={connect}>Connect Wallet</button>
+            <button className="metapill" style={{ cursor: "pointer", color: "var(--accent-soft)", borderColor: "var(--accent-32)", background: "var(--accent-12)" }} onClick={connect}>{SPT("Connect Wallet")}</button>
           )}
         </header>
 
-        <canvas className="lobbyfield" ref={canvasRef} />
         {showCashier && connected && <CashierModal close={() => setShowCashier(false)} addr={addr} bal={bal} refresh={refreshBal} />}
 
         <div className="lobbyhead">
           <div className="lobbytabs">
-            {[["cash", "Cash"], ["tournaments", "Tournaments"], ["sng", "Sit & Go"], ["clubs", "Clubs"]].map(([k, l]) => (
-              <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}<span className="ct tnum">{k === "cash" ? cash.length : (k === "tournaments" || k === "sng") && SP.sdk.hasTournaments() ? trnCount : "soon"}</span></button>
+            {[["cash", "Cash"], ["tournaments", "Tournaments"]].map(([k, l]) => (
+              <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}<span className="ct tnum">{k === "cash" ? cash.length : SP.sdk.hasTournaments() ? trnCount : "soon"}</span></button>
             ))}
           </div>
           <div className="statstrip">
-            <div className="stat"><span className="k"><span className="live" />Players seated</span><span className="v count tnum">{totalSeated + trnSeated}</span></div>
-            <div className="stat"><span className="k">Tables</span><span className="v tnum">{rows.length}</span></div>
-            <div className="stat" title="Tables with a hand being dealt right now"><span className="k">Hands in play</span><span className="v tnum">{running}</span></div>
-            <div className="stat"><span className="k">Biggest pot now</span><span className="v tnum">{biggest.toFixed(2)}<span className="u">{sym}</span></span></div>
+            <div className="stat"><span className="k"><span className="live" />{SPT("Players seated")}</span><span className="v count tnum">{totalSeated + trnSeated}</span></div>
+            <div className="stat"><span className="k">{SPT("Tables")}</span><span className="v tnum">{rows.length}</span></div>
+            <div className="stat" title="Tables with a hand being dealt right now"><span className="k">{SPT("Hands in play")}</span><span className="v tnum">{running}</span></div>
           </div>
         </div>
 
         <div className="subbar">
           {tab === "cash" ? (
             <React.Fragment>
-              <span className="filterlabel">Stakes</span>
+              <span className="filterlabel">{SPT("Stakes")}</span>
               <div className="chipset">{[["all", "All"], ["micro", "Micro"], ["low", "Low"], ["mid", "Mid"], ["high", "High"]].map(([k, l]) => <button key={k} className={stake === k ? "on" : ""} onClick={() => setStake(k)}>{l}</button>)}</div>
-              <span className="filterlabel">Size</span>
+              <span className="filterlabel">{SPT("Size")}</span>
               <div className="chipset">{[["all", "All"], ["6", "6-max"], ["9", "9-max"], ["2", "Heads-up"]].map(([k, l]) => <button key={k} className={size === k ? "on" : ""} onClick={() => setSize(k)}>{l}</button>)}</div>
               <div className="spacerflex" />
             </React.Fragment>
           ) : tab === "tournaments" && SP.sdk.hasTournaments() ? (
+            /* The line that used to sit here ("Single-table tournaments ·
+               buy-in or sponsored pools") described the feature to someone who
+               had already chosen it, in the row where they were looking for
+               something to click. */
             <React.Fragment>
-              <span className="filterlabel">Single-table tournaments · buy-in or sponsored pools</span>
               <div className="spacerflex" />
-              <button className="cta" onClick={() => (connected ? setShowCreate(true) : connect())}>+ Create tournament</button>
+              <button className="cta" onClick={() => (connected ? setShowCreate(true) : connect())}>+ {SPT("Create tournament")}</button>
             </React.Fragment>
-          ) : <span className="filterlabel">{tab === "tournaments" ? "Scheduled tournaments" : tab === "sng" ? "Sit & Go / Spin" : "Clubs & private tables"}</span>}
+          ) : <span className="filterlabel">{SPT("Scheduled tournaments")}</span>}
         </div>
 
         <div className="lobbybody">
@@ -171,27 +206,25 @@ function LobbyApp() {
             {tab === "tournaments" && SP.sdk.hasTournaments() ? (
               <TournamentsTab connected={connected} connect={connect} addr={addr} onCount={setTrnCount}
                 showCreate={showCreate} closeCreate={() => setShowCreate(false)} />
-            ) : tab === "sng" && SP.sdk.hasTournaments() ? (
-              <SngTab connected={connected} connect={connect} addr={addr} />
             ) : tab !== "cash" ? (
               <div style={{ textAlign: "center", padding: "70px 20px", color: "var(--muted)", fontFamily: "var(--label)" }}>
                 <div style={{ fontSize: 30, marginBottom: 10 }}>♠</div>
-                <div style={{ fontFamily: "var(--mono)", fontSize: 18, color: "var(--text)" }}>{tab === "tournaments" ? "Tournaments" : tab === "sng" ? "Sit & Go" : "Clubs"} — coming soon</div>
-                <div style={{ marginTop: 8, fontSize: 13 }}>Cash NLHE is live now. Scheduled tournaments, Sit&Go and clubs land next.</div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 18, color: "var(--text)" }}>Tournaments · coming soon</div>
+                <div style={{ marginTop: 8, fontSize: 13 }}>{SPT("Cash NLHE is live now.")}</div>
               </div>
-            ) : !loaded ? <div style={{ padding: 50, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>Loading tables…</div>
-              : cash.length === 0 ? <div style={{ padding: 50, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>No tables match your filters.</div>
+            ) : !loaded ? <div style={{ padding: 50, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>{SPT("Loading tables…")}</div>
+              : cash.length === 0 ? <div style={{ padding: 50, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>{SPT("No tables match your filters.")}</div>
               : (
                 /* cash tables as mini-felt cards: a plan-view oval with the
                    actual seat occupancy around it and the live pot in the
-                   middle — the row list read like a spreadsheet */
+                   middle · the row list read like a spreadsheet */
                 <div className="tgrid">
                   {cash.map((r) => {
                     const full = r.seated >= r.size;
                     const sizeLabel = r.size === 2 ? "Heads-up" : r.size + "-max";
                     const suit = ["♠", "♥", "♦", "♣"][r.id % 4];
                     const red = r.id % 4 === 1 || r.id % 4 === 2;
-                    const tilt = ((r.id * 47) % 22) - 11; // deterministic per table — no two cards sit identical
+                    const tilt = ((r.id * 47) % 22) - 11; // deterministic per table · no two cards sit identical
                     const seats = Array.from({ length: r.size }, (_, i) => {
                       const a = Math.PI / 2 + (i / r.size) * Math.PI * 2; // clockwise from the bottom seat
                       return { x: 50 + 43 * Math.cos(a), y: 50 + 38 * Math.sin(a), on: i < r.seated };
@@ -203,25 +236,30 @@ function LobbyApp() {
                           <span className="tc-tags"><span className="gametag">NLHE</span><span className="tc-size">{sizeLabel}</span></span>
                         </div>
                         <div className="tc-felt">
-                          <span className="tc-suit" style={{ transform: `translate(-50%, -52%) rotate(${tilt}deg)`, color: red ? "rgba(190,80,80,.075)" : "rgba(217,171,74,.07)" }}>{suit}</span>
+                          <span className="tc-suit" style={{ transform: `translate(-50%, -52%) rotate(${tilt}deg)`, color: red ? "rgba(190,80,80,.075)" : "rgba(217,185,112,.07)" }}>{suit}</span>
                           {seats.map((s, i) => <span key={i} className={"tc-seat" + (s.on ? " on" : "")} style={{ left: s.x + "%", top: s.y + "%" }} />)}
                           <div className="tc-center">
                             {r.inHand ? (
                               <React.Fragment>
                                 {r.pot > 0 && <span className="tc-pot tnum">{r.pot.toFixed(2)}<span className="u">{sym}</span></span>}
-                                <span className="tc-live"><span className="dot" />hand in play</span>
+                                <span className="tc-live"><span className="dot" />{SPT("hand in play")}</span>
                               </React.Fragment>
                             ) : (
-                              <span className="tc-wait">{r.seated > 0 ? "waiting for players" : "open table — be first"}</span>
+                              <span className="tc-wait">{r.seated > 0 ? SPT("waiting for players") : SPT("open table")}</span>
                             )}
                           </div>
                         </div>
                         <div className="tc-bottom">
-                          <span className="tc-rake">rake <b>{r.rake}%</b> · cap {r.cap} · no flop no drop</span>
+                          {/* One fact, legibly. The cap and the "no flop no
+                              drop" rule are real but they are answers to a
+                              question nobody asks while picking a table. */}
+                          <span className="tc-rake" title={`${SPT("Rake")} ${r.rake}% · ${SPT("cap")} ${r.cap} ${sym} · ${SPT("nothing is taken when the hand ends before the flop")}`}>
+                            {SPT("Rake")} <b>{r.rake}%</b>
+                          </span>
                           <span className="tc-actions">
                             {full
-                              ? <span className="btn-sm full">Full · watch</span>
-                              : <span className="btn-sm join">{r.seated === 0 ? "Sit first" : `Join · ${r.seated}/${r.size}`}</span>}
+                              ? <span className="btn-sm full">{SPT("Full · watch")}</span>
+                              : <span className="btn-sm join">{r.seated === 0 ? SPT("Take a seat") : `${SPT("Join")} · ${r.seated}/${r.size}`}</span>}
                           </span>
                         </div>
                       </a>
@@ -244,87 +282,126 @@ function TournamentsTab({ connected, connect, addr, onCount, showCreate, closeCr
   const [mine, setMine] = uS({}); // id -> isRegistered
   const [busy, setBusy] = uS(false);
   const [msg, setMsg] = uS(null);
+  const [showPast, setShowPast] = uS(false);
   const sym = SP.NETWORK.currency.symbol;
 
   function flash(m) { setMsg(m); setTimeout(() => setMsg(null), 4000); }
 
   async function load() {
     try {
-      const ts = await SP.sdk.tournaments();
+      const ts = await trnList();
       ts.reverse(); // newest first
       setList(ts);
       onCount(ts.filter((t) => t.status <= 1).length);
       if (SP.sdk.address) {
-        const m = {};
-        for (const t of ts) m[t.id] = await SP.sdk.isRegisteredIn(t.id);
-        setMine(m);
+        setMine(await regMap(ts));
       }
     } catch (e) { console.warn("trn load:", e.message); setList([]); }
   }
   uE(() => { load(); const iv = setInterval(load, 4000); return () => clearInterval(iv); }, [connected]);
+  // Language is owned by the casino's Settings · repaint when it changes so
+  // SPT() below re-runs with the new one (no reload).
+  const [, setLangTick] = uS(0);
+  uE(() => {
+    const on = () => setLangTick((n) => n + 1);
+    window.addEventListener("sp-lang-changed", on);
+    return () => window.removeEventListener("sp-lang-changed", on);
+  }, []);
 
   async function act(label, fn) {
+    // the clicked button owns the spinner until this settles
+    const done = SPPress.claim();
     setBusy(true);
-    try { await fn(); flash(label + " ✓"); await load(); }
-    catch (e) { flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 70)); console.error(e); }
-    finally { setBusy(false); }
+    try { await fn(); bustTrnCache(); await load(); } // no success toast · the row updates itself
+    catch (e) { flash(label + " ✗ " + SP.pokerError(e)); console.error(e); }
+    finally { setBusy(false); done(); }
   }
 
   const fmtSplit = (bps) => bps.map((b) => (b / 100) + "%").join(" / ");
-  // Private (approval) tournaments are invite-by-link — list them only for their host.
+  // Private (approval) tournaments are invite-by-link · list them only for their host.
   const visible = (list || []).filter((t) => !t.approvalRequired || (addr && t.creator.toLowerCase() === addr.toLowerCase()));
+  // A finished tournament cannot be joined, watched or acted on — it is a
+  // receipt. Twelve of them above the one event you could actually enter is
+  // what made this page unreadable, so they fold away behind a count.
+  const open = visible.filter((t) => t.status <= 1);
+  const past = visible.filter((t) => t.status > 1);
+  const rowsShown = showPast ? open.concat(past) : open;
 
   return (
     <React.Fragment>
       {msg && <div className="lt-toast" style={{ bottom: 60 }}>{msg}</div>}
       {showCreate && <CreateTournamentModal close={closeCreate} onDone={() => { closeCreate(); load(); }} act={act} busy={busy} />}
       {list == null ? (
-        <div style={{ padding: 50, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>Loading tournaments…</div>
+        <div style={{ padding: 50, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>{SPT("Loading tournaments…")}</div>
       ) : visible.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "70px 20px", color: "var(--muted)", fontFamily: "var(--label)" }}>
-          <div style={{ fontSize: 30, marginBottom: 10 }}>♠</div>
-          <div style={{ fontFamily: "var(--mono)", fontSize: 18, color: "var(--text)" }}>No tournaments yet</div>
-          <div style={{ marginTop: 8, fontSize: 13 }}>Be the first — create one with your own buy-in, prize pool and payout split.</div>
+        <div className="emptystate">
+          <div className="glyph">♠</div>
+          <div className="ttl">{SPT("No tournaments yet")}</div>
+          <div className="sub">{SPT("Be the first · create one with your own buy-in, prize pool and payout split.")}</div>
         </div>
       ) : (
         <div className="dtable">
+          {open.length === 0 && (
+            <div className="emptystate tight">
+              <div className="ttl">{SPT("Nothing running right now")}</div>
+              <div className="sub">{SPT("Create one, or look through what has already been played.")}</div>
+            </div>
+          )}
+          {rowsShown.length > 0 && (
           <div className="dthead" style={{ gridTemplateColumns: TRN_COLS }}>
-            <span className="h">Tournament</span><span className="h">Buy-in · split</span><span className="h">Prize pool</span>
-            <span className="h c">Entrants</span><span className="h">Status</span><span className="h r">Action</span>
-          </div>
-          {visible.map((t) => {
+            <span className="h">{SPT("Tournament")}</span><span className="h">{SPT("Buy-in")}</span><span className="h">{SPT("Prize pool")}</span>
+            <span className="h c">{SPT("Entrants")}</span><span className="h">{SPT("Status")}</span><span className="h r">{SPT("Action")}</span>
+          </div>)}
+          {rowsShown.map((t) => {
             const cost = t.buyIn + t.fee;
             const statusCls = ["registering", "running", "finished", "finished"][t.status];
             const reg = mine[t.id];
             const isCreator = addr && t.creator.toLowerCase() === addr.toLowerCase();
             return (
-              <div key={t.id} className="drow" style={{ gridTemplateColumns: TRN_COLS }}>
+              <div key={t.id} className={"drow" + (t.status > 1 ? " past" : "")} style={{ gridTemplateColumns: TRN_COLS }}>
                 <div className="cell-tname">
                   <span className="nm">SNG #{t.id} · {t.maxPlayers}-max</span>
                   <span className="meta"><span>{Number(t.startStack)} chips</span><span>by {t.creator.slice(0, 6)}…</span>{t.pool > t.buyIn * BigInt(t.registered) && <span className="bnt">◆ sponsored</span>}{t.hostBps > 0 && <span className="bnt" style={{ color: "var(--gold, #e8c15a)" }}>★ host {t.hostBps / 100}%</span>}{t.approvalRequired && <span className="bnt">● private</span>}{isCreator && t.pendingCount > 0 && <span className="bnt">{t.pendingCount} applied</span>}</span>
                 </div>
                 <div className="buyincell">
-                  <span className="bi tnum">{Number(SP.fmt(cost, 4))}<span className="u">{sym}</span></span>
-                  <span className="split">payout {fmtSplit(t.payoutBps)}</span>
+                  {/* A free roll used to print a bold gold 0 with a currency
+                      suffix, which reads as a price of zero rather than as no
+                      price at all — say the word. */}
+                  {cost > 0n
+                    ? <span className="bi tnum">{Number(SP.fmt(cost, 4))}<span className="u">{sym}</span></span>
+                    : <span className="bi free">{SPT("Free")}</span>}
+                  <span className="split">{SPT("payout")} {fmtSplit(t.payoutBps)}</span>
                 </div>
+                {/* The "✓ secured on-chain" badge under every prize pool was
+                    true of literally everything on this site, so it carried no
+                    information and cost a colour. */}
                 <div className="prizecell">
-                  <span className="pp tnum">{Number(SP.fmt(t.pool, 4))}<span className="u">{sym}</span></span>
-                  <span className="securechip">✓ secured on-chain</span>
+                  {/* Gold is reserved for a pool that exists. Before the first
+                      entry there is nothing to win, and a bright zero pulled
+                      the eye to the emptiest cell in the row. */}
+                  {t.pool > 0n
+                    ? <span className="pp tnum">{Number(SP.fmt(t.pool, 4))}<span className="u">{sym}</span></span>
+                    : <span className="pp empty">{SPT("no entries yet")}</span>}
                 </div>
                 <div className="regcell tnum">{t.registered}/{t.maxPlayers}{t.status === 1 && <span className="u">{t.remaining} left</span>}</div>
                 <div><span className={"statuschip " + statusCls}>{SP.TRN_STATUS[t.status]}</span></div>
                 <div className="rowactions">
-                  <a className="btn-sm" href={"tournament?id=" + t.id}>View</a>
-                  {t.status === 0 && t.approvalRequired && !isCreator && <a className="btn-sm join" href={"tournament?id=" + t.id}>Apply</a>}
-                  {t.status === 0 && !t.approvalRequired && !connected && <button className="btn-sm join" onClick={connect}>Connect</button>}
-                  {t.status === 0 && !t.approvalRequired && connected && !reg && <button className="btn-sm join" disabled={busy} onClick={() => act("Register", () => SP.sdk.registerTournament(t.id, cost))}>Register</button>}
-                  {t.status === 0 && !t.approvalRequired && connected && reg && <button className="btn-sm" disabled={busy} onClick={() => act("Unregister", () => SP.sdk.unregisterTournament(t.id))}>Unregister</button>}
-                  {t.status === 0 && connected && isCreator && t.registered >= 2 && <button className="btn-sm join" disabled={busy} onClick={() => act("Start", () => SP.sdk.startTournament(t.id))}>Start</button>}
-                  {t.status === 1 && <a className="btn-sm join" href={"table?t=" + t.tableId}>{reg ? "Play →" : "Observe"}</a>}
+                  <a className="btn-sm" href={"tournament?id=" + t.id}>{SPT("View")}</a>
+                  {t.status === 0 && t.approvalRequired && !isCreator && <a className="btn-sm join" href={"tournament?id=" + t.id}>{SPT("Apply")}</a>}
+                  {t.status === 0 && !t.approvalRequired && !connected && <button className="btn-sm join" onClick={connect}>{SPT("Connect")}</button>}
+                  {t.status === 0 && !t.approvalRequired && connected && !reg && <button className="btn-sm join" disabled={busy} onClick={() => act("Register", () => SP.sdk.registerTournament(t.id, cost))}>{SPT("Register")}</button>}
+                  {t.status === 0 && !t.approvalRequired && connected && reg && <button className="btn-sm" disabled={busy} onClick={() => act("Unregister", () => SP.sdk.unregisterTournament(t.id))}>{SPT("Unregister")}</button>}
+                  {t.status === 0 && connected && isCreator && t.registered >= 2 && <button className="btn-sm join" disabled={busy} onClick={() => act("Start", () => SP.sdk.startTournament(t.id))}>{SPT("Start")}</button>}
+                  {t.status === 1 && <a className="btn-sm join" href={"table?t=" + t.tableId}>{reg ? SPT("Play") + " →" : SPT("Observe")}</a>}
                 </div>
               </div>
             );
           })}
+          {past.length > 0 && (
+            <button className="pasttoggle" onClick={() => setShowPast((v) => !v)}>
+              {showPast ? SPT("Hide finished") : SPT("Show finished") + " (" + past.length + ")"}
+            </button>
+          )}
         </div>
       )}
     </React.Fragment>
@@ -350,21 +427,31 @@ function SngTab({ connected, connect, addr }) {
 
   async function load() {
     try {
-      const ts = (await SP.sdk.tournaments()).filter((t) => t.status === 0).reverse();
+      const ts = (await trnList()).filter((t) => t.status === 0).reverse();
       setOpen(ts);
-      if (SP.sdk.address) { const m = {}; for (const t of ts) m[t.id] = await SP.sdk.isRegisteredIn(t.id); setMine(m); }
+      if (SP.sdk.address) setMine(await regMap(ts));
     } catch (e) { setOpen([]); }
   }
   uE(() => { load(); const iv = setInterval(load, 4000); return () => clearInterval(iv); }, [connected]);
+  // Language is owned by the casino's Settings · repaint when it changes so
+  // SPT() below re-runs with the new one (no reload).
+  const [, setLangTick] = uS(0);
+  uE(() => {
+    const on = () => setLangTick((n) => n + 1);
+    window.addEventListener("sp-lang-changed", on);
+    return () => window.removeEventListener("sp-lang-changed", on);
+  }, []);
 
-  // spin reel — pure eye-candy teaser while Spin SNG awaits on-chain randomness
+  // spin reel · pure eye-candy teaser while Spin SNG awaits on-chain randomness
   uE(() => { const iv = setInterval(() => setDisplay(SPIN_MULTIS[Math.floor(Math.random() * SPIN_MULTIS.length)]), 1400); return () => clearInterval(iv); }, []);
 
   async function act(label, fn) {
+    // the clicked button owns the spinner until this settles
+    const done = SPPress.claim();
     setBusy(true);
-    try { await fn(); flash(label + " ✓"); await load(); }
-    catch (e) { flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 70)); console.error(e); }
-    finally { setBusy(false); }
+    try { await fn(); bustTrnCache(); await load(); } // no success toast · the row updates itself
+    catch (e) { flash(label + " ✗ " + SP.pokerError(e)); console.error(e); }
+    finally { setBusy(false); done(); }
   }
 
   /// One click: create the SNG from the preset AND take the first seat.
@@ -383,7 +470,7 @@ function SngTab({ connected, connect, addr }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <div className="dtable" style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden", alignSelf: "stretch" }}>
           <div className="dthead" style={{ gridTemplateColumns: "1.4fr 0.8fr 0.8fr 0.9fr", position: "static" }}>
-            <span className="h">Quick Sit &amp; Go</span><span className="h">Buy-in</span><span className="h c">Format</span><span className="h r">Action</span>
+            <span className="h">Quick Sit &amp; Go</span><span className="h">Buy-in</span><span className="h c">{SPT("Format")}</span><span className="h r">{SPT("Action")}</span>
           </div>
           {SNG_PRESETS.map((p) => (
             <div key={p.name} className="sngrow" style={{ gridTemplateColumns: "1.4fr 0.8fr 0.8fr 0.9fr" }}>
@@ -403,10 +490,10 @@ function SngTab({ connected, connect, addr }) {
 
         <div className="dtable" style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
           <div className="dthead" style={{ gridTemplateColumns: "1.4fr 0.8fr 0.8fr 0.9fr", position: "static" }}>
-            <span className="h">Open seats — join now</span><span className="h">Buy-in</span><span className="h c">Seats</span><span className="h r">Action</span>
+            <span className="h">{SPT("Open seats · join now")}</span><span className="h">Buy-in</span><span className="h c">{SPT("Seats")}</span><span className="h r">{SPT("Action")}</span>
           </div>
           {open == null ? <div style={{ padding: 24, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>Loading…</div>
-            : open.length === 0 ? <div style={{ padding: 24, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>No open Sit &amp; Go right now — start one above.</div>
+            : open.length === 0 ? <div style={{ padding: 24, color: "var(--muted)", fontFamily: "var(--label)", textAlign: "center" }}>No open Sit &amp; Go right now · start one above.</div>
             : open.map((t) => {
               const cost = t.buyIn + t.fee;
               return (
@@ -421,9 +508,9 @@ function SngTab({ connected, connect, addr }) {
                     <span className="lbl">{t.registered}/{t.maxPlayers}</span>
                   </div>
                   <div className="rowactions">
-                    {!connected ? <button className="btn-sm join" onClick={connect}>Connect</button>
-                      : mine[t.id] ? <button className="btn-sm" disabled={busy} onClick={() => act("Unregister", () => SP.sdk.unregisterTournament(t.id))}>Unregister</button>
-                      : <button className="btn-sm join" disabled={busy} onClick={() => act("Register", () => SP.sdk.registerTournament(t.id, cost))}>Register</button>}
+                    {!connected ? <button className="btn-sm join" onClick={connect}>{SPT("Connect")}</button>
+                      : mine[t.id] ? <button className="btn-sm" disabled={busy} onClick={() => act("Unregister", () => SP.sdk.unregisterTournament(t.id))}>{SPT("Unregister")}</button>
+                      : <button className="btn-sm join" disabled={busy} onClick={() => act("Register", () => SP.sdk.registerTournament(t.id, cost))}>{SPT("Register")}</button>}
                   </div>
                 </div>
               );
@@ -434,11 +521,11 @@ function SngTab({ connected, connect, addr }) {
       <div className="spincard">
         <div className="sptop">
           <div className="t">◆ Spin &amp; Go</div>
-          <div className="s">3-handed hyper turbo with a random prize multiplier revealed at seating — powered by the same provably-fair on-chain randomness as the deck. Coming soon.</div>
+          <div className="s">3-handed hyper turbo with a random prize multiplier revealed at seating · powered by the same provably-fair on-chain randomness as the deck. Coming soon.</div>
         </div>
         <div className="spinreel">
           <div style={{ fontFamily: "var(--mono)", fontSize: 54, fontWeight: 700, color: "var(--accent-soft)" }}>×{display.x}</div>
-          <button className="spinbtn" disabled>Spin — soon</button>
+          <button className="spinbtn" disabled>Spin · soon</button>
         </div>
       </div>
       {msg && <div className="lt-toast" style={{ bottom: 60 }}>{msg}</div>}
@@ -446,16 +533,45 @@ function SngTab({ connected, connect, addr }) {
   );
 }
 
-// LePoker-style blind schedules. Each preset = start stack + per-level rows
-// [smallBlind, bigBlind, ante] at a common per-level duration.
-const MK = (mins, rows) => rows.map(([sb, bb, ante]) => ({ sb, bb, ante, durationSecs: mins * 60 }));
-// Deep enough that no allowed field (up to 45 players) can outlast the final
-// level: the last blinds dwarf the total chips in play. Contract caps custom
-// structures at 40 levels.
+// ONE LADDER, THREE WAYS IN.
+// This is the standard tournament progression — blinds up about 1.5x a level,
+// doubling every second or third — the same shape the WSOP structure sheets,
+// live card rooms and online MTTs all use. A fast structure is NOT a different
+// ladder: it is a shorter level and a shallower entry point. That is exactly
+// how a turbo differs from a regular event everywhere else, and getting it
+// wrong is what made our "Standard" a hyper-turbo by every other name: three
+// minutes a level is about three hands here, against the ten-plus a regular
+// event gives you, and event #23 reached five big blinds in forty-two minutes.
+const LADDER = [
+  [10, 20, 0],       [15, 30, 0],       [20, 40, 0],       [25, 50, 0],       [30, 60, 8],
+  [40, 80, 10],      [50, 100, 12],     [60, 120, 15],     [75, 150, 20],     [100, 200, 25],
+  [125, 250, 30],    [150, 300, 40],    [200, 400, 50],    [250, 500, 60],    [300, 600, 75],
+  [400, 800, 100],   [500, 1000, 125],  [600, 1200, 150],  [800, 1600, 200],  [1000, 2000, 250],
+  [1200, 2400, 300], [1500, 3000, 400], [2000, 4000, 500], [2500, 5000, 600], [3000, 6000, 750],
+  [4000, 8000, 1000], [5000, 10000, 1250], [6000, 12000, 1500], [8000, 16000, 2000], [10000, 20000, 2500],
+];
+/// A preset is a slice of the ladder from `fromBB` onward at a fixed level
+/// length. Antes wait for the first four levels, as they do everywhere else —
+/// they exist to force action once the blinds are worth stealing, not before.
+const MK = (mins, fromBB) => {
+  const start = LADDER.findIndex(([, bb]) => bb === fromBB);
+  return LADDER.slice(start).map(([sb, bb, ante], i) => ({ sb, bb, ante: i < 4 ? 0 : ante, durationSecs: mins * 60 }));
+};
+/// Minutes until a starting stack is worth ten big blinds — the point where an
+/// event stops being poker and becomes a shoving contest. The single most
+/// useful number a host can see BEFORE creating one.
+const shoveAt = (levels, stack) => {
+  let t = 0;
+  for (const l of levels) { t += l.durationSecs; if (stack / l.bb <= 10) break; }
+  return Math.round(t / 60);
+};
+// Same 10,000 chips in every preset; the speed comes from the level length and
+// how deep you start, never from a steeper ladder. Contract caps custom
+// structures at 40 levels, and its own blind cap stops anything running away.
 const STRUCTURES = {
-  slow: { label: "Slow", stack: 2000, mins: 5, levels: MK(5, [[10, 20, 2], [20, 40, 4], [30, 60, 7], [40, 80, 9], [50, 100, 12], [60, 120, 14], [80, 160, 19], [100, 200, 24], [125, 250, 30], [150, 300, 36], [175, 350, 42], [200, 400, 48], [250, 500, 60], [300, 600, 72], [400, 800, 96], [500, 1000, 120], [600, 1200, 144], [800, 1600, 192], [1000, 2000, 240], [1250, 2500, 300], [1500, 3000, 360], [2000, 4000, 480], [2500, 5000, 600], [3000, 6000, 720]]) },
-  standard: { label: "Standard", stack: 5000, mins: 3, levels: MK(3, [[25, 50, 6], [30, 60, 7], [40, 80, 9], [50, 100, 12], [60, 120, 14], [80, 160, 19], [90, 180, 21], [100, 200, 24], [125, 250, 30], [150, 300, 36], [200, 400, 48], [250, 500, 60], [300, 600, 72], [400, 800, 96], [500, 1000, 120], [600, 1200, 144], [800, 1600, 192], [1000, 2000, 240], [1250, 2500, 300], [1500, 3000, 360], [2000, 4000, 480], [2500, 5000, 600], [3000, 6000, 720], [4000, 8000, 960]]) },
-  turbo: { label: "Turbo", stack: 10000, mins: 2, levels: MK(2, [[50, 100, 12], [60, 120, 14], [80, 160, 19], [100, 200, 24], [125, 250, 30], [150, 300, 36], [200, 400, 48], [250, 500, 60], [300, 600, 72], [400, 800, 96], [500, 1000, 120], [600, 1200, 144], [800, 1600, 192], [1000, 2000, 240], [1250, 2500, 300], [1500, 3000, 360], [2000, 4000, 480], [2500, 5000, 600], [3000, 6000, 720], [4000, 8000, 960], [5000, 10000, 1200], [6000, 12000, 1440]]) },
+  regular: { label: "Regular", stack: 10000, mins: 8, levels: MK(8, 50) },  // 200 BB
+  turbo: { label: "Turbo", stack: 10000, mins: 5, levels: MK(5, 100) },     // 100 BB
+  hyper: { label: "Hyper", stack: 10000, mins: 3, levels: MK(3, 200) },     //  50 BB
 };
 
 // Blind-structure viewer + editor (LePoker-style level table).
@@ -470,10 +586,10 @@ function StructureEditor({ levels, onSave, close }) {
   return (
     <Portal><div className="lt-modalbg" onClick={close}>
       <div className="lt-modal" onClick={stop} style={{ width: "min(520px,95vw)", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
-        <h3>Blind structure</h3>
+        <h3>{SPT("Blind structure")}</h3>
         <div style={{ overflowY: "auto", flex: 1 }}>
           <div style={{ display: "grid", gridTemplateColumns: "26px 1.6fr 0.8fr 0.7fr 30px", gap: 6, fontFamily: "var(--label)", fontSize: 10, textTransform: "uppercase", color: "var(--muted)", padding: "4px 0" }}>
-            <span>Lv</span><span>Blinds</span><span>Ante</span><span>Min</span><span></span>
+            <span>Lv</span><span>Blinds</span><span>Ante</span><span>{SPT("Min")}</span><span></span>
           </div>
           {rows.map((r, i) => (
             <div key={i} style={{ display: "grid", gridTemplateColumns: "26px 1.6fr 0.8fr 0.7fr 30px", gap: 6, alignItems: "center", padding: "3px 0" }}>
@@ -487,8 +603,8 @@ function StructureEditor({ levels, onSave, close }) {
           <button type="button" className="btn-sm" style={{ marginTop: 8 }} onClick={add}>+ Add level</button>
         </div>
         <div className="row" style={{ marginTop: 12 }}>
-          <button className="pill" onClick={close}>Cancel</button>
-          <button className="pill primary" onClick={save}>Save structure</button>
+          <button className="pill" onClick={close}>{SPT("Cancel")}</button>
+          <button className="pill primary" onClick={save}>{SPT("Save structure")}</button>
         </div>
       </div>
     </div></Portal>
@@ -499,8 +615,8 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
   const sym = SP.NETWORK.currency.symbol;
   const [f, setF] = uS({
     mode: "buyin", buyIn: "0.5", fee: "0.05", sponsor: "1",
-    maxPlayers: "6", seatsPerTable: "9", startStack: String(STRUCTURES.standard.stack),
-    struct: "standard", levels: STRUCTURES.standard.levels, actionSecs: "15",
+    maxPlayers: "6", seatsPerTable: "9", startStack: String(STRUCTURES.regular.stack),
+    struct: "regular", levels: STRUCTURES.regular.levels, actionSecs: "30",
     schedule: "open", startAt: "", priv: false, split: "65/35", hostReward: false,
   });
   const [showStruct, setShowStruct] = uS(false);
@@ -511,8 +627,12 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
   const splitOk = splitBps.length > 0 && splitBps.reduce((a, b) => a + b, 0) === 10000;
   const startTime = f.schedule === "scheduled" && f.startAt ? Math.floor(new Date(f.startAt).getTime() / 1000) : 0;
   const scheduleOk = f.schedule === "open" || startTime > Math.floor(Date.now() / 1000) + 60;
-  const sponsorOk = !sponsored || parseFloat(f.sponsor) > 0;
-  const ok = splitOk && scheduleOk && sponsorOk;
+  const sponsorOk = !sponsored || SP.num(f.sponsor) > 0;
+  // The action clock is enforced here rather than in the contract (which only
+  // defaults a 0 to 30s): tournament #23 shipped with our own 15s default and
+  // spent 57% of its turns inside the last ten seconds.
+  const clockOk = (parseInt(f.actionSecs, 10) || 0) >= 20;
+  const ok = splitOk && scheduleOk && sponsorOk && clockOk;
   const stop = (e) => e.stopPropagation();
   const Seg = ({ k, opts }) => (
     <div className="chipset" style={{ marginTop: 6 }}>{opts.map(([v, l]) => <button key={v} type="button" className={f[k] === v ? "on" : ""} onClick={pick(k, v)}>{l}</button>)}</div>
@@ -520,13 +640,17 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
   return (
     <Portal><div className="lt-modalbg" onClick={close}>
       <div className="lt-modal" onClick={stop} style={{ width: "min(480px,94vw)", maxHeight: "92vh", overflowY: "auto" }}>
-        <h3>Create tournament</h3>
+        <h3>{SPT("Create tournament")}</h3>
         {showStruct && <StructureEditor levels={f.levels} onSave={(lv) => setF((s) => ({ ...s, levels: lv, struct: "custom" }))} close={() => setShowStruct(false)} />}
 
-        <label>Prize pool</label>
+        <label>{SPT("Prize pool")}</label>
         <Seg k="mode" opts={[["buyin", "Buy-in pool"], ["sponsored", "I sponsor it · free entry"]]} />
         {sponsored ? (
-          <div style={{ marginTop: 8 }}><label>Sponsor amount ({sym}) <Hint text="You fund the whole prize pool — entry is free for everyone else." /></label><input value={f.sponsor} onChange={set("sponsor")} /></div>
+          <div style={{ marginTop: 8 }}>
+            <label>Sponsor amount ({sym}) <Hint text="You fund the prize pool; entry is free for everyone else. A flat 10% platform fee applies, the same as buy-in events · 90% becomes the prize pool." /></label>
+            <input value={f.sponsor} onChange={set("sponsor")} />
+            <p className="note" style={{ marginTop: 4 }}>Free entry · prize pool gets 90% · 10% platform fee{SP.num(f.sponsor) > 0 ? ` · pool ≈ ${(SP.num(f.sponsor) * 0.9).toFixed(4)} ${sym}` : ""}</p>
+          </div>
         ) : (
           <div style={{ marginTop: 8 }}>
             <label>Buy-in ({sym}) <Hint text="Entry cost per player. 90% builds the prize pool; a flat 10% platform fee goes to the house." /></label>
@@ -538,75 +662,101 @@ function CreateTournamentModal({ close, onDone, act, busy }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
           <div><label>Players (2–45)</label><input value={f.maxPlayers} onChange={set("maxPlayers")} /></div>
           <div><label>Start stack (chips)</label><input value={f.startStack} onChange={set("startStack")} /></div>
-          <div><label>Action time (sec) <Hint text="Seconds each player has to act before they're auto-folded." /></label><input value={f.actionSecs} onChange={set("actionSecs")} /></div>
+          <div><label>Action time (sec) <Hint text="Seconds each player has to act before they're auto-folded. This clock starts ON-CHAIN, a moment before your browser can even show you it is your turn — 15s left players with about twelve, and a tournament's worth of rushed clicks and auto-folds. 30s or more is a real decision; below 20s is not offered." /></label><input value={f.actionSecs} onChange={set("actionSecs")} style={{ borderColor: clockOk ? undefined : "var(--danger,#ef5a6f)" }} /></div>
           <div><label>Payout split % <Hint text="How the prize pool is divided by finishing place. '65/35' → winner gets 65%, runner-up 35%. '50/30/20' → top-3 paid: 1st 50%, 2nd 30%, 3rd 20%. Any number of places (up to player count); must add up to 100." /></label><input value={f.split} onChange={set("split")} style={{ borderColor: splitOk ? undefined : "var(--danger,#ef5a6f)" }} /></div>
         </div>
         {!splitOk && <p className="note" style={{ color: "var(--danger,#ef5a6f)" }}>Percentages must add up to exactly 100 (e.g. 65/35 or 50/30/20).</p>}
+        {!clockOk && <p className="note" style={{ color: "var(--danger,#ef5a6f)" }}>Give players at least 20 seconds. The action clock runs on-chain and part of it is spent reaching the browser.</p>}
 
-        <label style={{ marginTop: 10 }}>Table size <Hint text="Seats per table. With more players than this it becomes multi-table (MTT) — the number of tables is calculated automatically." /></label>
+        <label style={{ marginTop: 10 }}>Table size <Hint text="Seats per table. With more players than this it becomes multi-table (MTT) · the number of tables is calculated automatically." /></label>
         <Seg k="seatsPerTable" opts={[["2", "Heads-up"], ["6", "6-max"], ["9", "9-max"]]} />
         <p className="note" style={{ marginTop: 4 }}>{(() => { const ts = parseInt(f.seatsPerTable || "9", 10), mp = parseInt(f.maxPlayers || "0", 10); const nt = ts > 0 && mp > 0 ? Math.ceil(mp / ts) : 1; return nt > 1 ? `⌗ Multi-table: ${nt} tables of up to ${ts}` : `⌗ Single table (${ts}-max)`; })()}</p>
 
         <label style={{ marginTop: 10 }}>Blind structure <Hint text="How fast blinds rise. Pick a preset (Slow/Standard/Turbo) or edit the levels yourself." /></label>
         <div className="chipset" style={{ marginTop: 6 }}>
-          {["slow", "standard", "turbo"].map((k) => <button key={k} type="button" className={f.struct === k ? "on" : ""} onClick={() => setF((s) => ({ ...s, struct: k, levels: STRUCTURES[k].levels, startStack: String(STRUCTURES[k].stack) }))}>{STRUCTURES[k].label}</button>)}
-          <button type="button" className={f.struct === "custom" ? "on" : ""} onClick={() => setF((s) => ({ ...s, struct: "custom" }))}>Custom</button>
+          {["regular", "turbo", "hyper"].map((k) => <button key={k} type="button" className={f.struct === k ? "on" : ""} onClick={() => setF((s) => ({ ...s, struct: k, levels: STRUCTURES[k].levels, startStack: String(STRUCTURES[k].stack) }))}>{STRUCTURES[k].label}</button>)}
+          <button type="button" className={f.struct === "custom" ? "on" : ""} onClick={() => setF((s) => ({ ...s, struct: "custom" }))}>{SPT("Custom")}</button>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 6 }}>
-          <span className="note" style={{ flex: 1 }}>{f.levels.length} levels · start {f.levels[0] ? f.levels[0].sb + "/" + f.levels[0].bb : "—"} · {Math.round((f.levels[0]?.durationSecs || 0) / 60)} min/level</span>
-          <button type="button" className="btn-sm" onClick={() => setShowStruct(true)}>View / edit</button>
+          <span className="note" style={{ flex: 1 }}>{f.levels.length} levels · start {f.levels[0] ? f.levels[0].sb + "/" + f.levels[0].bb : "-"} · {Math.round((f.levels[0]?.durationSecs || 0) / 60)} min/level · {(() => { const bb = f.levels[0] ? Number(f.levels[0].bb) : 0, st = parseInt(f.startStack || "0", 10); return bb > 0 && st > 0 ? `${Math.round(st / bb)} BB deep · ~${shoveAt(f.levels, st)} min to 10 BB` : ""; })()}</span>
+          <button type="button" className="btn-sm" onClick={() => setShowStruct(true)}>{SPT("View / edit")}</button>
         </div>
 
         <label>Start <Hint text="Open = starts when full or when you press Start. Scheduled = starts at a set time with a live countdown for everyone." /></label>
         <Seg k="schedule" opts={[["open", "When full / I start"], ["scheduled", "Scheduled time"]]} />
         {f.schedule === "scheduled" && <input type="datetime-local" value={f.startAt} onChange={set("startAt")} style={{ marginTop: 6, borderColor: scheduleOk ? undefined : "var(--danger,#ef5a6f)" }} />}
-        {f.schedule === "scheduled" && <p className="note" style={{ marginTop: 4 }}>Your local time ({Intl.DateTimeFormat().resolvedOptions().timeZone}) — everyone sees a live countdown.</p>}
-        {f.schedule === "scheduled" && !scheduleOk && <p className="note" style={{ color: "var(--danger,#ef5a6f)" }}>Pick a time at least a minute in the future.</p>}
+        {f.schedule === "scheduled" && <p className="note" style={{ marginTop: 4 }}>Your local time ({Intl.DateTimeFormat().resolvedOptions().timeZone}) · everyone sees a live countdown.</p>}
+        {f.schedule === "scheduled" && !scheduleOk && <p className="note" style={{ color: "var(--danger,#ef5a6f)" }}>{SPT("Pick a time at least a minute in the future.")}</p>}
 
         {!sponsored && (
           <label style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontFamily: "var(--label)" }}>
             <input type="checkbox" checked={f.hostReward} onChange={(e) => setF((s) => ({ ...s, hostReward: e.target.checked }))} style={{ width: "auto" }} />
-            <span>Host reward — <b style={{ color: "var(--gold, #e8c15a)" }}>5% of the prize pool</b> goes to me for organizing <Hint text="Paid to you automatically when the tournament finishes. Prizes are split from the remaining 95%. Shown to players on the tournament card." /></span>
+            <span>Host reward · <b style={{ color: "var(--gold, #e8c15a)" }}>5% of the prize pool</b> goes to me for organizing <Hint text="Paid to you automatically when the tournament finishes. Prizes are split from the remaining 95%. Shown to players on the tournament card." /></span>
           </label>
         )}
         <label style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontFamily: "var(--label)" }}>
           <input type="checkbox" checked={f.priv} onChange={(e) => setF((s) => ({ ...s, priv: e.target.checked }))} style={{ width: "auto" }} />
-          Private — players apply and I approve each (invite by link)
+          Private · players apply and I approve each (invite by link)
         </label>
 
         <div className="row" style={{ marginTop: 14 }}>
-          <button className="pill" onClick={close}>Cancel</button>
+          <button className="pill" onClick={close}>{SPT("Cancel")}</button>
           <button className="pill primary" disabled={busy || !ok} onClick={() => act("Create tournament", async () => {
             await SP.sdk.createTournament({
-              buyInEth: sponsored ? 0 : ((parseFloat(f.buyIn) || 0) * 0.9).toFixed(6), feeEth: sponsored ? 0 : ((parseFloat(f.buyIn) || 0) * 0.1).toFixed(6),
+              buyInEth: sponsored ? 0 : (SP.num(f.buyIn) * 0.9).toFixed(6), feeEth: sponsored ? 0 : (SP.num(f.buyIn) * 0.1).toFixed(6),
               maxPlayers: parseInt(f.maxPlayers, 10), seatsPerTable: parseInt(f.seatsPerTable || "0", 10), startStack: parseInt(f.startStack, 10),
-              actionSecs: parseInt(f.actionSecs || "15", 10), structure: f.levels,
+              actionSecs: Math.max(20, parseInt(f.actionSecs || "30", 10)), structure: f.levels,
               startTime, approvalRequired: f.priv, payoutBps: splitBps, sponsorEth: sponsored ? (f.sponsor || 0) : 0,
               hostBps: !sponsored && f.hostReward ? 500 : 0,
             });
             const newId = (await SP.sdk.tournamentCount()) - 1;
             location.href = "tournament?id=" + newId; // land on the page (invite link + applicants)
-          })}>Create</button>
+          })}>{SPT("Create")}</button>
         </div>
       </div>
     </div></Portal>
   );
 }
 
+// Bound once. This used to run `window.addEventListener("resize", fit)` on
+// every tick of a 400ms interval, so the handler list grew forever — an hour
+// on this screen left ~9000 live closures, and every one of them ran on each
+// resize. The interval stays (it is what re-fits the stage after React
+// remounts a tab), but `fit` now no-ops unless something actually changed, so
+// the idle cost is two property reads instead of a layout write 2.5x/second.
+let _lobbyScaleBound = false;
 function mountScaleLobby() {
   const scaler = document.getElementById("scaler"); if (!scaler) return;
   const app = scaler.querySelector(".app"); if (!app) return;
   const fit = () => {
+    const embedNow = document.documentElement.classList.contains("sp-embed");
+    const key = window.innerWidth + "x" + window.innerHeight + "|" + (embedNow ? 1 : 0);
+    // a freshly remounted .app carries no marker, so it always re-fits
+    if (app.dataset.slFit === key) return;
+    app.dataset.slFit = key;
     if (window.innerWidth <= 760) { // fluid mobile layout (mobile.css) - no stage scaling
       app.style.transform = ""; app.style.position = ""; app.style.top = ""; app.style.left = "";
       scaler.style.width = ""; scaler.style.height = "";
       return;
     }
-    const s = Math.min((window.innerWidth - 24) / 1600, (window.innerHeight - 84) / 1000);
+    // Embedded in the merged site (sp-embed): fill the WIDTH of the frame -
+    // the stage scrolls vertically if needed, so no dead side margins.
+    const embed = document.documentElement.classList.contains("sp-embed");
+    const sW = (window.innerWidth - 24) / 1600;
+    // Embedded, scale to WIDTH only: the shell sizes the iframe to whatever
+    // height we report, so keying off window.innerHeight would feed back on
+    // itself (taller frame → bigger scale → taller frame). Width is stable and
+    // the shell page does the scrolling.
+    const sH = (window.innerHeight - 84) / 1000;
+    const s = embed ? sW : Math.min(sW, sH);
     app.style.transform = `scale(${s})`; app.style.transformOrigin = "top left"; app.style.position = "absolute"; app.style.top = "0"; app.style.left = "0";
     scaler.style.width = 1600 * s + "px"; scaler.style.height = 1000 * s + "px";
   };
-  fit(); window.addEventListener("resize", fit);
+  fit();
+  if (_lobbyScaleBound) return;
+  _lobbyScaleBound = true;
+  // re-enter through the mount fn so the handler always re-queries the DOM
+  window.addEventListener("resize", () => mountScaleLobby());
 }
 
 function bootLobby() { ReactDOM.createRoot(document.getElementById("root")).render(<LobbyApp />); setInterval(mountScaleLobby, 400); setTimeout(mountScaleLobby, 80); }

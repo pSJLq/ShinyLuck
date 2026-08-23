@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Poker · ShinyLuck</title>
+<script>
+  // Poker lives inside the merged shell at /poker (path route, no reload).
+  // Old deep links: /poker.html#tournament?id=N → /poker?v=tournament&id=N
+  (function () {
+    var h = (location.hash || "").replace(/^#\/?/, "");
+    var url = "/poker";
+    var m = h.match(/^(?:poker\/)?(tournament|table|lobby)?\??(.*)$/);
+    if (m && m[1] === "tournament") url = "/poker?v=tournament" + (m[2] ? "&" + m[2] : "");
+    else if (m && m[1] === "table") url = "/poker?v=table" + (m[2] ? "&" + m[2] : "");
+    else if (m && m[2]) url = "/poker?" + m[2];
+    location.replace(url);
+  })();
+</script>
+</head>
+<body></body>
+</html>

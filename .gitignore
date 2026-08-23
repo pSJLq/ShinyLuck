@@ -38,6 +38,15 @@ agent-service/*.sqlite
 agent-service/*.db
 agent-service/data/
 
+# Context handoff & personal notes — local only, not for the public repo
+HANDOFF.md
+/промпт.txt
+
+# Design source material — large (ShinyPokerDesign ~52MB), not deployed
+/New design ShinyLuck final/
+/ShinyLuckDesign/
+/ShinyPokerDesign/
+
 # demo-bot wallets
 demo-bot/wallets.json
 
@@ -140,3 +149,38 @@ scripts/_q*.js
 # ShinyPoker design source videos (52MB, not needed in repo)
 ShinyPokerDesign/uploads/
 deployments/zk-active/
+
+# Local pre-refactor backups (never for the repo)
+_zkshuffle-backup-*/
+
+# NOTE: frontend/poker/*.compiled.js used to be ignored, back when they were only
+# a syntax check and the site shipped raw .jsx to be transpiled in the browser.
+# The pages load the compiled files now, so they are the deployed artifact and
+# have to live in the repo — regenerate with `node scripts/build-poker-jsx.js`
+# after editing any poker .jsx.
+
+# Screenshots the user drops in for Claude to look at — local only
+/images for claude/
+
+# X bot account credentials (login:password:email:email_pass:token:2FA).
+# Never commit: this is a public repo. Used once to seed the scraper pool ON
+# THE VPS, never from a local machine.
+Accounts.txt
+accounts*.txt
+!*.example.txt
+
+# Raw samples written by scripts/_probe-latency.js — a measurement artefact,
+# regenerated on every run. The numbers that matter live in HANDOFF.md.
+scripts/probe-out.json
+
+# browser E2E run artifacts (screenshots + the throwaway local deployment)
+test/_e2e-shots/
+deployments/poker-localhost.json
+
+# Table music · 12 tracks cut from the owner's lounge mix (~180 MB of mp3).
+# Deployed straight to the VPS (frontend/assets/music on /root/poker-web), not
+# carried in git: binaries this size make every clone and every diff worse, and
+# they never change. Re-cut them with scripts/_cut-music.sh if they are ever lost.
+frontend/assets/music/
+test/_shots-mobile/
+test/_shots-desktop/

@@ -34,6 +34,7 @@ describe("ZkTableDealer — live v2 card layer (IPokerDealer, cards from verifie
       dealId, tableId, handId, seats,
       players.map((p) => P(p.X)), players.map((p) => P(p.pok.R)), players.map((p) => p.pok.s),
       inPlay.map((c) => P(c.A)), inPlay.map((c) => P(c.B)),
+      ethers.keccak256(ethers.toUtf8Bytes("test-transcript")),
     );
     return { players, X, deck, k };
   }
@@ -151,6 +152,7 @@ describe("ZkTableDealer — live v2 card layer (IPokerDealer, cards from verifie
       dealId, tableId, handId, seats,
       players.map((p) => P(p.X)), players.map((p) => P(p.pok.R)), players.map((p) => p.pok.s),
       inPlay.map((c) => P(c.A)), inPlay.map((c) => P(c.B)),
+      ethers.keccak256(ethers.toUtf8Bytes("test-transcript")),
     );
     const a = sharesFor(deck, players, dealId, 2 * k);
     await dealer.connect(coord).revealBoardCard(dealId, 0, a.trueCard, ctPair(a.ct), a.d, a.R1, a.R2, a.s);
@@ -158,6 +160,115 @@ describe("ZkTableDealer — live v2 card layer (IPokerDealer, cards from verifie
     expect(b.trueCard).to.equal(a.trueCard); // the dupe decrypts to the same card…
     await expect(dealer.connect(coord).revealBoardCard(dealId, 1, b.trueCard, ctPair(b.ct), b.d, b.R1, b.R2, b.s))
       .to.be.revertedWithCustomError(dealer, "DupeCard"); // …and is rejected on-chain
+  });
+
+  it("accusationAllowed: only shares the protocol legitimately needs right now", async () => {
+    const dealId = 41, tableId = 7, handId = 41, seats = [0, 3];
+    const { deck, k } = await setup(dealId, tableId, handId, seats);
+    const ct = (i) => ctPair(deck[i]);
+    const PREFLOP = 0, FLOP = 1, TURN = 2, SHOWDOWN = 4;
+
+    // seat 0 = participant 0 (holes 0,1); seat 3 = participant 1 (holes 2,3); board 4..8
+    // own holes: never before showdown, AND (crucially) not even at showdown
+    // until the WHOLE board is revealed — an all-in runout is on street 4 with
+    // the board not yet dealt, and a client only rescues own holes once the
+    // board is complete, so allowing it here would enable a theft of the
+    // all-in stack via a rescue the client (correctly) won't answer.
+    expect(await dealer.accusationAllowed(dealId, 0, 0, FLOP, ...ct(0))).to.equal(false);
+    expect(await dealer.accusationAllowed(dealId, 0, 0, SHOWDOWN, ...ct(0))).to.equal(false); // board not revealed yet
+    // someone ELSE's holes: always demandable (their shares are pre-collected anyway)
+    expect(await dealer.accusationAllowed(dealId, 0, 2, PREFLOP, ...ct(2))).to.equal(true);
+    // board: only once its street closed — flop slot ok on FLOP, river slot not until RIVER
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k, FLOP, ...ct(2 * k))).to.equal(true);
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k + 4, TURN, ...ct(2 * k + 4))).to.equal(false);
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k + 4, SHOWDOWN, ...ct(2 * k + 4))).to.equal(true);
+    // no board share is due preflop at all
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k, PREFLOP, ...ct(2 * k))).to.equal(false);
+    // a seat that is NOT a participant of the deal owes nothing
+    expect(await dealer.accusationAllowed(dealId, 5, 2 * k, FLOP, ...ct(2 * k))).to.equal(false);
+    // the supplied ciphertext must be the committed one (accuser can't swap it)
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k, FLOP, ...ct(2 * k + 1))).to.equal(false);
+    // out-of-range card index
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k + 5, SHOWDOWN, ...ct(0))).to.equal(false);
+  });
+
+  it("own-hole accusation is allowed at showdown ONLY once the full board is revealed", async () => {
+    // wire a real room-seat view so the folded-seat gate can consult it (seat live)
+    const mockRoom = await (await ethers.getContractFactory("MockRoomSeats")).deploy();
+    dealer = await (await ethers.getContractFactory("ZkTableDealer")).deploy(await mockRoom.getAddress(), coord.address);
+    const dealId = 43, tableId = 7, handId = 43, seats = [0, 1];
+    const { players, deck, k } = await setup(dealId, tableId, handId, seats);
+    await mockRoom.setInHand(tableId, 0, true); // seat 0 ran the hand down (not folded)
+    const ct = (i) => ctPair(deck[i]);
+    const SHOWDOWN = 4;
+    // board incomplete → own hole accusation refused (the all-in-runout theft window)
+    expect(await dealer.accusationAllowed(dealId, 0, 0, SHOWDOWN, ...ct(0))).to.equal(false);
+    // reveal all five board cards
+    for (let slot = 0; slot < 5; slot++) {
+      const sh = sharesFor(deck, players, dealId, 2 * k + slot);
+      await dealer.connect(coord).revealBoardCard(dealId, slot, sh.trueCard, ctPair(sh.ct), sh.d, sh.R1, sh.R2, sh.s);
+    }
+    expect(await dealer.boardRevealedCount(dealId)).to.equal(5);
+    // now the own-hole share is legitimately demandable at showdown (seat live)
+    expect(await dealer.accusationAllowed(dealId, 0, 0, SHOWDOWN, ...ct(0))).to.equal(true);
+  });
+
+  it("a FOLDED seat's own hole cards stay hidden even at showdown+full board (no accuse→rescue harvest)", async () => {
+    // the accuse→self-rescue leak: seat 0 folds, seats 1 runs to showdown, the
+    // board completes for the LIVE seat — a malicious operator must still not be
+    // able to open an own-hole accusation on the folded seat (which, combined with
+    // the k-1 shares it pre-collected, would decrypt the folded hand).
+    const mockRoom = await (await ethers.getContractFactory("MockRoomSeats")).deploy();
+    dealer = await (await ethers.getContractFactory("ZkTableDealer")).deploy(await mockRoom.getAddress(), coord.address);
+    const dealId = 44, tableId = 7, handId = 44, seats = [0, 1];
+    const { players, deck, k } = await setup(dealId, tableId, handId, seats);
+    const ct = (i) => ctPair(deck[i]);
+    const SHOWDOWN = 4;
+    for (let slot = 0; slot < 5; slot++) {
+      const sh = sharesFor(deck, players, dealId, 2 * k + slot);
+      await dealer.connect(coord).revealBoardCard(dealId, slot, sh.trueCard, ctPair(sh.ct), sh.d, sh.R1, sh.R2, sh.s);
+    }
+    await mockRoom.setInHand(tableId, 0, false); // seat 0 FOLDED
+    await mockRoom.setInHand(tableId, 1, true);  // seat 1 ran it down
+
+    // folded seat's OWN holes (idx 0,1): refused even at showdown with full board
+    expect(await dealer.accusationAllowed(dealId, 0, 0, SHOWDOWN, ...ct(0))).to.equal(false);
+    expect(await dealer.accusationAllowed(dealId, 0, 1, SHOWDOWN, ...ct(1))).to.equal(false);
+    // the LIVE seat's own hole (idx 2) is still legitimately demandable
+    expect(await dealer.accusationAllowed(dealId, 1, 2, SHOWDOWN, ...ct(2))).to.equal(true);
+    // the gate is scoped to OWN holes only: a folded seat still owes shares for
+    // OTHERS' holes and for the board (those are pre-collected / public — nothing
+    // of the folded seat leaks), so those accusations remain allowed
+    expect(await dealer.accusationAllowed(dealId, 0, 2, SHOWDOWN, ...ct(2))).to.equal(true);       // participant 1's hole
+    expect(await dealer.accusationAllowed(dealId, 0, 2 * k, SHOWDOWN, ...ct(2 * k))).to.equal(true); // a board card
+  });
+
+  it("rescueShare verifies, records and serves the share; junk is refused", async () => {
+    const dealId = 42, tableId = 7, handId = 42, seats = [0, 3];
+    const { players, deck, k } = await setup(dealId, tableId, handId, seats);
+    const idx = 2 * k; // first board card
+    const ct = deck[idx];
+    // participant 1 (seat 3) computes its genuine share
+    const sh = zk.decryptionShare(ct, players[1].x, players[1].X, shareDomain(dealId, idx, 1));
+    const args = [P(sh.d), P(sh.proof.R1), P(sh.proof.R2), sh.proof.s];
+
+    // rescueShare is room-only (the room's proveResponsive is the sole entry)
+    await expect(dealer.connect(coord).rescueShare(dealId, 3, idx, ...ctPair(ct), ...args))
+      .to.be.revertedWithCustomError(dealer, "NotRoom");
+
+    // a wrong ciphertext or a tampered proof is refused (returns false)
+    expect(await dealer.connect(room).rescueShare.staticCall(dealId, 3, idx, ...ctPair(deck[idx + 1]), ...args)).to.equal(false);
+    const bad = [P(sh.d), P(sh.proof.R1), P(sh.proof.R2), sh.proof.s + 1n];
+    expect(await dealer.connect(room).rescueShare.staticCall(dealId, 3, idx, ...ctPair(ct), ...bad)).to.equal(false);
+    // wrong seat (share verified against the WRONG participant's key) refused
+    expect(await dealer.connect(room).rescueShare.staticCall(dealId, 0, idx, ...ctPair(ct), ...args)).to.equal(false);
+
+    // the genuine share is recorded and served back for the coordinator
+    await dealer.connect(room).rescueShare(dealId, 3, idx, ...ctPair(ct), ...args);
+    const r = await dealer.rescuedShare(dealId, idx, 1);
+    expect(r.exists).to.equal(true);
+    expect(r.d.x).to.equal(zk.aff(sh.d).x);
+    expect(r.s).to.equal(sh.proof.s);
   });
 
   it("only the room can bind a hand; only a coordinator can reveal; workers are addable", async () => {
@@ -171,5 +282,106 @@ describe("ZkTableDealer — live v2 card layer (IPokerDealer, cards from verifie
     await dealer.connect(room).setCoordinator(other.address, true);
     await dealer.connect(other).revealBoardCard(dealId, 0, sh.trueCard, ctPair(sh.ct), sh.d, sh.R1, sh.R2, sh.s);
     expect(await dealer.boardRevealedCount(dealId)).to.equal(1);
+  });
+
+  // =======================================================================
+  // The showdown ends in the transaction that completes it. Before this, the
+  // tail cost three confirmations: the last reveal, then markShowdownReady,
+  // then resolveShowdown. Readiness is now DERIVED from the room's own seat
+  // state instead of asserted by the coordinator, which is what makes closing
+  // the hand here safe — it is strictly less trusting than what it replaced.
+  // =======================================================================
+  describe("showdown closes itself", () => {
+    let mockRoom, tableId, dealId, seats, players, deck, k;
+
+    // Reveal the whole board, then hand back a per-seat reveal helper.
+    async function openBoardAndHoles(live) {
+      mockRoom = await (await ethers.getContractFactory("MockRoomSeats")).deploy();
+      dealer = await (await ethers.getContractFactory("ZkTableDealer")).deploy(await mockRoom.getAddress(), coord.address);
+      tableId = 7; dealId = 900 + live.length; seats = [0, 1];
+      ({ players, deck, k } = await setup(dealId, tableId, handId(), seats));
+      for (const s of seats) await mockRoom.setInHand(tableId, s, live.includes(s));
+      const revealBoard = async (upto) => {
+        for (let slot = Number(await dealer.boardRevealedCount(dealId)); slot < upto; slot++) {
+          const sh = sharesFor(deck, players, dealId, 2 * k + slot);
+          await dealer.connect(coord).revealBoardCard(dealId, slot, sh.trueCard, ctPair(sh.ct), sh.d, sh.R1, sh.R2, sh.s);
+        }
+      };
+      const revealSeat = async (p) => {
+        const a = sharesFor(deck, players, dealId, 2 * p);
+        const b = sharesFor(deck, players, dealId, 2 * p + 1);
+        await dealer.connect(coord).revealHoleCards(
+          dealId, p, seats[p], [a.trueCard, b.trueCard],
+          [...ctPair(a.ct), ...ctPair(b.ct)],
+          [...a.d, ...b.d], [...a.R1, ...b.R1], [...a.R2, ...b.R2], [...a.s, ...b.s],
+        );
+      };
+      return { revealBoard, revealSeat };
+    }
+    let _h = 900;
+    const handId = () => ++_h;
+
+    it("the LAST reveal flips readiness and pays the pot — earlier ones do neither", async () => {
+      const { revealBoard, revealSeat } = await openBoardAndHoles([0, 1]);
+      await revealBoard(5);
+      expect(await dealer.isShowdownReady(dealId), "board alone is not a showdown").to.equal(false);
+
+      await revealSeat(0);
+      expect(await dealer.isShowdownReady(dealId), "one seat still owed").to.equal(false);
+      expect(await mockRoom.settleCalls()).to.equal(0);
+
+      await revealSeat(1);
+      expect(await dealer.isShowdownReady(dealId)).to.equal(true);
+      expect(await mockRoom.settleCalls(), "pot moved in the reveal tx").to.equal(1);
+      expect(await mockRoom.lastSettledTable()).to.equal(tableId);
+    });
+
+    it("a folded seat never holds the showdown open, and its cards stay secret", async () => {
+      // seat 1 folded → the room no longer counts it, so seat 0's reveal is the
+      // last one owed. Its hole cards must never be revealed to close the hand.
+      const { revealBoard, revealSeat } = await openBoardAndHoles([0]);
+      await revealBoard(5);
+      await revealSeat(0);
+      expect(await dealer.isShowdownReady(dealId)).to.equal(true);
+      expect(await mockRoom.settleCalls()).to.equal(1);
+      const [f0, f1] = await dealer.holeCards(dealId, 1);
+      expect(Number(f0)).to.equal(255);
+      expect(Number(f1)).to.equal(255);
+    });
+
+    it("an incomplete board keeps the hand open, and the completing BOARD card closes it", async () => {
+      // The all-in runout order: the room is already at showdown and hole cards
+      // can land before the board finishes. The closing card is then a board
+      // card, so readiness must not be tied to the hole-reveal path.
+      const { revealBoard, revealSeat } = await openBoardAndHoles([0, 1]);
+      await revealBoard(4);
+      await revealSeat(0);
+      await revealSeat(1);
+      expect(await dealer.isShowdownReady(dealId), "board incomplete").to.equal(false);
+      expect(await mockRoom.settleCalls()).to.equal(0);
+
+      await revealBoard(5);
+      expect(await dealer.isShowdownReady(dealId)).to.equal(true);
+      expect(await mockRoom.settleCalls(), "the river closed the hand").to.equal(1);
+    });
+
+    it("a room that refuses to settle never undoes a proven reveal — the coordinator still closes it", async () => {
+      const { revealBoard, revealSeat } = await openBoardAndHoles([0, 1]);
+      await mockRoom.setSettleReverts(true);
+      await revealBoard(5);
+      await revealSeat(0);
+      await revealSeat(1); // must NOT revert, even though the settle inside does
+
+      const [a0, a1] = await dealer.holeCards(dealId, 1);
+      expect(Number(a0), "cards recorded despite the failed settle").to.be.lte(51);
+      expect(Number(a1)).to.be.lte(51);
+      expect(await dealer.isShowdownReady(dealId), "still ready for the fallback").to.equal(true);
+      expect(await mockRoom.settleCalls()).to.equal(0);
+
+      // …and the coordinator's own call then settles it, exactly as before
+      await mockRoom.setSettleReverts(false);
+      await mockRoom.resolveShowdown(tableId);
+      expect(await mockRoom.settleCalls()).to.equal(1);
+    });
   });
 });

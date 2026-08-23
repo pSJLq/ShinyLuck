@@ -1,4 +1,4 @@
-// Crash — round-based integration.
+// Crash · round-based integration.
 //
 // Round phases:
 //   PHASE 1 (BETTING)   block.timestamp < r.betWindowEnd
@@ -13,6 +13,7 @@
 import { ethers } from "/vendor/ethers.bundle.js";
 import { SL, connect } from "../wallet.js";
 import { CONFIG } from "../config.js";
+import { CONFIG_V15 } from "../config-v15.js";
 import { provider, fetchRecentLogs } from "../rpc.js";
 import {
   $, $$, setText, fmtSTTfromString, readStakeStr, injectKeyframes,
@@ -23,28 +24,31 @@ import { validateStake, validateAutoCashout } from "../errors.js";
 import { clampStakeStr, applyMaxToInput } from "../casino-limits.js";
 
 const CRASH = 1;
-// Was 1000ms — caused 1 RPC/s contract reads even when the round hadn't
+// Was 1000ms · caused 1 RPC/s contract reads even when the round hadn't
 // changed. WS subscriptions below catch real state changes instantly; this
 // poll is just a fallback for missed events. 3s gives smooth UX without
 // hammering RPC + freeing the main thread for cursor / animations.
 const POLL_MS = 3000;
 
+/// v15: crash is its own module contract, not the monolith.
+const CRASH_ADDR = (CONFIG_V15.games || []).find((g) => g.name === "crash")?.module;
+
 let casinoRO = null;
 function casino() {
   if (!casinoRO) {
     const abi = [
-      "function currentCrashRoundId() view returns (uint256)",
-      "function totalCrashRounds() view returns (uint256)",
-      "function getCrashRound(uint256) view returns (uint64 id,uint64 betWindowEnd,uint64 commitBlock,uint32 seedIdx,bool settled,uint16 crashPointX100,bytes32 serverSeed,uint256 bettorCount)",
-      "function getCrashBettors(uint256) view returns (address[])",
-      "function getCrashBet(uint256,address) view returns (tuple(uint96 amount,uint16 autoCashoutX100,uint16 cashoutMultX100,bool resolved))",
-      "event CrashRoundStarted(uint256 indexed roundId,uint256 betWindowEnd,uint256 commitBlock,uint256 seedIdx)",
-      "event CrashRoundSettled(uint256 indexed roundId,uint256 crashPointX100,bytes32 serverSeed,bytes32 randomness,bytes32 blockHash)",
-      "event CrashRoundRefunded(uint256 indexed roundId,string reason)",
-      "event CrashBetPlaced(uint256 indexed roundId,address indexed player,uint256 amount,uint256 autoCashoutX100)",
-      "event CrashCashoutRequested(uint256 indexed roundId,address indexed player,uint256 multX100)",
+      "function currentRoundId() view returns (uint256)",
+      "function totalRounds() view returns (uint256)",
+      "function getRound(uint256) view returns (uint64 id,uint64 betWindowEnd,uint64 commitBlock,uint32 seedIdx,bool settled,uint16 crashPointX100,bytes32 serverSeed,uint256 bettorCount)",
+      "function getBettors(uint256) view returns (address[])",
+      "function getBet(uint256,address) view returns (tuple(uint96 amount,uint16 autoCashoutX100,uint16 cashoutMultX100,bool resolved))",
+      "event RoundStarted(uint256 indexed roundId,uint256 betWindowEnd,uint256 commitBlock,uint256 seedIdx)",
+      "event RoundSettled(uint256 indexed roundId,uint256 crashPointX100,bytes32 serverSeed,bytes32 randomness,bytes32 blockHash)",
+      "event RoundRefunded(uint256 indexed roundId,string reason)",
+      "event BetPlaced(uint256 indexed roundId,address indexed player,uint256 amount,uint256 autoCashoutX100)",
+      "event CashoutRequested(uint256 indexed roundId,address indexed player,uint256 multX100)",
     ];
-    casinoRO = new ethers.Contract(CONFIG.casino, abi, provider());
+    casinoRO = new ethers.Contract(CRASH_ADDR, abi, provider());
   }
   return casinoRO;
 }
@@ -53,6 +57,9 @@ let activeRound = null;     // { id, betWindowEnd, commitBlock, settled, crashPo
 let myBet = null;           // { roundId, amount, autoCashoutX100, cashoutMultX100, resolved }
 let multTickerHandle = null;
 let countdownHandle = null;
+// Rounds whose crash-point climb we've already replayed (guards the poll + WS
+// both firing onRoundSettled for the same round).
+const replayedRounds = new Set();
 
 function autoCashoutX() {
   const el = $("[data-sl-autocashout]");
@@ -104,13 +111,15 @@ function predictedMultiplier(roundStartSec, nowSec) {
   return Math.min(100, m);
 }
 
-/// Convert the cashout multiplier (≥ 1.00) into the visual "growth" multiplier
-/// that starts at 0.00× at round start and climbs as the curve rises. Display
-/// semantics: "1.50×" on screen ≡ 2.50× actual cashout payout (the bet returns
-/// stake + 1.50× stake). Auto-cashout input is still entered as the actual
-/// cashout multiplier — the slider label conversion happens at render time.
+/// The number on screen IS the cashout multiplier — 1.00× at launch, climbing,
+/// and the crash point is where it stops.
+///
+/// This used to render "growth" (multiplier − 1), so a round that crashed at
+/// 2.71× showed 1.71× on the curve while the history, the auto-cashout input
+/// and the payout all spoke in 2.71×. Players read that as a bug or a swindle,
+/// and it is a convention no other crash game uses.
 function toDisplayMult(actualMult) {
-  return Math.max(0, actualMult - 1);
+  return Math.max(1, actualMult);
 }
 
 /// Update the SVG curve + glowing dot to reflect the live multiplier.
@@ -119,7 +128,7 @@ function toDisplayMult(actualMult) {
 /// curve climbs logarithmically toward y=20 (the 50× ceiling).
 function _updateCrashSvg(elapsedSec, actualMult) {
   // Guard against NaN / negative / zero inputs. predictedMultiplier can yield
-  // 0 or NaN if a round is between phases or roundStartSec is bogus — without
+  // 0 or NaN if a round is between phases or roundStartSec is bogus · without
   // this guard, Math.log(0)=-Infinity → y=NaN → SVG d-string contains "NaN"
   // and the browser logs an attribute-parse warning every animation frame.
   if (!Number.isFinite(elapsedSec) || elapsedSec < 0) return;
@@ -163,12 +172,12 @@ function _updateCrashSvg(elapsedSec, actualMult) {
 function startTicker(roundStartSec) {
   stopTicker();
   // First-frame update so the curve resets to (0, bottom) and the number to
-  // 0.00× the moment the round goes live (vs lingering on the previous
+  // 1.00× the moment the round goes live (vs lingering on the previous
   // round's crash point).
   _updateCrashSvg(0, 1);
   const el = $("[data-sl-crash-mult]");
   if (el) {
-    el.textContent = "0.00";
+    el.textContent = "1.00";
     el.style.color = "var(--cyan)";
   }
   multTickerHandle = setInterval(() => {
@@ -189,10 +198,9 @@ function stopTicker() {
 function paintMultiplierFinal(cpX, won) {
   const el = $("[data-sl-crash-mult]");
   if (!el) return;
-  // Display the growth multiplier (cashpoint − 1) consistent with the live
-  // ticker. cpX is the actual cashout floor (e.g. 1.34); we show 0.34.
+  // The crash point as everyone else states it: 2.71x reads 2.71x.
   const v = toDisplayMult(Number(cpX));
-  el.textContent = Number.isFinite(v) ? v.toFixed(2) : "0.00";
+  el.textContent = Number.isFinite(v) ? v.toFixed(2) : "1.00";
   el.style.color = won ? "var(--green)" : "var(--red)";
 }
 
@@ -210,14 +218,14 @@ function startCountdown(betWindowEnd) {
 async function loadActiveRound() {
   try {
     const c = casino();
-    const total = Number(await c.totalCrashRounds());
+    const total = Number(await c.totalRounds());
     if (total === 0) {
       renderPhasePill("BETTING");
       setText("[data-sl-crash-countdown]", "waiting for first round…");
       return;
     }
-    const id = Number(await c.currentCrashRoundId());
-    const r = await c.getCrashRound(id);
+    const id = Number(await c.currentRoundId());
+    const r = await c.getRound(id);
     activeRound = {
       id,
       betWindowEnd: Number(r.betWindowEnd),
@@ -231,22 +239,27 @@ async function loadActiveRound() {
       renderPhasePill("BETTING");
       startCountdown(activeRound.betWindowEnd);
       stopTicker();
-      setText("[data-sl-crash-mult]", "0.00");
+      setText("[data-sl-crash-mult]", "1.00");
       // also reset the SVG curve to the bottom-left during BETTING phase so
       // the previous round's crash point isn't lingering.
       _updateCrashSvg(0, 1);
     } else if (!r.settled) {
+      // Window closed → the bot is about to reveal the crash point. The visible
+      // climb is a deterministic REPLAY (onRoundSettled) once that reveal lands,
+      // not a wall-clock ticker: the round settles ~1s after the window and the
+      // ~26s blockhash budget leaves no room for a real-time flight. So here we
+      // just signal the reveal is imminent.
       renderPhasePill("RUNNING");
-      startTicker(activeRound.betWindowEnd);
-      setText("[data-sl-crash-countdown]", "settling…");
+      stopTicker();
+      setText("[data-sl-crash-countdown]", "revealing…");
     } else {
       renderPhasePill("SETTLED");
       stopTicker();
-      paintMultiplierFinal(activeRound.crashPointX100 / 100, false);
       setText("[data-sl-crash-countdown]", "round closed");
+      onRoundSettled(id).catch(() => {});
     }
     if (SL.address) {
-      const b = await c.getCrashBet(id, SL.address);
+      const b = await c.getBet(id, SL.address);
       myBet = {
         roundId: id,
         amount: BigInt(b.amount),
@@ -267,14 +280,14 @@ async function renderBettors(roundId) {
   const list = $("[data-sl-crash-bettors]");
   if (!list) return;
   try {
-    const addrs = await c.getCrashBettors(roundId);
+    const addrs = await c.getBettors(roundId);
     if (addrs.length === 0) {
       list.innerHTML = `<div class="m" style="opacity:.4;">no players yet</div>`;
       return;
     }
     list.innerHTML = "";
     for (const a of addrs.slice(0, 30)) {
-      const b = await c.getCrashBet(roundId, a);
+      const b = await c.getBet(roundId, a);
       const status = b.resolved
         ? (b.cashoutMultX100 > 0 ? `cashed @ ${(Number(b.cashoutMultX100)/100).toFixed(2)}×`
                                  : (b.autoCashoutX100 > 0 ? `auto @ ${(Number(b.autoCashoutX100)/100).toFixed(2)}×` : "busted"))
@@ -289,20 +302,16 @@ async function renderBettors(roundId) {
 }
 
 function renderMyBet() {
-  if (!myBet || myBet.amount === 0n) {
-    setText("[data-sl-crash-mybet]", "—");
-    const co = $("[data-sl-cashout]");
-    if (co) co.style.display = "none";
-    return;
-  }
-  const ac = myBet.autoCashoutX100 > 0 ? `auto @ ${(myBet.autoCashoutX100/100).toFixed(2)}×` : "manual";
-  setText("[data-sl-crash-mybet]", `${ethers.formatEther(myBet.amount)} STT · ${ac}`);
+  // Auto-cashout ONLY: the real running window is ~1s (the bot settles right
+  // after the bet window, bounded by the ~26s blockhash budget), so a live
+  // manual cash-out button would almost never land. The player picks a target
+  // multiplier up front and the climb replay shows whether the rocket reached
+  // it. Keep the manual button permanently hidden.
   const co = $("[data-sl-cashout]");
-  if (co) {
-    const showCO = !myBet.resolved && myBet.cashoutMultX100 === 0 && activeRound && !activeRound.settled
-                   && Math.floor(Date.now() / 1000) >= activeRound.betWindowEnd;
-    co.style.display = showCO ? "block" : "none";
-  }
+  if (co) co.style.display = "none";
+  if (!myBet || myBet.amount === 0n) { setText("[data-sl-crash-mybet]", "-"); return; }
+  const ac = myBet.autoCashoutX100 > 0 ? `target ${(myBet.autoCashoutX100/100).toFixed(2)}×` : "no target (rides to crash)";
+  setText("[data-sl-crash-mybet]", `${ethers.formatEther(myBet.amount)} STT · ${ac}`);
 }
 
 async function onPlaceBet() {
@@ -350,7 +359,10 @@ async function onPlaceBet() {
       return;
     }
     const result = await SL.placeCrash(ac, finalStake);
-    populateFairPanel({ clientSeed: ethers.ZeroHash, betId: activeRound.id, nonce: activeRound.id, serverSeed: ethers.ZeroHash, txHash: result.txHash });
+    // Crash is round-based: randomness = keccak(serverSeed, commit blockhash,
+    // roundId) shared by everyone in the round — there is no per-player client
+    // seed. The server seed is revealed at settle (onRoundSettled fills it in).
+    populateFairPanel({ clientSeed: "round-based · shared server seed", betId: activeRound.id, nonce: activeRound.id, txHash: result.txHash });
     placeBtn.textContent = `In round #${activeRound.id}`;
     await loadActiveRound();
   } catch (e) {
@@ -387,7 +399,7 @@ async function refreshHistory() {
   if (!list) return;
   try {
     const c = casino();
-    const events = await fetchRecentLogs(c, "CrashRoundSettled", { minCount: 20, maxLookback: 20_000 });
+    const events = await fetchRecentLogs(c, "RoundSettled", { minCount: 20, maxLookback: 20_000 });
     list.innerHTML = "";
     if (events.length === 0) {
       list.innerHTML = `<span class="m" style="opacity:.4;">no recent rounds</span>`;
@@ -403,13 +415,124 @@ async function refreshHistory() {
   } catch (e) { console.warn("[crash] history:", e.message); }
 }
 
-function bindWS() {
-  // Subscribe to CrashRoundStarted/Settled so the UI flips instantly.
+// ---------------------------------------------------------------------------
+// On-demand round opener (parity with roulette, 2026-07-24). The house bot no
+// longer chains crash rounds after an EMPTY one (ROUND_ON_DEMAND=crash), so it
+// idles gas-free when nobody's playing. A CONNECTED player watching the table
+// opens the next round themselves once the current one has settled and none is
+// open. startRound() is permissionless; races between two players are
+// harmless (one lands, the loser reverts and we reconcile on the next tick).
+// If crash is paused on-chain the call reverts before broadcast → costs nothing.
+// ---------------------------------------------------------------------------
+let startingRound = false;
+let lastStartAttempt = 0;
+async function maybeStartRound() {
+  if (!SL.address || !SL.signer) return;   // only a signed-in player opens rounds
+  if (document.hidden) return;             // and only while actually watching
+  if (startingRound || Date.now() - lastStartAttempt < 12_000) return;
+  // Only open when NO round is live: the current one is settled (or none
+  // exists). Never during BETTING (open) or RUNNING (climbing, awaiting settle)
+  // — that round is still live and the bot will settle it.
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (activeRound && !activeRound.settled) return; // BETTING or RUNNING → live
+  startingRound = true;
+  try {
+    lastStartAttempt = Date.now();
+    const c = new ethers.Contract(CRASH_ADDR, ["function startRound()"], SL.signer);
+    const tx = await c.startRound();
+    await tx.wait();
+    await loadActiveRound();
+  } catch (_) { /* lost the race / paused · reconcile on the next tick */ }
+  finally { startingRound = false; }
+}
+
+// Deterministic climb replay: animate the multiplier from 1.00× up to the
+// revealed crash point over a duration that scales with the height, marking the
+// player's target on the way up. This is the "growth" the player watches — the
+// outcome is already fixed on-chain (they set the target before the round), so
+// the tension is purely "did the rocket reach my number before it blew".
+function animateCrashClimb(cpX100, myTargetX100) {
+  return new Promise((resolve) => {
+    stopTicker();
+    const cp = Math.max(1, cpX100 / 100);
+    const target = myTargetX100 > 0 ? myTargetX100 / 100 : 0;
+    const el = $("[data-sl-crash-mult]");
+    const dur = Math.min(6500, 1500 + Math.log(cp) * 2200);
+    const startT = performance.now();
+    let flashed = false;
+    function frame(now) {
+      const t = Math.min(1, (now - startT) / dur);
+      const cur = 1 + (cp - 1) * (1 - Math.pow(1 - t, 2)); // ease-out → decelerates into the crash
+      const reached = target > 0 && cur >= target;
+      if (el) { el.textContent = toDisplayMult(cur).toFixed(2); el.style.color = reached ? "var(--green)" : "var(--cyan)"; }
+      _updateCrashSvg(t * 30, cur);
+      if (reached && !flashed) { flashed = true; setStagePill("won", `TARGET ${target.toFixed(2)}× HIT`); }
+      else if (!reached) setStagePill("live", `FLYING · ${toDisplayMult(cur).toFixed(2)}×`);
+      if (t < 1) requestAnimationFrame(frame);
+      else { paintMultiplierFinal(cp, target > 0 && cp >= target); resolve(); }
+    }
+    requestAnimationFrame(frame);
+  });
+}
+
+// Fired once per round when the crash point is revealed. Replays the climb for
+// the player's own bet and reveals the result; also fills the provably-fair
+// panel with the now-revealed server seed. Spectator rounds (no personal bet)
+// just reset the stage to idle.
+async function onRoundSettled(roundId) {
+  if (replayedRounds.has(roundId)) return;
+  replayedRounds.add(roundId);
   const c = casino();
-  c.on("CrashRoundStarted", () => loadActiveRound().catch(() => {}));
-  c.on("CrashRoundSettled", () => { loadActiveRound().catch(() => {}); refreshHistory().catch(() => {}); });
-  c.on("CrashBetPlaced",    () => loadActiveRound().catch(() => {}));
-  c.on("CrashCashoutRequested", () => loadActiveRound().catch(() => {}));
+  let r;
+  try { r = await c.getRound(roundId); } catch (_) { return; }
+  const cpX100 = Number(r.crashPointX100 ?? r[5]);
+  const serverSeed = r.serverSeed ?? r[6];
+  const cp = cpX100 / 100;
+
+  // provably-fair: the server seed is public now.
+  populateFairPanel({ betId: roundId, nonce: roundId, serverSeed });
+
+  // Did the player have a bet in THIS round? Compute their effective payout the
+  // exact way the contract does (max of target/manual that is ≤ crash point).
+  let target = 0, stakeWei = 0n, hadBet = false;
+  if (SL.address) {
+    try {
+      const b = await c.getBet(roundId, SL.address);
+      if (BigInt(b.amount) > 0n) {
+        hadBet = true; stakeWei = BigInt(b.amount);
+        const auto = Number(b.autoCashoutX100), manual = Number(b.cashoutMultX100);
+        if (auto > 0 && auto <= cpX100) target = auto;
+        if (manual > 0 && manual <= cpX100 && manual > target) target = manual;
+      }
+    } catch (_) {}
+  }
+
+  if (!hadBet) {
+    stopTicker();
+    setText("[data-sl-crash-mult]", "1.00");
+    _updateCrashSvg(0, 1);
+    return;
+  }
+
+  await animateCrashClimb(cpX100, target);
+  if (target > 0) {
+    const payout = (stakeWei * BigInt(target)) / 100n;
+    const profit = payout - stakeWei;
+    setStagePill("won", `CASHED @ ${(target / 100).toFixed(2)}×`);
+    setResultBanner({ won: true, txt: `<b>WON</b> · ${(target / 100).toFixed(2)}× · + ${fmtSTT(profit)} STT` });
+  } else {
+    setStagePill("lost", `CRASHED @ ${cp.toFixed(2)}×`);
+    setResultBanner({ won: false, txt: `<b>CRASHED</b> at ${cp.toFixed(2)}× · − ${fmtSTT(stakeWei)} STT` });
+  }
+}
+
+function bindWS() {
+  // Subscribe to RoundStarted/Settled so the UI flips instantly.
+  const c = casino();
+  c.on("RoundStarted", () => loadActiveRound().catch(() => {}));
+  c.on("RoundSettled", (roundId) => { onRoundSettled(Number(roundId)).catch(() => {}).then(() => maybeStartRound().catch(() => {})); refreshHistory().catch(() => {}); });
+  c.on("BetPlaced",    () => loadActiveRound().catch(() => {}));
+  c.on("CashoutRequested", () => loadActiveRound().catch(() => {}));
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -432,9 +555,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   recalcSummary();
   setStagePill("ready", "READY");
-  loadActiveRound().catch(() => {});
+  loadActiveRound().then(() => maybeStartRound().catch(() => {})).catch(() => {});
   refreshHistory().catch(() => {});
   try { bindWS(); } catch (_) {}
-  setInterval(() => loadActiveRound().catch(() => {}), POLL_MS);
+  setInterval(() => loadActiveRound().then(() => maybeStartRound().catch(() => {})).catch(() => {}), POLL_MS);
   setInterval(() => refreshHistory().catch(() => {}), 12_000);
 });

@@ -1,4 +1,4 @@
-/* ShinyPoker — marketing shared chrome (vanilla). Injects header + footer,
+/* ShinyPoker · marketing shared chrome (vanilla). Injects header + footer,
    ambient grid, FAQ toggles, zkShuffle scramble viz. */
 (function () {
   "use strict";
@@ -11,10 +11,10 @@
     return '<svg viewBox="0 0 64 64" style="width:' + px + 'px;height:' + px + 'px;display:inline-block;vertical-align:-0.18em">' +
       '<g transform="rotate(26 32 32)">' +
       '<path d="M 32 3 Q 36.5 23 47 32 Q 36.5 41 32 61 Q 27.5 41 17 32 Q 27.5 23 32 3 Z" fill="#e8c15a" opacity="0.45"/>' +
-      '<path d="M 32 5 Q 36.2 24 45.5 32 Q 36.2 40 32 59 Q 27.8 40 18.5 32 Q 27.8 24 32 5 Z" fill="#fff6dd" stroke="#d9ab4a" stroke-width="1.6" stroke-linejoin="round"/>' +
+      '<path d="M 32 5 Q 36.2 24 45.5 32 Q 36.2 40 32 59 Q 27.8 40 18.5 32 Q 27.8 24 32 5 Z" fill="#fff6dd" stroke="#D9B970" stroke-width="1.6" stroke-linejoin="round"/>' +
       '</g>' +
-      '<path d="M 13 15 L 13.8 17.2 L 16 18 L 13.8 18.8 L 13 21 L 12.2 18.8 L 10 18 L 12.2 17.2 Z" fill="#f2d78a"/>' +
-      '<path d="M 50 48.4 L 50.7 50.3 L 52.6 51 L 50.7 51.7 L 50 53.6 L 49.3 51.7 L 47.4 51 L 49.3 50.3 Z" fill="#f2d78a" opacity="0.9"/>' +
+      '<path d="M 13 15 L 13.8 17.2 L 16 18 L 13.8 18.8 L 13 21 L 12.2 18.8 L 10 18 L 12.2 17.2 Z" fill="#F4DD9E"/>' +
+      '<path d="M 50 48.4 L 50.7 50.3 L 52.6 51 L 50.7 51.7 L 50 53.6 L 49.3 51.7 L 47.4 51 L 49.3 50.3 Z" fill="#F4DD9E" opacity="0.9"/>' +
       '</svg>';
   };
   function logo(size) {
@@ -35,21 +35,25 @@
       '</nav>' +
       '<div class="spacer"></div>' +
       '<div class="mkt-switcher">' +
-        '<a class="casino" href="https://shiny-luck.vercel.app/"><span class="dot"></span>ShinyLuck</a>' +
+        '<a class="casino" href="/"><span class="dot"></span>ShinyLuck</a>' +
         '<a class="on" href="/poker/"><span class="dot"></span>Poker</a>' +
       '</div>' +
       '<a class="btn primary" href="lobby">Connect Wallet &amp; Play</a>' +
     '</div></header>';
 
-  // Real community links — used by BOTH footers.
+  // Real community links · used by BOTH footers.
+  // `casino` used to point at an old Vercel preview that is STILL online and
+  // serving a stale build with dead contract addresses · it must be the live
+  // domain. `escrow` used to name the v1 PokerRoom (0x7E13…36e3); the live room
+  // has been 0xFeF7…6A24 since 2026-07-11.
   var LINKS = {
     telegram: "https://t.me/ShinyLuck1",
     x: "https://x.com/ShinyLuck_",
     discord: "https://discord.gg/DxRzqnXmeq",
-    github: "https://github.com/pSJLq",
+    github: "https://github.com/pSJLq/ShinyLuck",
     somnia: "https://somnia.network/",
-    casino: "https://shiny-luck.vercel.app/",
-    escrow: "https://shannon-explorer.somnia.network/address/0x7E1387FCE14522B981C07bca921e857CfeD636e3",
+    casino: "https://shinyluck.win/",
+    escrow: "https://shannon-explorer.somnia.network/address/0xFeF7d1bb6c0DffaB4e13D9b49BBE1F1459266A24",
   };
 
   var SOCIAL = {
@@ -90,8 +94,8 @@
       '</div>' +
       '<div class="fchain">' +
         '<span class="ci"><span class="dot"></span>Somnia Testnet</span>' +
-        '<span class="ci">Escrow: <a href="' + LINKS.escrow + '" target="_blank" rel="noopener">0x7E13…36e3 ↗</a></span>' +
-        '<span class="ci">Build v1.5</span>' +
+        '<span class="ci">Escrow: <a href="' + LINKS.escrow + '" target="_blank" rel="noopener">0xFeF7…6A24 ↗</a></span>' +
+        '<span class="ci">Cards: zkShuffle v2</span>' +
         '<span class="ci">RPC: api.infra.testnet.somnia.network</span>' +
       '</div>' +
       '<div class="fbot">' +
@@ -132,15 +136,15 @@
     // ambient bg grid
     var bg = document.getElementById("mkt-bg");
     if (bg && window.GridField) {
-      new GridField(bg, { cell: 24, gap: 8, speed: 0.34, density: 0.5, accent: "#d9ab4a", accent2: "#f2d78a",
+      new GridField(bg, { cell: 24, gap: 8, speed: 0.34, density: 0.5, accent: "#D9B970", accent2: "#F4DD9E",
         maxAlpha: 0.7, minBright: 0.008, shape: "square" }).start();
     }
 
     // zkShuffle viz
     var zk = document.getElementById("zkviz-canvas");
     if (zk && window.GridField) {
-      var field = new GridField(zk, { cell: 16, gap: 4, speed: 0.5, density: 0.45, accent: "#d9ab4a",
-        accent2: "#f2d78a", maxAlpha: 0.9, minBright: 0.02, shape: "square" });
+      var field = new GridField(zk, { cell: 16, gap: 4, speed: 0.5, density: 0.45, accent: "#D9B970",
+        accent2: "#F4DD9E", maxAlpha: 0.9, minBright: 0.02, shape: "square" });
       field.start();
       window.__zkField = field;
       var btn = document.getElementById("zk-shuffle-btn");
@@ -153,7 +157,7 @@
       it.addEventListener("click", function () { it.classList.toggle("open"); });
     });
 
-    // LIVE landing data from the public dealer feed (same one the lobby uses) —
+    // LIVE landing data from the public dealer feed (same one the lobby uses) -
     // the hero stats and "featured" lists are real chain state, not decor.
     liveLanding();
 
@@ -176,7 +180,7 @@
     });
   }
 
-  var DEALER_URL = "https://shinia.mom/dealer"; // public feed, CORS-open — works from dev too
+  var DEALER_URL = "/dealer"; // same-origin public feed · domain-agnostic
   var ZERO_ADDR = "0x0000000000000000000000000000000000000000";
   var stt = function (wei) { var v = Number(BigInt(wei || 0)) / 1e18; return v >= 100 ? Math.round(v).toLocaleString("en-US") : +v.toFixed(v >= 1 ? 2 : 4); };
 
@@ -195,7 +199,7 @@
       set("ls-players", String(seated));
       set("ls-tables", String(tables.length));
       set("ls-hands", String(inHand));
-      set("ls-pot", pot > 0 ? (+pot.toFixed(2)) + " STT" : "—");
+      set("ls-pot", pot > 0 ? (+pot.toFixed(2)) + " STT" : "-");
 
       var fc = document.getElementById("feat-cash");
       if (fc) {
@@ -217,14 +221,14 @@
             '<div class="ft">' + esc(t.maxPlayers + "-max " + (cost === 0n ? "freeroll" : "tournament") + " #" + t.id) + "</div>" +
             '<div class="fm secure">✓ ' + stt(t.pool) + " STT secured on-chain · " + esc(st) + "</div></div>" +
             '<div class="fval tnum">' + (cost === 0n ? "FREE" : stt(cost.toString()) + '<span class="u"> STT</span>') + "</div></a>";
-        }).join("") || '<div class="fitem"><div class="fmain"><div class="fm">No open events — start one in the lobby.</div></div></div>';
+        }).join("") || '<div class="fitem"><div class="fmain"><div class="fm">No open events · start one in the lobby.</div></div></div>';
       }
     }
     fetch(DEALER_URL + "/lobby").then(function (r) { return r.json(); }).then(apply).catch(function () {
       var fc = document.getElementById("feat-cash");
-      if (fc) fc.innerHTML = '<div class="fitem"><div class="fmain"><div class="fm">Live feed warming up — open the lobby for tables.</div></div></div>';
+      if (fc) fc.innerHTML = '<div class="fitem"><div class="fmain"><div class="fm">Live feed warming up · open the lobby for tables.</div></div></div>';
       var ftr = document.getElementById("feat-trn");
-      if (ftr) ftr.innerHTML = '<div class="fitem"><div class="fmain"><div class="fm">Live feed warming up — open the lobby for events.</div></div></div>';
+      if (ftr) ftr.innerHTML = '<div class="fitem"><div class="fmain"><div class="fm">Live feed warming up · open the lobby for events.</div></div></div>';
     });
   }
 

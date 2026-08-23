@@ -1,8 +1,10 @@
-/* ShinyPoker — Tournament detail page. The invite-link target
+/* ShinyPoker · Tournament detail page. The invite-link target
    (tournament?id=N): info + countdown + blind structure + prize/split, and the
-   approval flow — applicants apply with their on-chain nickname, the host
+   approval flow · applicants apply with their on-chain nickname, the host
    approves/rejects. Fully on-chain via window.SP. Mirrors the lobby chrome. */
-const { useState: uS, useEffect: uE } = React;
+// `var`, not `const`: the cashier and the page app both bind these and now
+// share one global script scope — a second `const` would kill the page.
+var { useState: uS, useEffect: uE } = React;
 const sym = () => SP.NETWORK.currency.symbol;
 const N4 = (w) => Number(SP.fmt(w, 4));
 const tshort = (a) => (a && a !== "0x0000000000000000000000000000000000000000" ? a.slice(0, 6) + "…" + a.slice(-4) : "");
@@ -11,7 +13,7 @@ const ZERO = "0x0000000000000000000000000000000000000000";
 // Styled input matching the site (bare <input> outside .lt-modal gets browser default white).
 const INP = { background: "var(--panel, #141420)", border: "1px solid var(--line)", color: "var(--text)", borderRadius: 8, padding: "8px 10px", fontFamily: "var(--mono)", fontSize: 13, outline: "none" };
 
-/// Nickname setter row — shared by the player apply flow AND the host join flow.
+/// Nickname setter row · shared by the player apply flow AND the host join flow.
 function NickRow({ nick, setNick, busy, run, onSet }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 380 }}>
@@ -25,7 +27,7 @@ function NickRow({ nick, setNick, busy, run, onSet }) {
 }
 
 function structureLabel(levelDur) {
-  if (!levelDur) return "—";
+  if (!levelDur) return "-";
   const m = Math.max(1, Math.round(levelDur / 60));
   const name = levelDur <= 180 ? "Turbo" : levelDur <= 360 ? "Standard" : "Slow";
   return `${name} · ${m} min levels`;
@@ -56,14 +58,16 @@ function TournamentPage() {
   const [playTable, setPlayTable] = uS(null);
   const [numTables, setNumTables] = uS(1);
   const [tables, setTables] = uS([]);
-  const [results, setResults] = uS(null); // [{addr, place, prize, handle}] — winner first
+  const [results, setResults] = uS(null); // [{addr, place, prize, handle}] · winner first
   const [structure, setStructure] = uS([]);
   const [showStruct, setShowStruct] = uS(false);
   const [showCashier, setShowCashier] = uS(false);
   const [pokerBal, setPokerBal] = uS(0);
   const refreshPokerBal = async () => { if (SP.sdk.address) { try { setPokerBal(Number(SP.fmt(await SP.sdk.balanceOf(SP.sdk.address), 6))); } catch {} } };
   uE(() => { if (connected) refreshPokerBal(); }, [connected]);
-  const [theme] = uS(() => localStorage.getItem("sp_theme") || "b");
+  // guarded: a framed WKWebView can THROW here and blank the page (see the
+  // same read in poker-lobby-app.jsx)
+  const [theme] = uS(() => { try { return localStorage.getItem("sp_theme") || "b"; } catch (e) { return "b"; } });
 
   const flash = (m) => { setMsg(m); setTimeout(() => setMsg(null), 4500); };
 
@@ -116,10 +120,12 @@ function TournamentPage() {
 
   async function connect() { try { const a = await SP.sdk.connect(); setAddr(a); setConnected(true); load(); } catch (e) { if (e && e.message !== "cancelled") flash(e.message || "connect failed"); } }
   async function run(label, fn) {
+    // the clicked button owns the spinner until this settles
+    const done = SPPress.claim();
     setBusy(true);
-    try { await fn(); flash(label + " ✓"); await load(); }
-    catch (e) { flash(label + " ✗ " + (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").slice(0, 90)); console.error(e); }
-    finally { setBusy(false); }
+    try { await fn(); await load(); } // no success toast · the page updates itself
+    catch (e) { flash(label + " ✗ " + SP.pokerError(e)); console.error(e); }
+    finally { setBusy(false); done(); }
   }
 
   if (id == null) return <Centered>Invalid tournament link.</Centered>;
@@ -183,13 +189,13 @@ function TournamentPage() {
             </div>
 
             {/* schedule line */}
-            <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: 10, background: "var(--accent-08, rgba(217,171,74,.08))", fontFamily: "var(--mono)", fontSize: 15, color: "var(--text)" }}>
+            <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: 10, background: "var(--accent-08, rgba(217,185,112,.08))", fontFamily: "var(--mono)", fontSize: 15, color: "var(--text)" }}>
               {info.status === 0 && startTime > 0 && startsIn > 0 && <>⏱ Starts in <b>{clk(startsIn)}</b></>}
-              {info.status === 0 && startTime > 0 && startsIn === 0 && <>⏱ Start time reached — waiting on the host / enough players</>}
+              {info.status === 0 && startTime > 0 && startsIn === 0 && <>⏱ Start time reached · waiting on the host / enough players</>}
               {info.status === 0 && startTime === 0 && <>Starts when full or when the host starts it</>}
-              {info.status === 1 && <>● In progress — Level {clock.level + 1}, blinds {sb}/{bb}{ante ? ` (ante ${ante})` : ""}{numTables > 1 ? ` · ${numTables} tables` : ""}</>}
-              {info.status === 2 && <>🏁 Finished{results && results[0] && results[0].place === 1 && <> — 🏆 <b style={{ color: "var(--accent-soft)" }}>{results[0].handle || tshort(results[0].addr)}</b> wins {N4(results[0].prize)} {sym()}</>}</>}
-              {info.status === 3 && <>Cancelled — all entries refunded</>}
+              {info.status === 1 && <>● In progress · Level {clock.level + 1}, blinds {sb}/{bb}{ante ? ` (ante ${ante})` : ""}{numTables > 1 ? ` · ${numTables} tables` : ""}</>}
+              {info.status === 2 && <>🏁 Finished{results && results[0] && results[0].place === 1 && <> · 🏆 <b style={{ color: "var(--accent-soft)" }}>{results[0].handle || tshort(results[0].addr)}</b> wins {N4(results[0].prize)} {sym()}</>}</>}
+              {info.status === 3 && <>Cancelled · all entries refunded</>}
             </div>
 
             {/* stat grid */}
@@ -214,9 +220,9 @@ function TournamentPage() {
               {structure.map((l, i) => {
                 const cur = info.status === 1 && clock && clock.level === i;
                 return (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "36px 1fr 0.6fr 0.6fr", gap: 6, fontFamily: "var(--mono)", fontSize: 13, padding: "3px 0", color: cur ? "var(--accent-soft)" : "var(--text)", background: cur ? "var(--accent-08, rgba(217,171,74,.08))" : "transparent", borderRadius: 6 }}>
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "36px 1fr 0.6fr 0.6fr", gap: 6, fontFamily: "var(--mono)", fontSize: 13, padding: "3px 0", color: cur ? "var(--accent-soft)" : "var(--text)", background: cur ? "var(--accent-08, rgba(217,185,112,.08))" : "transparent", borderRadius: 6 }}>
                     <span style={{ color: cur ? "var(--accent-soft)" : "var(--muted)" }}>{i + 1}{cur ? " ●" : ""}</span>
-                    <span>{l.sb} / {l.bb}</span><span>{l.ante || "—"}</span><span>{Math.round(l.durationSecs / 60)}</span>
+                    <span>{l.sb} / {l.bb}</span><span>{l.ante || "-"}</span><span>{Math.round(l.durationSecs / 60)}</span>
                   </div>
                 );
               })}
@@ -242,10 +248,10 @@ function TournamentPage() {
 
             {info.status === 0 && !isCreator && (
               !connected ? <button className="btn-sm join" style={{ alignSelf: "flex-start" }} onClick={connect}>Connect wallet to enter</button>
-              : myReg ? <span style={{ color: "var(--win, #57d9a3)", fontFamily: "var(--mono)" }}>✓ You're in — see you at the table</span>
+              : myReg ? <span style={{ color: "var(--win, #57d9a3)", fontFamily: "var(--mono)" }}>✓ You're in · see you at the table</span>
               : myPend ? (
                 <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ color: "var(--accent-soft)", fontFamily: "var(--mono)" }}>⏳ Application pending — waiting for the host</span>
+                  <span style={{ color: "var(--accent-soft)", fontFamily: "var(--mono)" }}>⏳ Application pending · waiting for the host</span>
                   <button className="btn-sm" disabled={busy} onClick={() => run("Withdraw", () => SP.sdk.withdrawApplication(id))}>Withdraw</button>
                 </div>
               ) : !handle ? (
@@ -260,7 +266,7 @@ function TournamentPage() {
               )
             )}
 
-            {/* creator controls — the host can also play in their own event
+            {/* creator controls · the host can also play in their own event
                 (the contract admits the creator directly, no self-approval). */}
             {isCreator && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -274,10 +280,10 @@ function TournamentPage() {
                   </div>
                 )}
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                  <button className="btn-sm" onClick={() => { navigator.clipboard?.writeText(location.href); flash("Invite link copied"); }}>🔗 Copy invite link</button>
+                  <button className="btn-sm" onClick={() => { navigator.clipboard?.writeText(location.origin + "/poker?v=tournament&id=" + id); flash("Invite link copied"); }}>🔗 Copy invite link</button>
                   {info.status === 0 && info.registered >= 2 && <button className="btn-sm join" disabled={busy} onClick={() => run("Start", () => SP.sdk.startTournament(id))}>Start now</button>}
                   {info.status === 0 && <button className="btn-sm" disabled={busy} onClick={() => run("Cancelled", () => SP.sdk.cancelTournament(id))}>Cancel & refund</button>}
-                  <span style={{ fontFamily: "var(--label)", fontSize: 12, color: "var(--muted)" }}>You're the host — share the link so players can apply.</span>
+                  <span style={{ fontFamily: "var(--label)", fontSize: 12, color: "var(--muted)" }}>You're the host · share the link so players can apply.</span>
                 </div>
               </div>
             )}
@@ -305,13 +311,13 @@ function TournamentPage() {
             <div style={{ border: "1px solid var(--line)", borderRadius: 14, padding: "16px 22px" }}>
               <div style={{ fontFamily: "var(--mono)", fontSize: 15, marginBottom: 10, color: "var(--text)" }}>Final standings</div>
               {results == null
-                ? <span style={{ color: "var(--muted)", fontFamily: "var(--label)", fontSize: 13 }}>Results are being indexed — check back in a moment.</span>
+                ? <span style={{ color: "var(--muted)", fontFamily: "var(--label)", fontSize: 13 }}>Results are being indexed · check back in a moment.</span>
                 : results.map((r) => {
                     const me = !!addr && r.addr.toLowerCase() === addr.toLowerCase();
                     const medal = r.place === 1 ? "🥇" : r.place === 2 ? "🥈" : r.place === 3 ? "🥉" : null;
                     return (
                       <div key={r.place} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderRadius: 8, marginTop: 2,
-                        background: me ? "var(--accent-12, rgba(217,171,74,.12))" : r.place <= 3 ? "var(--accent-08, rgba(217,171,74,.06))" : "transparent" }}>
+                        background: me ? "var(--accent-12, rgba(217,185,112,.12))" : r.place <= 3 ? "var(--accent-08, rgba(217,185,112,.06))" : "transparent" }}>
                         <span style={{ width: 40, fontFamily: "var(--mono)", fontSize: 14, color: r.place <= 3 ? "var(--accent-soft)" : "var(--muted)" }}>{medal || "#" + r.place}</span>
                         <AvatarIcon av={r.avatar} img={r.img} name={r.handle || r.addr} size={24} style={{ borderRadius: 6 }} />
                         <span style={{ flex: 1, fontFamily: "var(--mono)", fontSize: 14, color: "var(--text)" }}>
@@ -319,7 +325,7 @@ function TournamentPage() {
                           <span style={{ color: "var(--muted)", fontSize: 11, marginLeft: 8 }}>{r.handle ? tshort(r.addr) : ""}</span>
                         </span>
                         <span style={{ fontFamily: "var(--mono)", fontSize: 14, color: r.prize > 0n ? "var(--win, #57d9a3)" : "var(--muted)" }}>
-                          {r.prize > 0n ? `+${N4(r.prize)} ${sym()}` : "—"}
+                          {r.prize > 0n ? `+${N4(r.prize)} ${sym()}` : "-"}
                         </span>
                       </div>
                     );
@@ -328,11 +334,11 @@ function TournamentPage() {
                 const mine = results.find((r) => r.addr.toLowerCase() === addr.toLowerCase());
                 if (!mine) return null;
                 return (
-                  <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "var(--accent-08, rgba(217,171,74,.08))", fontFamily: "var(--mono)", fontSize: 14, color: "var(--text)" }}>
+                  <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "var(--accent-08, rgba(217,185,112,.08))", fontFamily: "var(--mono)", fontSize: 14, color: "var(--text)" }}>
                     {mine.place === 1
-                      ? <>🏆 You won this tournament — <b style={{ color: "var(--win, #57d9a3)" }}>{N4(mine.prize)} {sym()}</b> credited to your poker balance.</>
+                      ? <>🏆 You won this tournament · <b style={{ color: "var(--win, #57d9a3)" }}>{N4(mine.prize)} {sym()}</b> credited to your poker balance.</>
                       : mine.prize > 0n
-                        ? <>You finished <b>#{mine.place}</b> and won <b style={{ color: "var(--win, #57d9a3)" }}>{N4(mine.prize)} {sym()}</b> — credited to your poker balance.</>
+                        ? <>You finished <b>#{mine.place}</b> and won <b style={{ color: "var(--win, #57d9a3)" }}>{N4(mine.prize)} {sym()}</b> · credited to your poker balance.</>
                         : <>You finished <b>#{mine.place}</b> of {info.registered}. Better luck next time!</>}
                   </div>
                 );
@@ -346,7 +352,7 @@ function TournamentPage() {
             {players.length === 0 ? <span style={{ color: "var(--muted)", fontFamily: "var(--label)", fontSize: 13 }}>No players registered yet.</span>
               : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {players.map((p) => (
-                    <span key={p.addr} style={{ display: "inline-flex", alignItems: "center", gap: 7, fontFamily: "var(--mono)", fontSize: 13, padding: "4px 10px 4px 5px", borderRadius: 8, background: "var(--accent-08, rgba(217,171,74,.08))", color: "var(--text)" }}>
+                    <span key={p.addr} style={{ display: "inline-flex", alignItems: "center", gap: 7, fontFamily: "var(--mono)", fontSize: 13, padding: "4px 10px 4px 5px", borderRadius: 8, background: "var(--accent-08, rgba(217,185,112,.08))", color: "var(--text)" }}>
                       <AvatarIcon av={p.avatar} img={p.img} name={p.handle || p.addr} size={22} style={{ borderRadius: 6 }} />
                       {p.handle || tshort(p.addr)}
                     </span>
@@ -362,20 +368,38 @@ function TournamentPage() {
   );
 }
 
+// Bound once - see the same fix in poker-lobby-app.jsx: a 400ms interval was
+// re-registering the resize handler forever, and the fit itself rewrote layout
+// styles 2.5x/second even when nothing had moved.
+let _trnScaleBound = false;
 function mountScaleTrn() {
   const scaler = document.getElementById("scaler"); if (!scaler) return;
   const app = scaler.querySelector(".app"); if (!app) return;
   const fit = () => {
+    const embedNow = document.documentElement.classList.contains("sp-embed");
+    const key = window.innerWidth + "x" + window.innerHeight + "|" + (embedNow ? 1 : 0);
+    if (app.dataset.slFit === key) return;   // remounted nodes carry no marker
+    app.dataset.slFit = key;
     if (window.innerWidth <= 760) { // fluid mobile layout (mobile.css) - no stage scaling
       app.style.transform = ""; app.style.position = ""; app.style.top = ""; app.style.left = "";
       scaler.style.width = ""; scaler.style.height = "";
       return;
     }
-    const s = Math.min((window.innerWidth - 24) / 1600, (window.innerHeight - 84) / 1000);
+    // Embedded in the merged site (sp-embed): fill the WIDTH of the frame -
+    // the stage scrolls vertically if needed, so no dead side margins.
+    const embed = document.documentElement.classList.contains("sp-embed");
+    const sW = (window.innerWidth - 24) / 1600;
+    // Embedded, scale to WIDTH only: the shell sizes the iframe to whatever
+    // height we report, so keying off window.innerHeight would feed back on
+    // itself (taller frame → bigger scale → taller frame). Width is stable and
+    // the shell page does the scrolling.
+    const sH = (window.innerHeight - 84) / 1000;
+    const s = embed ? sW : Math.min(sW, sH);
     app.style.transform = `scale(${s})`; app.style.transformOrigin = "top left"; app.style.position = "absolute"; app.style.top = "0"; app.style.left = "0";
     scaler.style.width = 1600 * s + "px"; scaler.style.height = 1000 * s + "px";
   };
-  fit(); window.addEventListener("resize", fit);
+  fit();
+  if (!_trnScaleBound) { _trnScaleBound = true; window.addEventListener("resize", () => mountScaleTrn()); }
 }
 function bootTrn() { ReactDOM.createRoot(document.getElementById("root")).render(<TournamentPage />); setInterval(mountScaleTrn, 400); setTimeout(mountScaleTrn, 80); }
 if (window.SP) bootTrn(); else window.addEventListener("sp:ready", bootTrn, { once: true });

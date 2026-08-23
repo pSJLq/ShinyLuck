@@ -3,11 +3,15 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ShinyPoker — Lobby</title>
+<title>ShinyPoker · Lobby</title>
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Source+Code+Pro:wght@400;500;600&family=DM+Sans:wght@400;500;600&family=Bricolage+Grotesque:opsz,wght@12..96,600..800&display=swap" rel="stylesheet" />
+<!-- Boot guard · deliberately NOT deferred and ahead of everything it protects:
+     hardens localStorage, reports failures to /dealer/clientlog, and replaces a
+     blank frame with a readable panel. See poker-boot.js. -->
+<script src="poker-boot.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 <link rel="stylesheet" href="lobby.css" />
 <link rel="stylesheet" href="poker-live.css" />
@@ -17,7 +21,89 @@
   #stage { position: fixed; inset: 0 0 38px 0; display: grid; place-items: center; background: radial-gradient(120% 90% at 50% -10%, #0c0c11 0%, #070707 62%); overflow: hidden; }
   #root { position: relative; z-index: 2; }
   #app-footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; }
+  /* Embedded in the merged site's Poker tab: the shell owns nav/footer. */
+  .sp-embed .topbar { display: none !important; }
+  .sp-embed #app-footer { display: none !important; }
+  /* …and the shell owns the PAGE. The lobby used to draw its own bordered,
+     rounded, drop-shadowed panel on top of the casino's background, so the
+     poker tab read as a second application embedded in the site rather than
+     as a part of it. Inside the shell the lobby is just content.
+     NB: do NOT retune .lobby's grid-template-rows to drop the hidden topbar's
+     track. `display:none` removes the topbar from the grid altogether, so the
+     tab band already occupies that first 56px row — zeroing it collapses the
+     tabs onto the filter bar. */
+  .sp-embed .app { background: transparent !important; border: 0 !important;
+    border-radius: 0 !important; box-shadow: none !important; }
+  .sp-embed .lobbyhead, .sp-embed .subbar { background: transparent; backdrop-filter: none; }
+  /* Embedded: the stage joins the normal flow so the document has a real
+     height · the shell then sizes the iframe to it and only the page
+     scrolls (one scrollbar, footer still reachable below). */
+  .sp-embed #stage { position: static !important; inset: auto !important; overflow: visible !important;
+    display: block !important; height: auto !important; padding: 6px 0 0; }
+  .sp-embed #scaler { margin: 0 auto; }
+  /* dark scrollbars inside the embedded stage (no white OS bar) */
+  .sp-embed #stage { scrollbar-color: #20202A transparent; scrollbar-width: thin; }
+  .sp-embed #stage::-webkit-scrollbar { width: 10px; height: 8px; }
+  .sp-embed #stage::-webkit-scrollbar-thumb { background: #20202A; border-radius: 10px; border: 2px solid #050506; }
+  .sp-embed #stage::-webkit-scrollbar-track { background: transparent; }
+  /* ONE SCROLLBAR, cont'd -- the feedback loop that kept a second one alive:
+     mobile.css pins `.app` to 100dvh, i.e. to THIS frame's viewport. But the
+     shell sizes the frame to whatever height we report, so `#stage`'s 6px of
+     padding made us report dvh+6 -> shell grows the frame -> dvh grows -> we
+     report +6 again. One poll per second, forever, and the frame sat ~6px
+     overflowed the whole time: that overflow is the second scrollbar (native
+     and white, because it belongs to the frame's own <html>).
+     Embedded, the shell owns the viewport · we are only content, so size to it. */
+  @media (max-width: 760px) {
+    .sp-embed .app { height: auto !important; min-height: 0 !important; }
+  }
 </style>
+<script>
+  // Embed mode: inside the merged-site Poker tab (poker.html iframe).
+  (function () {
+    var inFrame = false;
+    try { inFrame = window.self !== window.top; } catch (e) { inFrame = true; }
+    var flagged = /(^|[?&])embed=1/.test(location.search);
+    if (!inFrame && !flagged) {
+      // Standalone visit (old links, "Back to lobby" from a table): the lobby
+      // now lives inside the merged site's Poker tab · go there, keep params.
+      var q = location.search.replace(/^\?/, "");
+      location.replace("/poker" + (q ? "?" + q : ""));
+      return;
+    }
+    document.documentElement.classList.add("sp-embed");
+    // ONE SCROLLBAR: tell the shell how tall we are · it sizes the iframe to
+    // match, so this frame never grows its own scrollbar next to the page's.
+    var lastH = 0;
+    function reportH() {
+      var h = Math.ceil(Math.max(
+        document.documentElement.scrollHeight,
+        document.body ? document.body.scrollHeight : 0));
+      if (!h || Math.abs(h - lastH) < 2) return;
+      lastH = h;
+      try { window.parent.postMessage({ type: "sl-height", h: h }, "*"); } catch (e) {}
+    }
+    addEventListener("load", reportH);
+    addEventListener("resize", reportH);
+    setInterval(reportH, 1000);
+
+    // Table/tournament links become shell routes (the shell keeps its chrome
+    // and swaps the iframe) - forwarded up via postMessage.
+    document.addEventListener("click", function (e) {
+      var a = e.target && e.target.closest && e.target.closest("a[href]");
+      if (!a) return;
+      var href = a.getAttribute("href") || "";
+      var mt = href.match(/^table(?:\.html)?\?t=(\d+)/);
+      var mn = href.match(/^tournament(?:\.html)?\?id=(\d+)/);
+      var target = mt ? "/poker?v=table&t=" + mt[1] : (mn ? "/poker?v=tournament&id=" + mn[1] : null);
+      if (!target) return;
+      e.preventDefault(); e.stopPropagation();
+      try { window.parent.postMessage({ type: "sl-nav", href: target }, "*"); return; } catch (_) {}
+      (window.top || window).location.href = target;
+    }, true);
+  })();
+</script>
+  <script type="module" src="/lib/i18n.js"></script>
 </head>
 <body>
 <div id="stage"><div id="root"></div></div>
@@ -31,15 +117,22 @@
   });
 </script>
 
-<script src="/vendor/privy.bundle.js"></script>
+<!-- Wallet source · reuses the shell's Privy when embedded (same origin),
+     loads the 4.8 MB bundle only when standalone. See poker-auth.js. -->
+<script src="poker-auth.js"></script>
 <script src="poker-grid.js"></script>
-<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
-
-<script type="text/babel" src="poker-cards.jsx"></script>
+<script src="poker-dust.js"></script>
+<script defer src="/lib/music.js"></script>
+  <script src="poker-press.js"></script>
+<!-- Vendored React + precompiled JSX · see the note in table.html: the CDN and
+     the in-browser Babel transpile were why some players only ever saw the
+     background. Regenerate with `node scripts/build-poker-jsx.js`. -->
+<script defer src="/vendor/react.production.min.js"></script>
+<script defer src="/vendor/react-dom.production.min.js"></script>
+<script defer src="poker-cards.compiled.js"></script>
 <script type="module" src="poker-bridge.js"></script>
-<script type="text/babel" src="poker-cashier.jsx"></script>
-<script type="text/babel" src="poker-lobby-app.jsx"></script>
+<script defer src="poker-cashier.compiled.js"></script>
+<script defer src="poker-lobby-app.compiled.js"></script>
+
 </body>
 </html>

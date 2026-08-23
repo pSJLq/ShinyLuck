@@ -1,8 +1,9 @@
-// zkShuffle v2 Lab — drives the REAL protocol core (zk-bn254.js) and verifies
+// zkShuffle v2 Lab · drives the REAL protocol core (zk-bn254.js) and verifies
 // every proof AGAINST THE DEPLOYED CONTRACT (ZkDealerV2 on Somnia testnet) with
-// a zero-gas eth_call. So the "verified on-chain" claim isn't a description —
+// a zero-gas eth_call. So the "verified on-chain" claim isn't a description -
 // you watch the browser ask the actual contract, live.
-import { bn254 } from "/vendor/noble-bn254.js"; // self-hosted (no CDN dependency)
+import nobleBn254 from "/vendor/noble-bn254.js"; // self-hosted (no CDN); esbuild CJS bundle → default export
+const { bn254 } = nobleBn254;
 import { ethers } from "/vendor/ethers.bundle.js";
 import { POKER_CONFIG, NETWORK } from "./poker-config.js";
 import * as zk from "./zk-bn254.js";
@@ -64,7 +65,7 @@ async function playHand(withCheat) {
 
   if (CADDR) log(`Contract: <a href="${explorer}/address/${CADDR}" target="_blank" style="color:#57d9a3">${CADDR}</a> · every ✓ below is a live eth_call to it\n`, "");
 
-  log("— DKG: each player proves their key (Schnorr), verified on-chain —", "head");
+  log("- DKG: each player proves their key (Schnorr), verified on-chain -", "head");
   const players = [];
   for (let i = 0; i < K; i++) {
     const p = zk.keygen(keyDomain(dealId, i));
@@ -77,7 +78,7 @@ async function playHand(withCheat) {
   const X = zk.aggregate(players.map((p) => p.X));
   log(`table key X = Σ pubkeys = ${shh(X)} (BN254 G1)`);
 
-  log("\n— each player shuffles + re-encrypts the deck —", "head");
+  log("\n- each player shuffles + re-encrypts the deck -", "head");
   let deck = zk.initialDeck(pts);
   const stages = [];
   for (let i = 0; i < K; i++) {
@@ -94,7 +95,7 @@ async function playHand(withCheat) {
     await sleep(150);
   }
 
-  log("\n— hole cards: shares proven (Chaum–Pedersen) & verified on-chain —", "head");
+  log("\n- hole cards: shares proven (Chaum–Pedersen) & verified on-chain -", "head");
   for (let i = 0; i < K; i++) {
     for (const [slot, idx] of [[0, 2 * i], [1, 2 * i + 1]]) {
       const ct = deck[idx];
@@ -118,7 +119,7 @@ async function playHand(withCheat) {
   }
   renderPlayers(states);
 
-  log("\n— board: public decryption (all shares) —", "head");
+  log("\n- board: public decryption (all shares) -", "head");
   const boardCards = [];
   for (let b = 0; b < 5; b++) {
     const ct = deck[2 * K + b];
@@ -128,15 +129,22 @@ async function playHand(withCheat) {
     await sleep(110);
   }
 
-  log("\n— shuffle audit: re-derive every stage —", "head");
+  log("\n- shuffle audit: re-derive every stage -", "head");
   const audit = zk.auditShuffles(pts, X, stages);
   if (audit.ok) {
-    log("every shuffle recomputes exactly — the hand was clean ✓", "ok");
-    log("(on a live table this same check runs on-chain via ZkDealerV2.checkStage)", "");
+    log("every shuffle recomputes exactly · the hand was clean ✓", "ok");
+    // The lab demonstrates the POST-HOC audit (open everything, recompute). A
+    // live table does not rely on it: each shuffle carries a Wikström zk proof
+    // that every client verifies before giving up a share, and the deal commits
+    // the transcript hash on-chain. Saying "checkStage runs on a live table"
+    // was simply untrue - ZkTableDealer has no such function.
+    log("(a live table proves each shuffle DURING the hand instead: a Wikström zk", "");
+    log(" argument every client verifies, with the transcript hash committed on-chain)", "");
   } else {
-    log(`AUDIT FAILED at player ${audit.cheater + 1}, ciphertext #${audit.card} — tampering attributed with certainty.`, "bad");
-    log(`on a live table ZkDealerV2.checkStage proves this on-chain → the cheat is slashed.`, "bad");
-    states[audit.cheater].know = "CAUGHT by the audit — escrow slashed";
+    log(`AUDIT FAILED at player ${audit.cheater + 1}, ciphertext #${audit.card} · tampering attributed with certainty.`, "bad");
+    log(`on a live table this deck never even reaches the felt: the Wikström proof for that`, "bad");
+    log(`stage fails, every client rejects it, and the hand is redealt without that seat.`, "bad");
+    states[audit.cheater].know = "CAUGHT by the audit · shuffle rejected";
     renderPlayers(states);
   }
   log("\ndone.", "head");

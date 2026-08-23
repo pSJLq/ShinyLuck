@@ -1,5 +1,5 @@
 /* =========================================================================
-   ShinyPoker — mobile layout (≤760px).
+   ShinyPoker · mobile layout (≤760px).
    Desktop is a fixed 1600×1000 stage scaled to fit; on phones the mountScale
    functions skip scaling entirely and this sheet reflows the app into a
    fluid column: compact top bar, full-width felt, the side rail as a
@@ -23,18 +23,39 @@
   .topbar .group .metapill:first-child, .topbar .group .metapill:nth-child(3) { display: none; }
   .metapill { height: 28px; padding: 0 8px; font-size: 10px; white-space: nowrap; }
   .metapill b, .metapill .k { white-space: nowrap; }
+  /* desktop gives the blinds 14px; a 28px pill on a phone takes 12px */
+  .metapill b { font-size: 12px; }
   .wallet { height: 30px; padding: 0 8px 0 7px; gap: 6px; }
   .wallet .net { display: none; }
   .iconbtn { width: 32px; height: 32px; flex-shrink: 0; }
 
-  /* ---- tournament HUD: swipeable strip ---- */
-  .trn-hud { top: 45px; flex-wrap: nowrap; overflow-x: auto; gap: 14px; padding: 6px 10px;
-    font-size: 11px; white-space: nowrap; scrollbar-width: none; }
-  .trn-hud::-webkit-scrollbar { display: none; }
+  /* The tournament strip is gone (see poker-live.css); its live facts are on
+     the header's sub-line now. On a phone that line has to stay one line: no
+     wrapping, and it may scroll sideways rather than push the felt down. */
+  .tableid { min-width: 0; }
+  .tableid .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
+  /* a tournament's line is longer (level, its clock, players left) and there
+     is room for it: the Top up button does not exist on a tournament table */
+  .app[data-trn="1"] .tableid .sub { font-size: 10px; letter-spacing: 0; max-width: 64vw; }
+  .app[data-trn="1"] .tableid .stakes b { font-size: 15px; }
+  .tabsw { display: none; } /* the MTT switcher: the event page does this better on a phone */
 
-  /* ---- table: full width; the side rail becomes a bottom sheet ---- */
+  /* ---- table: a PORTRAIT table, not a landscape one squeezed sideways ----
+     A phone is tall and a poker felt was wide, so the oval was drawn across
+     the top of the area while the seat ring used the WHOLE area: the bottom
+     three seats ended up floating on the black background BELOW the table.
+     Rotate the whole idea instead — a tall stadium down the middle of the
+     screen, seats on its rail, hero at the bottom. `--sp-side` is the one
+     number that has to agree with POS_M in poker-live-table.jsx: the side
+     seats sit exactly on those edges. */
   .mainrow { grid-template-columns: 1fr !important; }
-  .felt { inset: 42px 8px 224px; border-radius: 150px; }
+  .feltwrap { --sp-side: 15%; }
+  /* 999px, not a measured radius: the browser clamps an over-large radius to
+     the box, which on a TALL box gives a true stadium — half-circle top and
+     bottom, straight sides. An exact value left flat shoulders where the
+     rail's sheen (.felt::after, inset -16px, border-radius: inherit) did not
+     line up with the cloth. */
+  .felt { inset: 5% var(--sp-side) 20%; border-radius: 999px; }
   .siderail { position: fixed; left: 0; right: 0; bottom: 0; top: auto; height: 64dvh; z-index: 320;
     transform: translateY(112%); transition: transform .28s ease; border-left: 0;
     border-top: 1px solid var(--line-2); border-radius: 16px 16px 0 0;
@@ -49,8 +70,19 @@
   .avatar, [data-dir="b"] .seatcard .avatar { width: 30px; height: 30px; font-size: 11px; }
   .avatar .em, [data-dir="b"] .seatcard .avatar .em { font-size: 16px; }
   .seatinfo .nm { font-size: 9.5px; max-width: 88px; }
-  .seatinfo .stack { font-size: 12px; }
+  /* the stack still gets the "read this first" treatment, just within what a
+     102px seat card can hold — phones have no stage scaling to fall back on */
+  .seatinfo .stack { font-size: 13.5px; }
   .seatinfo .status { font-size: 8.5px; }
+  /* "Larger interface" on a phone: the desktop step (21px) would burst the
+     seat card, so it gets its own, tighter set. These must out-specify the
+     .app[data-bigui="1"] rules in styles.css, hence .app twice. */
+  .app.app[data-bigui="1"] .seatinfo .stack { font-size: 15.5px; }
+  .app.app[data-bigui="1"] .seatinfo .nm { font-size: 10.5px; max-width: 88px; }
+  .app.app[data-bigui="1"] .heroinfo .meta .stack { font-size: 19px; }
+  .app.app[data-bigui="1"] .metapill b { font-size: 13px; }
+  .app.app[data-bigui="1"] .metapill { height: 30px; }
+  .app.app[data-bigui="1"] .tableid .sub b { font-size: 12px; }
   .btnmark { width: 18px; height: 18px; font-size: 8.5px; }
   .board { gap: 4px; }
   .board .card, .board .slot { width: 42px; height: 60px; }
@@ -58,34 +90,102 @@
   .board .card .center-suit svg { width: 18px; height: 18px; }
   .pot .v { font-size: 15px; }
   .zkbadge { font-size: 8.5px; padding: 3px 8px; }
-  .hole .card { width: 52px; height: 74px; }
+  .hole .card { width: 48px; height: 68px; }
   .hole .card .rank { font-size: 15px; }
   .hole .card .center-suit svg { width: 22px; height: 22px; }
-  .herozone { bottom: 168px; gap: 5px; }
+  /* the hero sits just above the action bar (≈112px tall now), not behind it */
+  /* bar = 7+32+6+20+6+48+7 ≈ 126px, plus the safe area — the hero clears it */
+  /* the bar measures itself (poker-live-table.jsx) — 166px is only the
+     fallback for the beat before the first measurement lands */
+  .herozone { bottom: calc(var(--sp-barh, 158px) + 8px + env(safe-area-inset-bottom)); gap: 4px; }
+  /* …and its own bet sat exactly where its cards are on a narrow felt, so
+     the amount you just put in was hidden behind them. Lift the bottom
+     seat's chips clear; the other seats have room and keep their place. */
+  .betchips { transform: translate(-50%, -50%) !important; }
+  .feltwrap .betchips[style*="top: 76%"] { margin-top: -46px; }
   .heroinfo { padding: 5px 8px 5px 6px; gap: 8px; }
   .heroinfo .avatar { width: 30px; height: 30px; }
+  .heroinfo .meta .stack { font-size: 17px; } /* desktop 21px is too wide here */
   .winbanner { top: 58%; }
   .winbanner .hand { font-size: 19px; }
   .actchip { font-size: 9px; padding: 2px 8px; }
 
   /* ---- action bar: column, thumb-sized ---- */
-  .actionbar { right: 0 !important; flex-direction: column; align-items: stretch; gap: 8px;
-    padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .actionbar { right: 0 !important; flex-direction: column; align-items: stretch; gap: 6px;
+    padding: 7px 8px calc(7px + env(safe-area-inset-bottom)); }
   .helpers { flex-direction: row; }
   .helpers .helperchip { height: 26px; font-size: 9.5px; padding: 0 8px; }
   .betcontrols { max-width: none; }
-  .betinput { width: 104px; height: 34px; }
+  /* The sizing row ran off the right edge — "Best / Pot odds / 12s" was
+     clipped mid-word ("BE"). It wraps onto its own line instead: the
+     action clock lives in there, and a clock you cannot see is worse
+     than 16px of bar. */
+  .actrow.sizing { flex-wrap: wrap; }
+  .youhave { width: 100%; justify-content: flex-start; gap: 12px; font-size: 10px; margin-top: 2px; }
+  .youhave b { font-size: 11px; }
+  .betinput { width: 92px; height: 32px; }
   .timebank { position: absolute; right: 10px; top: -58px; }
-  .actions { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 8px; }
-  .abtn { min-width: 0; height: 56px; padding: 0 8px; }
+  /* FOUR buttons, one row. At three columns the All-in wrapped onto a line of
+     its own, and the bar grew to nearly half the screen — it covered the hero
+     panel and pushed the player's own cards up into the middle of the felt.
+     A phone has one thumb and four choices; they fit side by side. */
+  .actions { display: grid; grid-template-columns: 1fr 1fr 1.25fr .85fr; gap: 6px; }
+  .abtn { min-width: 0; height: 48px; padding: 0 6px; }
   .abtn .lbl { font-size: 11.5px; }
   .abtn .amt { font-size: 14px; }
   .abtn .key { display: none; }
-  .lt-toast { bottom: 200px; max-width: 94vw; font-size: 12px; }
+  .lt-toast { bottom: 150px; max-width: 94vw; font-size: 12px; }
+
+  /* ---- lobby header: 250px of chrome before the first table ---------------
+     Tabs, three stat blocks and two filter rows stacked up to a third of the
+     screen before a single table appeared. Same information, one thumb-width
+     tighter: the stats read as one line, and the two filter rows become one
+     that scrolls sideways (the same pattern the tab strip already uses). */
+  /* nowrap + scroll, NOT wrap: allowing it to wrap put "HANDS IN PLAY"
+     on a line of its own and made the header taller than before. */
+  .statstrip { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none;
+    gap: 0 14px; padding: 7px 10px; }
+  .statstrip::-webkit-scrollbar { display: none; }
+  .statstrip > * { flex-shrink: 0; }
+  .statstrip .stat { gap: 1px; }
+  .statstrip .k, .statstrip .filterlabel { font-size: 9px; letter-spacing: .06em; }
+  .statstrip .v, .statstrip b { font-size: 17px; }
+  .subbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    gap: 6px; padding: 7px 10px; }
+  .subbar::-webkit-scrollbar { display: none; }
+  .subbar > * { flex-shrink: 0; }
+  .lobbyhead { gap: 6px; padding: 8px 10px 0; }
+  .lobbytabs button { font-size: 13px; }
+
+  /* ---- cash tables: a LIST, not a gallery --------------------------------
+     Every table drew a 132px plan-view felt above its numbers, so one table
+     filled a third of the phone and choosing a stake meant scrolling past
+     pictures of tables that all look alike. Same markup, re-laid as a row:
+     the felt shrinks to a thumbnail on the left (its only job here is "how
+     full is it", which the seat dots say), and the things you actually choose
+     by — blinds, size, rake, the button — stack beside it. Two and a half
+     tables per screen became five. */
+  .tcard { display: grid !important; grid-template-columns: 92px minmax(0, 1fr);
+    grid-template-areas: "felt top" "felt bottom"; align-items: center;
+    gap: 3px 11px; padding: 10px 12px; margin-bottom: 9px; }
+  .tcard .tc-top { grid-area: top; }
+  .tcard .tc-felt { grid-area: felt; width: 92px; height: 58px; margin: 0; align-self: center; }
+  .tcard .tc-bottom { grid-area: bottom; }
+  /* "OPEN TABLE" does not fit in a 92px felt and is not news — an empty table
+     is one with no lit seat dots. The live pot moves up to the header row. */
+  .tcard .tc-center { display: none; }
+  .tcard .tc-stakes { font-size: 19px; }
+  .tcard .tc-seat { transform: scale(.8); }
+
+  /* ---- the hero panel must not be clipped by the action bar ---- */
+  .herozone .heroinfo { padding-bottom: 7px; }
+
+  /* the house mark bled out from under the pot on a narrow felt */
+  .feltmark { opacity: .5; transform: translate(-50%, -50%) scale(.7); }
 
   /* ---- lobby: rows become wrapped cards ---- */
   /* the .lobby grid's implicit column sizes to the widest item's MIN-CONTENT
-     (the tab strip ≈ 530px) and every section stretches to it — clamp the
+     (the tab strip ≈ 530px) and every section stretches to it · clamp the
      track to the viewport instead; the tab strip already scrolls */
   .lobby { grid-template-columns: minmax(0, 1fr); }
   .lobby > * { min-width: 0; }
@@ -98,18 +198,32 @@
   .statstrip { flex-wrap: wrap; gap: 8px 14px; }
   .subbar { flex-wrap: wrap; gap: 8px; padding: 8px 10px; height: auto; }
   .dthead { display: none !important; }
-  .drow, .sngrow { display: flex !important; flex-wrap: wrap; align-items: center;
-    gap: 6px 14px; padding: 12px 10px; }
-  .drow .rowactions, .sngrow .rowactions { width: 100%; justify-content: flex-end; }
+  /* A row is a CARD on a phone, not a wrapped line. The old rule let the six
+     cells reflow wherever they fitted, so "no entries yet" ended up beside the
+     buy-in and the seat count landed under the payout split — the same data,
+     in a different order on every row. Stacked and left-aligned, each row
+     reads top to bottom: who, what it costs, what it pays, what you can do.
+     (`display: flex` also makes the JSX's inline grid-template-columns inert,
+     which is why it does not need !important on six tracks.) */
+  .drow, .sngrow { display: flex !important; flex-direction: column; flex-wrap: nowrap;
+    align-items: stretch; text-align: left; gap: 7px; padding: 14px 12px;
+    border-left: 0; border-bottom: 1px solid var(--line-2); }
+  .drow .buyincell, .drow .prizecell { flex-direction: row; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+  .drow .regcell { text-align: left; }
+  .drow .regcell .u { display: inline; margin-left: 7px; }
+  .drow .rowactions, .sngrow .rowactions { width: 100%; justify-content: flex-start; gap: 8px; }
+  .drow .rowactions .btn-sm { flex: 1; text-align: center; }
   .sngsplit { grid-template-columns: 1fr; }
   .lt-modal { width: min(440px, 96vw); max-height: 88dvh; overflow-y: auto; }
 }
 
-/* desktop: the mobile-only controls stay hidden */
-.railfab { display: none; position: absolute; right: 10px; bottom: 236px; z-index: 40; width: 46px; height: 46px;
-  border-radius: 50%; place-items: center; border: 1px solid var(--accent-32, rgba(217,171,74,.32));
-  background: rgba(16, 14, 8, .94); color: var(--accent-soft, #f2d78a); cursor: pointer;
+/* the chat-drawer opener shows on EVERY size now (the rail is a drawer
+   everywhere since the event-week layout round; this sheet loads after
+   poker-live.css, so the display must be set here) */
+.railfab { display: grid; position: absolute; right: 10px; bottom: 236px; z-index: 40; width: 46px; height: 46px;
+  border-radius: 50%; place-items: center; border: 1px solid var(--accent-32, rgba(217,185,112,.32));
+  background: rgba(16, 14, 8, .94); color: var(--accent-soft, #F4DD9E); cursor: pointer;
   box-shadow: 0 8px 26px rgba(0, 0, 0, .5); }
 .railfab svg { width: 21px; height: 21px; }
 .railclose { display: none; width: 30px; height: 30px; place-items: center; background: transparent;
-  border: 0; color: var(--muted, #9a9aa8); font-size: 16px; cursor: pointer; }
+  border: 0; color: var(--muted, #8F8C85); font-size: 16px; cursor: pointer; }

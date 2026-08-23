@@ -33,11 +33,32 @@ import { ethers } from "/vendor/ethers.bundle.js";
 // `CLUSTER_PAY_BOOST_X100 = 320` means cluster payouts are scaled 3.20× on
 // chain after the ClusterLib resolver returns its basis-100 figure.
 // ----------------------------------------------------------------------------
-// Monte-Carlo'd to land total RTP at ~92% (was 320 → 89.21%, now 332 → 92.01%).
-// Must match Casino.sol's CLUSTER_PAY_BOOST_X100 exactly - every redeploy
-// bump both in lockstep so the JS replay matches chain payouts to the wei.
-const CLUSTER_PAY_BOOST_X100 = 332n;
-const VAULT_PAY_BOOST_X100   = 560n;
+// These MUST equal the modules' on-chain `payBoostX100`, or every per-symbol
+// figure this file renders is wrong while the spin total (read from chain)
+// stays right — a silent mismatch nobody notices.
+//
+// They drifted exactly that way once: the contracts ship 560/332 as defaults,
+// prod was retuned to 589/340 with setPayBoost, and these constants stayed put,
+// understating every SUGAR.LAB label by ~2.4% and every VAULT.7 label by ~5.2%.
+// So they are no longer constants: `syncPayBoosts()` pulls the live values and
+// the numbers below are only the cold-start default (current prod values).
+let CLUSTER_PAY_BOOST_X100 = 340n;
+let VAULT_PAY_BOOST_X100   = 589n;
+
+/// Pull the real boosts off chain. Best-effort: a failed read leaves the
+/// defaults in place rather than blocking the page.
+export async function syncPayBoosts(SL) {
+  try {
+    const [v7, cl] = await Promise.all([
+      SL.slotModule("vault7").payBoostX100(),
+      SL.slotModule("cluster").payBoostX100(),
+    ]);
+    if (v7 > 0n) VAULT_PAY_BOOST_X100 = BigInt(v7);
+    if (cl > 0n) CLUSTER_PAY_BOOST_X100 = BigInt(cl);
+  } catch (e) {
+    console.warn("[slots] pay-boost sync failed, using defaults:", e.shortMessage || e.message);
+  }
+}
 const VAULT7_FREE_SPIN_MULT_X100 = 200n;
 
 // ----------------------------------------------------------------------------

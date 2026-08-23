@@ -60,8 +60,8 @@ describe("PokerTournament — buy-in + sponsored pool, custom split", function (
     await trn.connect(bob).register(id, { value: E(11) });
 
     let info = await trn.info(id);
-    expect(info.pool).to.equal(E(120)); // 100 sponsored + 10 + 10
-    expect(await trn.feeCollected()).to.equal(E(2));
+    expect(info.pool).to.equal(E(110)); // 90% of 100 sponsored (10% fee) + 10 + 10 buy-ins
+    expect(await trn.feeCollected()).to.equal(E(12)); // 10 sponsor fee + 2 buy-in fees
     expect(info.registered).to.equal(2);
 
     // start → controlled table created, both seated with 1000 chips
@@ -89,9 +89,13 @@ describe("PokerTournament — buy-in + sponsored pool, custom split", function (
 
     // report bob's bust → he's 2nd (no payout), alice wins the whole pool
     const tx = await trn.connect(operator).reportBust(id, 0, 1);
-    await expect(tx).to.emit(trn, "Finished").withArgs(id, alice.address, E(120));
-    expect(await room.balance(alice.address)).to.equal(E(120)); // prize credited to in-room balance
+    await expect(tx).to.emit(trn, "Finished").withArgs(id, alice.address, E(110));
+    expect(await room.balance(alice.address)).to.equal(E(110)); // prize credited to in-room balance
     expect((await trn.info(id)).status).to.equal(2); // FINISHED
+    // the WINNER's seat is freed too — no ghost seat on the dead table that
+    // "already playing elsewhere" checks would trip over forever
+    expect((await room.getSeat(t, 0)).occupied).to.equal(false);
+    expect(Number(await room.seatOf(t, alice.address))).to.equal(255);
   });
 
   it("host reward: creator's hostBps cut is paid at the finish, prizes come from the net pool", async function () {
@@ -158,14 +162,25 @@ describe("PokerTournament — buy-in + sponsored pool, custom split", function (
     expect((await trn.info(0)).status).to.equal(3); // CANCELLED
   });
 
-  it("free fully-sponsored event: buyIn 0, creator funds the whole prize", async function () {
+  it("free fully-sponsored event: buyIn 0, creator funds the prize, 10% platform fee", async function () {
     const { alice, bob, carol, trn } = await loadFixture(setup);
     await trn.connect(carol).createTournament(tp({ buyIn: 0, fee: 0, payoutBps: [10000] }), { value: E(40) });
     await trn.connect(alice).register(0, { value: 0 }); // free entry
     await trn.connect(bob).register(0, { value: 0 });
     const info = await trn.info(0);
-    expect(info.pool).to.equal(E(40)); // entirely the sponsor's
+    expect(info.pool).to.equal(E(36)); // 90% of the sponsorship — the flat 10% fee applies
+    expect(await trn.feeCollected()).to.equal(E(4)); // 10% platform fee
     expect(info.registered).to.equal(2);
+  });
+
+  it("sponsored cancel: creator gets the FULL sponsorship back and the fee is reversed", async function () {
+    const { owner, carol, trn } = await loadFixture(setup);
+    await trn.connect(carol).createTournament(tp({ buyIn: 0, fee: 0, payoutBps: [10000] }), { value: E(40) });
+    expect(await trn.feeCollected()).to.equal(E(4));
+    const before = await ethers.provider.getBalance(carol.address);
+    await trn.connect(owner).cancel(0); // owner cancels → no gas cost to carol
+    expect((await ethers.provider.getBalance(carol.address)) - before).to.equal(E(40)); // full gross refund
+    expect(await trn.feeCollected()).to.equal(0); // fee reversed — nothing earned on an event that never ran
   });
 
   it("scheduled start: operator must wait for startTime; can start after", async function () {
@@ -341,5 +356,75 @@ describe("PokerTournament — buy-in + sponsored pool, custom split", function (
     const { alice, trn } = await loadFixture(setup);
     const bad = [{ sb: 100, bb: 20, ante: 0, durationSecs: 60 }];
     await expect(trn.connect(alice).createTournament(tp({ buyIn: E(1), structure: bad }))).to.be.revertedWithCustomError(trn, "BadParams");
+  });
+
+  it("idle forfeit: an abandoned (sat-out) stack can no longer freeze the event — and sitting back in cancels the countdown", async function () {
+    const { operator, alice, bob, carol, room, trn } = await loadFixture(setup);
+    await trn.connect(carol).createTournament(tp({ buyIn: E(10), maxPlayers: 3, payoutBps: [10000] }));
+    for (const pl of [alice, bob, carol]) await trn.connect(pl).register(0, { value: E(10) });
+    await trn.connect(operator).start(0);
+    const t = Number((await trn.info(0)).tableId);
+    const seatOf = async (pl) => Number(await room.seatOf(t, pl.address));
+
+    // bob's tab dies → the zk strike path sits him out (operator = dealer op)
+    await room.connect(operator).sitOutIdle(t, await seatOf(bob));
+    // too early — the reconnect window is his
+    await expect(trn.connect(operator).forfeitIdle(0, 0, await seatOf(bob)))
+      .to.be.revertedWithCustomError(trn, "NotIdleLongEnough");
+
+    // alice also gets struck, but SITS BACK IN — her countdown is cancelled
+    await room.connect(operator).sitOutIdle(t, await seatOf(alice));
+    await time.increase(200);
+    await room.connect(alice).setSitOut(t, false);
+    await time.increase(200); // bob is now 400s idle, alice only "in"
+    await expect(trn.connect(operator).forfeitIdle(0, 0, await seatOf(alice)))
+      .to.be.revertedWithCustomError(trn, "NotIdleLongEnough");
+
+    // bob's window elapsed → forfeited at his CURRENT place (3rd of 3)
+    await expect(trn.connect(operator).forfeitIdle(0, 0, await seatOf(bob)))
+      .to.emit(trn, "ForfeitedIdle").withArgs(0, bob.address, 3);
+    expect(Number((await trn.info(0)).remaining)).to.equal(2);
+    // same seat can't be forfeited twice
+    await expect(trn.connect(operator).forfeitIdle(0, 0, 1)).to.be.revertedWithCustomError(trn, "NotBusted");
+
+    // carol abandons too → her forfeit ENDS the event, alice takes the pool
+    await room.connect(operator).sitOutIdle(t, await seatOf(carol));
+    await time.increase(301);
+    const tx = trn.connect(operator).forfeitIdle(0, 0, await seatOf(carol));
+    await expect(tx).to.emit(trn, "Finished").withArgs(0, alice.address, E(30));
+    expect(await room.balance(alice.address)).to.equal(E(30));
+    expect((await trn.info(0)).status).to.equal(2); // FINISHED — no eternal stall
+  });
+
+  it("idle forfeit: owner tunes the window, hair-trigger values are rejected", async function () {
+    const { owner, trn } = await loadFixture(setup);
+    await expect(trn.connect(owner).setIdleForfeitSecs(30)).to.be.revertedWithCustomError(trn, "BadParams");
+    await trn.connect(owner).setIdleForfeitSecs(120);
+    expect(Number(await trn.idleForfeitSecs())).to.equal(120);
+  });
+
+  it("blind cap: geometric escalation saturates at 2× the chips in play and dueForLevelUp goes quiet", async function () {
+    const { operator, alice, bob, room, trn } = await loadFixture(setup);
+    // 2 players × 1000 chips → cap = 4000; ×2 growth from 10/20
+    await trn.connect(alice).createTournament(tp({ buyIn: E(1) }));
+    await trn.connect(alice).register(0, { value: E(1) });
+    await trn.connect(bob).register(0, { value: E(1) });
+    await trn.connect(operator).start(0);
+    const t = Number((await trn.info(0)).tableId);
+
+    for (let i = 0; i < 30; i++) {
+      if (!(await trn.dueForLevelUp(0))) {
+        const cfg = await room.getTable(t);
+        if (cfg.bigBlind >= 4000n) break; // capped — the driver stops being told to level
+        await time.increase(61);
+        continue;
+      }
+      await trn.connect(operator).levelUp(0);
+    }
+    const cfg = await room.getTable(t);
+    expect(cfg.bigBlind).to.equal(4000n);      // saturated exactly at the cap
+    expect(cfg.smallBlind).to.be.lte(4000n);   // never above bb, no overflow
+    await time.increase(3600);
+    expect(await trn.dueForLevelUp(0)).to.equal(false); // stays quiet forever
   });
 });

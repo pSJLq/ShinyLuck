@@ -4,8 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Admin · ShinyLuck</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/v2.css">
 <script src="lib/console-filter.js"></script>
 <script src="partials.js" defer></script>
 <script src="vendor/privy.bundle.js"></script>
@@ -16,7 +18,7 @@
   .adm { padding: 56px 32px 96px; max-width: 1360px; margin: 0 auto; display:none; }
   .adm.on { display:block; }
   .adm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
-  .adm-card { background: var(--bg-1); border: 1px solid var(--line); padding: 24px; }
+  .adm-card { background: var(--panel); border: 1px solid var(--line-2); border-radius: 16px; padding: 24px; }
   .adm-card h3 { margin: 0 0 16px; font-size: 11px; letter-spacing: 2px; color: var(--cyan); text-transform: uppercase; font-weight: 400; }
   .adm-row { display:flex; justify-content: space-between; align-items:center; padding: 8px 0; border-bottom: 1px dashed var(--line-2); font-size: 12px; font-family: var(--mono); }
   .adm-row:last-child { border-bottom: none; }
@@ -30,7 +32,7 @@
   .adm-btn:hover:not(:disabled) { background: rgba(34,211,238,.06); border-color: var(--cyan); color: var(--cyan); }
   .adm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .adm-btn.danger { border-color: var(--red); color: var(--red); }
-  .adm-input { background: rgba(0,0,0,0.2); border: 1px solid var(--line); color: var(--fg); padding: 6px 10px; font-family: var(--mono); font-size: 12px; width: 100px; }
+  .adm-input { background: var(--panel-3); border: 1px solid var(--bd-2); border-radius: 8px; color: var(--fg); padding: 7px 10px; font-family: var(--mono); font-size: 12px; width: 110px; }
   .adm-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .adm-game-row { display: grid; grid-template-columns: 80px 80px 100px 1fr; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--line-2); font-size: 12px; font-family: var(--mono); }
   .adm-game-row:last-child { border-bottom: none; }
@@ -44,16 +46,21 @@
   .denied a { color: var(--cyan); }
   @media (max-width: 1000px) { .adm-grid { grid-template-columns: 1fr; } }
 </style>
+  <script type="module" src="/lib/i18n.js"></script>
 </head>
 <body data-active-page="admin">
 <div data-page-shell>
 <div data-mount="nav"></div>
 
+<div style="display:flex;align-items:flex-start">
+  <div data-mount="side"></div>
+  <main data-r-padb-m style="flex:1;min-width:0">
+
 <!-- Access-denied screen, shown until the connected wallet === casino.owner() -->
 <div data-sl-adm-denied class="denied">
   <h2>ACCESS DENIED</h2>
   <p>This page is only available to the casino owner. Connect with the owning wallet, or<br/>
-     <a href="SomniaLuck.html" data-link>return to the home page →</a></p>
+     <a href="/" data-link>return to the home page →</a></p>
   <p style="margin-top:32px; font-size:11px; color: var(--fg-dim); letter-spacing: 2px;">
     OWNER ADDRESS: <b data-sl-adm-owner style="color:var(--cyan);">-</b><br/>
     CONNECTED: <b data-sl-adm-connected style="color:var(--amber);">-</b>
@@ -63,7 +70,7 @@
 
 <div data-sl-adm-main class="adm">
   <div class="crumb">
-    <a href="SomniaLuck.html" data-link>ShinyLuck</a><span class="sep">/</span><span class="here">Admin</span>
+    <a href="/" data-link>ShinyLuck</a><span class="sep">/</span><span class="here">Admin</span>
   </div>
 
   <h1 style="font-size: 36px; margin: 0 0 32px; letter-spacing: -1px;">Admin <span class="accent">panel</span>.</h1>
@@ -100,6 +107,59 @@
       </div>
       <div class="adm-row" style="border-bottom:none;">
         <button class="adm-btn" data-sl-adm-deposit>Deposit</button>
+      </div>
+    </div>
+
+    <div class="adm-card">
+      <h3>Poker treasury · rake &amp; tournament fees</h3>
+      <div class="adm-row"><span class="l">Rake collected</span><span class="v cyan"><span data-sl-adm-rake>-</span> STT</span></div>
+      <div class="adm-row"><span class="l">Tournament fees</span><span class="v cyan"><span data-sl-adm-trnfees>-</span> STT</span></div>
+      <div class="adm-row"><span class="l">Send to</span>
+        <span style="flex:1"><input class="adm-input" style="width:100%" type="text" placeholder="0x… (blank = connected wallet)" data-sl-adm-poker-to /></span>
+      </div>
+      <div class="adm-row" style="border-bottom:none;">
+        <button class="adm-btn" data-sl-adm-rake-withdraw>Withdraw all rake</button>
+        <button class="adm-btn" data-sl-adm-trnfees-withdraw>Withdraw all fees</button>
+      </div>
+      <div class="m" style="opacity:.5; margin-top:10px; font-size:11px; line-height:1.5;">These are owned by the POKER deployer key · connect that account to use them. Casino profit above uses the casino deployer key.</div>
+    </div>
+
+    <div class="adm-card">
+      <h3>Predictions · revenue</h3>
+      <div class="adm-row"><span class="l">Platform accrued</span><span class="v cyan"><span data-sl-adm-pred-accrued>-</span> STT</span></div>
+      <div class="adm-row"><span class="l">Fee model</span><span class="v" data-sl-adm-pred-fees>-</span></div>
+      <div class="adm-row"><span class="l">Your pending (creator fees + bonds)</span><span class="v"><span data-sl-adm-pred-pending>-</span> STT</span></div>
+      <div class="adm-row"><span class="l">Markets created</span><span class="v" data-sl-adm-pred-markets>-</span></div>
+      <div class="adm-row">
+        <span class="l">Withdraw to</span>
+        <span style="flex:1"><input class="adm-input" style="width:100%" type="text" placeholder="0x… (blank = connected wallet)" data-sl-adm-pred-to /></span>
+      </div>
+      <div class="adm-row" style="border-bottom:none;">
+        <button class="adm-btn" data-sl-adm-pred-withdraw>Withdraw platform fees</button>
+        <button class="adm-btn" data-sl-adm-pred-claim>Claim creator fees + bonds</button>
+      </div>
+      <div class="m" style="opacity:.5; margin-top:10px; font-size:11px; line-height:1.5;">
+        Fees are carved from the LOSING pool only, so a winning bettor never receives less than their stake.
+        Owned by the PREDICTIONS deployer key · connect that account to withdraw.
+      </div>
+    </div>
+
+    <div class="adm-card">
+      <h3>Predictions · market creators</h3>
+      <div class="adm-row"><span class="l">Curated mode</span><span class="v amber" data-sl-adm-pred-curated>-</span></div>
+      <div class="adm-row">
+        <span class="l">Address</span>
+        <span style="flex:1"><input class="adm-input" style="width:100%" type="text" placeholder="0x…" data-sl-adm-pred-creator /></span>
+      </div>
+      <div class="adm-row">
+        <button class="adm-btn" data-sl-adm-pred-add>Allow creator</button>
+        <button class="adm-btn" data-sl-adm-pred-check>Check status</button>
+        <button class="adm-btn" data-sl-adm-pred-curated-toggle>-</button>
+      </div>
+      <div data-sl-adm-pred-creators style="margin-top:6px"></div>
+      <div class="m" style="opacity:.5; margin-top:10px; font-size:11px; line-height:1.5;">
+        With curated mode ON only the owner and whitelisted wallets can open markets. Each row shows the LIVE
+        on-chain flag; the address list itself is kept in this browser (the contract exposes no enumeration).
       </div>
     </div>
 
@@ -156,6 +216,47 @@
     </div>
 
     <div class="adm-card" style="grid-column: span 2;">
+      <h3>InfoFi · tracked accounts</h3>
+      <div class="adm-row">
+        <span class="l">List</span>
+        <span style="flex:1">
+          <button class="adm-btn" data-sl-adm-if-list="projects">Projects</button>
+          <button class="adm-btn" data-sl-adm-if-list="voices">Voices</button>
+          <button class="adm-btn" data-sl-adm-if-list="tags">Context tags</button>
+        </span>
+      </div>
+      <div class="adm-row">
+        <span class="l">Handle</span>
+        <span style="flex:1"><input class="adm-input" style="width:100%" type="text" placeholder="somnia_network (no @)" data-sl-adm-if-handle /></span>
+      </div>
+      <div class="adm-row">
+        <button class="adm-btn" data-sl-adm-if-add>Add to list</button>
+        <button class="adm-btn danger" data-sl-adm-if-remove>Remove from list</button>
+        <span class="v" data-sl-adm-if-status style="margin-left:10px"></span>
+      </div>
+      <div data-sl-adm-if-rows style="margin-top:8px"></div>
+      <div class="adm-row" style="margin-top:12px">
+        <span class="l">Snapshot</span>
+        <span class="v" data-sl-adm-if-snapshot>-</span>
+      </div>
+      <div class="adm-row" style="border-bottom:none">
+        <button class="adm-btn" data-sl-adm-if-collect>Collect now</button>
+        <span class="v" data-sl-adm-if-run style="margin-left:10px"></span>
+      </div>
+      <div class="m" style="opacity:.5; margin-top:10px; font-size:11px; line-height:1.5;">
+        Drives the mindshare board. <b>Projects</b> are measured on all of their own posts; <b>voices</b> only on
+        activity that mentions a <b>context tag</b>, so a tag change re-scopes every voice. Writes are signed with
+        your wallet and accepted from any of the three project owner keys · no transaction, no gas.
+        <br/>A collection runs nightly at 04:17 UTC and picks up whatever the lists say then. <b>Collect now</b>
+        runs the same job immediately: it walks every tracked timeline on X, which takes <b>about 20 minutes</b>
+        with healthy scraper accounts. It can take far longer, or stall outright, when X rate-limits or bans one ·
+        the elapsed counter is how you tell the difference, and a run is stopped after 10 hours so a wedged one
+        cannot block the next night. Close the page if you like, it keeps going. Avatars are mirrored during the
+        run, so a newly added account gets its picture as part of it.
+      </div>
+    </div>
+
+    <div class="adm-card" style="grid-column: span 2;">
       <h3>Stats · per-game wagered / paid / margin</h3>
       <table class="adm-table">
         <thead><tr><th>Game</th><th>Bets</th><th>Wagered</th><th>Paid out</th><th>House margin</th></tr></thead>
@@ -166,7 +267,9 @@
   </div>
 </div>
 
-<div data-mount="footer"></div>
+  <div data-mount="footer"></div>
+  </main>
+</div>
 </div>
 </body>
 </html>

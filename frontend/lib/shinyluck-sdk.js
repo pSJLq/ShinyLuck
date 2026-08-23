@@ -19,15 +19,14 @@ export const CHAINS = {
     chainId: 50312,
     chainName: "Somnia Testnet (Shannon)",
     nativeCurrency: { name: "STT", symbol: "STT", decimals: 18 },
-    // Canonical Somnia infra endpoints (matches emrestay's reactivity
-    // examples + somnia-devrel SKILL.md). `dream-rpc.somnia.network` is
-    // the public RPC - works for tx submission but WS subs there
-    // occasionally drop silently. `api.infra.testnet.somnia.network` is
-    // the validator infra endpoint maintained by the Somnia team, used
-    // by every first-party example. Order matters - list canonical
-    // first, public second as fallback.
-    rpcUrls: ["https://api.infra.testnet.somnia.network", "https://dream-rpc.somnia.network"],
-    wsUrls: ["wss://api.infra.testnet.somnia.network/ws", "wss://dream-rpc.somnia.network/ws"],
+    // First entry = OUR proxy (shinyluck.win/rpc → rpc-proxy.js on the VPS):
+    // it retries/fails over across the canonical Somnia gateways + Ankr, so
+    // browsers never see the gateway's 502 waves and VPN users blocked by
+    // Somnia's LB still reach the chain through the site's own origin.
+    // Direct endpoints stay listed after it as manual fallbacks (canonical
+    // api.infra first, public dream-rpc second — see docs.somnia.network).
+    rpcUrls: ["https://shinyluck.win/rpc", "https://api.infra.testnet.somnia.network", "https://dream-rpc.somnia.network"],
+    wsUrls: ["wss://shinyluck.win/rpc/ws", "wss://api.infra.testnet.somnia.network/ws", "wss://dream-rpc.somnia.network/ws"],
     blockExplorerUrls: ["https://shannon-explorer.somnia.network"],
   },
   somniaMainnet: {
@@ -59,6 +58,13 @@ const CASINO_ABI = [
   "function buyBonusVault7(bytes32 clientSeed) payable returns (uint256)",
   "function claimChargeReward() external",
   "function getChargeMeter(address) view returns (uint256 current, uint256 threshold, uint256 pendingReward, uint8 cycle)",
+  // Live RTP display. Missing from this ABI for a while - both slot pages
+  // call SL.casino.getReportedRTP() in their refreshRtp(), which threw
+  // "not a function" into a silent catch: VAULT.7 was rescued by
+  // livedata.js (its own ABI has the method and its selector matches that
+  // page), SUGAR.LAB just showed the baked-in 92% placeholder forever.
+  "function getReportedRTP(uint8) view returns (uint16)",
+  "event RtpAdjusted(uint8 indexed game, uint16 oldRtpBps, uint16 newRtpBps, string reasoning)",
   "event BuyBonusPlaced(uint256 indexed betId, address indexed player, uint8 game, uint256 totalStake, uint256 unitStake)",
   "event ChargeMeterBumped(address indexed player, uint256 newCharge, uint256 threshold)",
   "event ChargeMeterTriggered(address indexed player, uint8 rewardId, uint256 amount, uint8 cycle)",
@@ -69,9 +75,17 @@ const CASINO_ABI = [
   "function placeMinesBet(uint8 mineCount, bytes32 clientSeed) payable returns (uint256)",
   "function placeplinkoBet(uint8 risk, bytes32 clientSeed) payable returns (uint256)",
   "function revealAndSettle(uint256 betId, bytes32 serverSeed) external",
-  "function revealMinesSeed(uint256 betId, bytes32 serverSeed) external",
-  "function openMinesCell(uint256 betId, uint8 cellIdx) external",
+  // Mines v14 (hidden layout): player picks a cell (cheap intent), the
+  // coordinator resolves it; the layout root is committed off the player's path.
+  "function pickMinesCell(uint256 betId, uint8 cellIdx) external",
+  "function cancelMinesPick(uint256 betId) external",
   "function cashoutMines(uint256 betId) external",
+  "function minesState(uint256) view returns (uint8 mineCount,uint32 openedBitmap,bool busted,bool finalized,uint8 pendingCell,uint64 pickBlock,bytes32 layoutRoot,bytes32 entropyHash)",
+  "event MinesCellPicked(uint256 indexed betId, uint8 cellIdx)",
+  "event MinesCellOpened(uint256 indexed betId, uint8 cellIdx, uint32 openedBitmap, uint256 multiplierX100)",
+  "event MinesBust(uint256 indexed betId, uint8 cellIdx)",
+  "event MinesCashout(uint256 indexed betId, uint8 cellsOpened, uint256 payout, uint256 multiplierX100)",
+  "event MinesRootCommitted(uint256 indexed betId, bytes32 root)",
   "function refundExpired(uint256 betId) external",
   // round-based Crash
   "function startCrashRound() external",
@@ -109,7 +123,8 @@ const CASINO_ABI = [
   "function bonusModeUntil() view returns (uint256)",
   "function houseEdgeBps(uint8) view returns (uint256)",
   "function seedPoolStatus() view returns (uint256,uint256,uint256)",
-  "function minesState(uint256) view returns (uint8 mineCount,uint32 openedBitmap,uint32 minesBitmap,bool seedRevealed,bool busted)",
+  // (v14 minesState is defined once above — the stale v1 duplicate that used to
+  //  live here made the fragment ambiguous and could win with a wrong decode.)
   // events - per-bet
   "event BetPlaced(uint256 indexed betId,address indexed player,uint8 indexed game,uint256 amount,bytes32 clientSeed,uint256 commitBlock,uint256 seedIdx,bytes params)",
   "event BetSettled(uint256 indexed betId,address indexed player,uint8 indexed game,bool won,uint256 payout,bytes32 randomness,bytes32 serverSeed,bytes32 clientSeed,bytes32 blockHash,uint256 nonce,bytes resultData)",
@@ -445,6 +460,21 @@ export class ShinyLuck {
   async placeMines(mineCount, valueStr) {
     const cs = this.randomClientSeed();
     return await this._placeWithRace(this.casino.placeMinesBet, [mineCount, cs], cs, ethers.parseEther(String(valueStr)));
+  }
+
+  /// @notice Commit to opening a cell (v14 hidden layout). Cheap, proof-less;
+  ///         the coordinator resolves it into a safe/bust via MinesCellOpened/
+  ///         MinesBust. Fire-and-forget like a poker action.
+  async pickMines(betId, cellIdx) {
+    const tx = await this.casino.pickMinesCell(betId, cellIdx);
+    return await tx.wait();
+  }
+
+  /// @notice Void a bet whose pick the coordinator failed to resolve in time
+  ///         (full stake refund). Only succeeds after MINES_PICK_TIMEOUT blocks.
+  async cancelMinesPick(betId) {
+    const tx = await this.casino.cancelMinesPick(betId);
+    return await tx.wait();
   }
 
   async placePlinko(risk, valueStr) {

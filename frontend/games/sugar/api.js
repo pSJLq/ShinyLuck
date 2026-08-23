@@ -113,7 +113,17 @@ export class SugarSlot {
       const el = c.querySelector('[data-fair-nonce]');
       if (el) el.textContent = String(fairData.betId);
     }
-    if (fairData.txHash) {
+    // Verify goes to OUR fair page pinned to this exact bet - it re-derives
+    // the roll in the browser and links every receipt; the raw explorer tx is
+    // reachable from there. New tab so the game session is not torn down.
+    if (fairData.betId != null) {
+      const el = c.querySelector('[data-fair-explorer]');
+      if (el) {
+        el.href = `/fair?betId=${fairData.betId}`;
+        el.textContent = 'verify this spin \u2197';
+        el.style.display = 'block';
+      }
+    } else if (fairData.txHash) {
       const el = c.querySelector('[data-fair-explorer]');
       if (el) {
         el.href = `https://shannon-explorer.somnia.network/tx/${fairData.txHash}`;
@@ -336,7 +346,7 @@ export class SugarSlot {
       <p class="lede">7×7 cluster cascade with sticky multiplier orbs and a hidden-threshold Vault Charge meter. Honest payouts - every spin's seed is published from the contract.</p>
     </div>
     <div class="hero-meta">
-      <div class="m">RTP<b class="cyan" data-sl-cluster-rtp>92.00%</b></div>
+      <div class="m">RTP<b class="cyan" data-sl-cluster-rtp data-sl="rtp" data-game="cluster">…</b></div>
       <div class="m">Volatility<b class="pink">VERY HIGH</b></div>
       <div class="m">Max Win<b class="gold">25,000×</b></div>
       <div class="m">Mechanic<b class="purple">CLUSTER + TUMBLE</b></div>
@@ -345,26 +355,6 @@ export class SugarSlot {
 
   <div class="cl-layout">
     <div class="cab">
-      <div class="marquee">
-        <div class="badge">★ FEATURED</div>
-        <div class="scroll">
-          <div class="track" data-marquee-track>
-            <span class="item">RTP <b data-sl-cluster-rtp>92%</b> · LLM agent live-adjusted hourly · published on-chain</span>
-            <span class="item">Every bet verifiable · <b>Shannon Explorer</b> · finality ~1s</span>
-            <span class="item">Vault Charge - hidden threshold · cycle resets each prize</span>
-            <span class="item">All seeds verifiable post-spin</span>
-            <span class="item">RTP <b data-sl-cluster-rtp>92%</b> · LLM agent live-adjusted hourly · published on-chain</span>
-            <span class="item">Every bet verifiable · <b>Shannon Explorer</b> · finality ~1s</span>
-            <span class="item">Vault Charge - hidden threshold · cycle resets each prize</span>
-            <span class="item">All seeds verifiable post-spin</span>
-          </div>
-        </div>
-        <div class="jp" style="display:none">
-          <span class="lbl">CASINO JACKPOT</span>
-          <span class="v" data-jp>$0.00</span>
-        </div>
-      </div>
-
       <div class="charge-rail">
         <div class="ico">⚡</div>
         <div class="col">
@@ -421,7 +411,7 @@ export class SugarSlot {
           <div class="lbl">BALANCE</div>
           <div class="balance"><span class="cur">STT</span><span data-balance>1,000.00</span></div>
           <div class="last-win zero" data-last-win>- no win yet</div>
-          <div class="ev-note" data-ev-note><span data-sl-cluster-rtp>92.00%</span> RTP - autonomously adjusted by LLM agent</div>
+          <div class="ev-note" data-ev-note><span data-sl-cluster-rtp>96.44%</span> RTP - the real payout ratio, published on-chain</div>
         </div>
       </div>
     </div>

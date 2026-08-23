@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>InfoFi · ShinyLuck</title>
+<link rel="icon" href="/favicon.ico" />
+<link rel="stylesheet" href="/v2.css" />
+<!-- Versioned on purpose. Caddy now sends Cache-Control: no-cache so a reload
+     revalidates, but a browser that already holds a heuristically-cached copy
+     of the OLD file would still use it; a different URL cannot be satisfied
+     from that entry. Bump on any change to this page's css/js pair. -->
+<link rel="stylesheet" href="/infofi.css?v=20260726b" />
+<script src="/lib/console-filter.js"></script>
+<script src="/partials.js" defer></script>
+<script type="module" src="/lib/i18n.js"></script>
+</head>
+<body>
+  <div class="iw">
+    <div class="if-head">
+      <div class="if-title">Somnia <b>mindshare</b> on X · who owns the bubble's attention</div>
+      <div class="if-meta" id="ifMeta">loading…</div>
+    </div>
+
+    <!-- Filters sit in one row above the chart. The board mixes two populations
+         scored on different surfaces, and in the combined view the smaller one
+         is squeezed into unreadable slivers - splitting it is the whole point
+         of this control, not decoration. -->
+    <div class="if-controls">
+      <div class="if-seg" id="ifSeg" role="tablist" aria-label="Mindshare view">
+        <button class="bw-tab on" data-view="all"     role="tab" aria-selected="true">Everyone</button>
+        <button class="bw-tab"    data-view="project" role="tab" aria-selected="false">Projects</button>
+        <button class="bw-tab"    data-view="voice"   role="tab" aria-selected="false">Users</button>
+      </div>
+      <!-- Identity is never colour-alone: the legend names both groups and the
+           tiles carry a written badge as well. -->
+      <div class="if-legend" id="ifLegend">
+        <span class="if-key"><i class="sw project"></i>Ecosystem project</span>
+        <span class="if-key"><i class="sw voice"></i>Community voice</span>
+      </div>
+    </div>
+
+    <div class="if-context" id="ifContext"></div>
+
+    <!-- data-no-i18n on both: they render account names, and a project called
+         "Bets" must not come out as "Ставки". It has to be on the container at
+         render time - the i18n MutationObserver translates on insertion, so
+         adding it afterwards is already too late. The tile labels need it for a
+         second reason: i18n's SKIP_TAGS lists "SVG", but SVG elements report a
+         lowercase tagName, so that guard never actually fires. -->
+    <!-- height is recomputed from the measured width on every render, but the
+         attribute stays as a floor: an older cached script reads this attribute
+         instead of computing it, and without it the viewBox collapsed to zero
+         height and the whole board rendered blank. -->
+    <svg id="tmap" height="460" data-no-i18n role="img" aria-label="Mindshare treemap"></svg>
+    <div class="if-tip" id="ifTip" data-no-i18n></div>
+
+    <div id="ifProjWrap" style="display:none">
+      <div class="if-board">Ecosystem projects <span id="ifProjCount"></span></div>
+      <div class="if-scroll">
+        <table class="if">
+          <thead><tr>
+            <th>Account</th><th>Posts</th><th>Comments</th><th>Likes</th><th>Reposts</th>
+            <th>Replies</th><th>Bookmarks</th><th>Views</th><th>Score</th><th>Share</th>
+          </tr></thead>
+          <tbody id="ifProjRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="ifVoiceWrap" style="display:none">
+      <div class="if-board voice">Community voices <span id="ifVoiceCount"></span></div>
+      <div class="if-scroll">
+        <table class="if">
+          <thead><tr>
+            <th>Account</th><th>Tagged posts</th><th>Comments</th><th>Likes</th><th>Reposts</th>
+            <th>Replies</th><th>Bookmarks</th><th>Views</th><th>Score</th><th>Share</th>
+          </tr></thead>
+          <tbody id="ifVoiceRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="if-note" id="ifNote"></div>
+  </div>
+
+  <script type="module" src="/lib/infofi.js?v=20260726b"></script>
+</body>
+</html>

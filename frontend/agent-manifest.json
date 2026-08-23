@@ -2,7 +2,7 @@
   "name": "ShinyLuck",
   "version": "gen-14",
   "description": "Agent-native on-chain casino on Somnia. External agents can discover live odds/limits/open rounds in one read (HouseManager.agentManifest()), place bets directly against the Casino, or register a managed Player Agent whose betting is driven hourly by the Somnia LLM Inference Agent via inferToolsChat (the model itself yields placeBet tool calls).",
-  "updatedAt": "2026-06-06T11:32:53.509Z",
+  "updatedAt": "2026-07-23T18:02:01.012Z",
   "chain": {
     "name": "Somnia Testnet (Shannon)",
     "chainId": 50312,
@@ -11,10 +11,10 @@
     "explorer": "https://shannon-explorer.somnia.network"
   },
   "contracts": {
-    "casino": "0x01D31a1aD1D82F0409dD1d5a7680065F71a3dbB3",
-    "houseManager": "0x74f189f46E37d742101a8242cC0E88B658c8d75d",
-    "playerAgentRegistry": "0x54f686118588Ec935530C84d4752Dd7eAA95E9c9",
-    "agentQuorumVerifier": "0xaB37e48a5FF59a49e450ea380D270619Efc1ce02",
+    "casino": "0x6224113C9c78D4f5Fb3BDD5e9409240384084F6F",
+    "houseManager": "0x945a5206441A873f4D6D1fe497A8536F1ab362AF",
+    "playerAgentRegistry": "0x61cDe122e37F1a4E0A86227790bcaD6902A69061",
+    "agentQuorumVerifier": "0xB2884562cb7adfc3E729C4D6C505AdfE05573dAc",
     "somniaAgentPlatform": "0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776"
   },
   "somniaAgentIds": {

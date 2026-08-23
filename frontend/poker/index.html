@@ -3,11 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ShinyPoker — Provably-fair on-chain poker on Somnia</title>
+<title>ShinyPoker · Provably-fair on-chain poker on Somnia</title>
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="stylesheet" href="styles.css" />
 <link rel="stylesheet" href="marketing.css" />
 <link rel="stylesheet" href="mobile.css" />
+  <script type="module" src="/lib/i18n.js"></script>
 </head>
 <body class="marketing">
   <canvas id="mkt-bg"></canvas>
@@ -19,7 +20,7 @@
       <div class="container">
         <span class="badge"><span class="dot"></span>Live on Somnia Testnet · every hand verifiable on-chain</span>
         <h1>Provably-fair <span class="accent">on-chain poker</span> on Somnia.</h1>
-        <p class="sub">Your keys, your cards, your chips. Every bet, pot and payout settles on-chain, every deck is sealed before the deal and verified after — check any hand yourself, no trust required.</p>
+        <p class="sub">Your keys, your cards, your chips. Every bet, pot and payout settles on-chain, and the deck is shuffled by the players themselves with zero-knowledge proofs · only you can see your cards, no trust required.</p>
         <div class="ctas">
           <a class="btn primary lg" href="lobby">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg>
@@ -35,10 +36,10 @@
 
         <!-- filled LIVE from the on-chain lobby feed by marketing.js -->
         <div class="mkt-stats" id="live-stats">
-          <div class="s"><span class="k"><span class="live"></span>Players seated</span><span class="v acc tnum" id="ls-players">—</span></div>
-          <div class="s"><span class="k">Tables live</span><span class="v tnum" id="ls-tables">—</span></div>
-          <div class="s"><span class="k">Hands in play</span><span class="v tnum" id="ls-hands">—</span></div>
-          <div class="s"><span class="k">Biggest pot now</span><span class="v tnum" id="ls-pot">—</span></div>
+          <div class="s"><span class="k"><span class="live"></span>Players seated</span><span class="v acc tnum" id="ls-players">-</span></div>
+          <div class="s"><span class="k">Tables live</span><span class="v tnum" id="ls-tables">-</span></div>
+          <div class="s"><span class="k">Hands in play</span><span class="v tnum" id="ls-hands">-</span></div>
+          <div class="s"><span class="k">Biggest pot now</span><span class="v tnum" id="ls-pot">-</span></div>
         </div>
       </div>
     </section>
@@ -49,14 +50,14 @@
         <div class="sechead">
           <span class="eyebrow">Three steps</span>
           <h2>From wallet to the felt in under a minute</h2>
-          <p>Connect once, deposit into on-chain escrow, and sit down. A one-time session key lets you play at web2 speed — no popup for every fold, call or raise.</p>
+          <p>Connect once, deposit into on-chain escrow, and sit down. A one-time session key lets you play at web2 speed · no popup for every fold, call or raise.</p>
         </div>
         <div class="steps">
           <div class="stepcard">
             <div class="num">1</div>
             <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg></div>
             <h3>Connect your wallet</h3>
-            <p>Sign in with email for an instant Somnia wallet — or bring MetaMask. Either way it's your key, no custody, ever.</p>
+            <p>Sign in with email for an instant Somnia wallet · or bring MetaMask. Either way it's your key, no custody, ever.</p>
           </div>
           <div class="stepcard">
             <div class="num">2</div>
@@ -68,31 +69,31 @@
             <div class="num">3</div>
             <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 11l18-5-5 18-4-7z"/></svg></div>
             <h3>Sit down &amp; play</h3>
-            <p>Grant a capped table session key once. Then fold, call and raise with a single tap — every action still settles on-chain.</p>
+            <p>Grant a capped table session key once. Then fold, call and raise with a single tap · every action still settles on-chain.</p>
           </div>
         </div>
       </div>
     </section>
 
     <!-- zkSHUFFLE -->
-    <section class="section" id="fair" style="background:linear-gradient(180deg,transparent,rgba(217,171,74,0.04),transparent)">
+    <section class="section" id="fair" style="background:linear-gradient(180deg,transparent,rgba(217,185,112,0.04),transparent)">
       <div class="container">
         <div class="zksplit">
           <div class="zkviz">
             <canvas id="zkviz-canvas"></canvas>
-            <span class="vlabel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" style="width:13px;height:13px"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg>commit-reveal · deck sealed on-chain</span>
+            <span class="vlabel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" style="width:13px;height:13px"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg>zkShuffle · every shuffle proven on-chain</span>
             <button class="vbtn" id="zk-shuffle-btn">Shuffle ↻</button>
           </div>
           <div class="zktext">
             <span class="eyebrow">Provably fair</span>
-            <h2>The deal can’t be rigged — and you can prove it.</h2>
-            <p class="lead">Before every hand the deck is sealed on-chain with a commitment, then locked to a future block hash no one can predict. After the hand the seed is revealed and the whole deck is re-derived and verified on-chain. No one can stack the deck or change a card, and anyone can re-check any hand.</p>
+            <h2>The deal can’t be rigged · and no one can see your cards.</h2>
+            <p class="lead">Every hand is mental poker: the deck is shuffled and encrypted by the players’ own browsers, every shuffle ships with a zero-knowledge proof, and the full transcript is committed on-chain before a single chip moves. Your hole cards are decrypted only on your machine · not even our dealer service can see them.</p>
             <div class="zklist">
-              <div class="zi"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="zt"><b>Commit before the deal.</b> A sealed deck commitment is published on-chain so the shuffle can’t be altered once the hand starts.</span></div>
-              <div class="zi"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="zt"><b>Prove, don’t trust.</b> The deck is a deterministic function of the seed + block hash — re-derive and verify any past hand yourself.</span></div>
-              <div class="zi"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="zt"><b>Reveal after.</b> The seed is revealed post-hand and re-hashes to the commitment — provably fair, every time. <span style="opacity:.7">During play a dealer service delivers your hole cards; a fully trustless mental-poker dealer is on the roadmap.</span></span></div>
+              <div class="zi"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="zt"><b>Players shuffle, not the house.</b> Each player’s browser re-shuffles and re-encrypts the deck in turn, and a zk-proof of every shuffle is verified before the deal starts.</span></div>
+              <div class="zi"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="zt"><b>Cards only you can open.</b> Hole cards are encrypted to all players jointly · opening yours takes the other players’ proven decryption shares, delivered only to you.</span></div>
+              <div class="zi"><span class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg></span><span class="zt"><b>Every reveal proven on-chain.</b> Board and showdown cards come with cryptographic proofs checked by the contract · no card can be substituted, and anyone can audit any hand.</span></div>
             </div>
-            <a class="btn ghost" href="provably-fair" style="margin-top:26px">Read how it works →</a>
+            <a class="btn ghost" href="zk-lab" style="margin-top:26px">Watch it live in the zk Lab →</a>
           </div>
         </div>
       </div>
@@ -130,10 +131,10 @@
         <div class="featgrid">
           <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div><h3>Non-custodial escrow</h3><p>Your balance lives in an audited escrow contract you can withdraw from any time. We never hold your funds.</p></div>
           <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg></div><h3>Instant on-chain payouts</h3><p>Pots, side-pots and tournament prizes settle automatically the moment a hand ends. No cashier delays.</p></div>
-          <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M9 12h6M12 9v6"/></svg></div><h3>Transparent rake</h3><p>Every table shows its rake and cap up front — “no flop, no drop”. Tournament fees are split in the open.</p></div>
+          <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M9 12h6M12 9v6"/></svg></div><h3>Transparent rake</h3><p>Every table shows its rake and cap up front · “no flop, no drop”. Tournament fees are split in the open.</p></div>
           <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 12l5 5L20 7"/></svg></div><h3>One-tap session keys</h3><p>Authorize a capped session once at sit-down and play popup-free. Revoke instantly from Settings.</p></div>
-          <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></div><h3>Real-time table state</h3><p>Table state, timers and pots stay in sync live — served from a fast dealer cache so hundreds can watch at once.</p></div>
-          <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg></div><h3>Provably fair, always</h3><p>Every deck is committed on-chain before the deal and re-derived and verified after. The deal can’t be rigged — audit any hand yourself.</p></div>
+          <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></div><h3>Real-time table state</h3><p>Table state, timers and pots stay in sync live · served from a fast dealer cache so hundreds can watch at once.</p></div>
+          <div class="featcard"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg></div><h3>Provably fair, always</h3><p>The players shuffle the deck themselves; every shuffle and every revealed card is zk-proven and checked on-chain. The deal can’t be rigged · audit any hand yourself.</p></div>
         </div>
       </div>
     </section>
@@ -144,7 +145,7 @@
         <div class="family">
           <span class="eyebrow">One wallet, two rooms</span>
           <h2>Part of the Shiny family</h2>
-          <p>Jump between ShinyPoker and the ShinyLuck on-chain casino in one click — same wallet, same on-chain balance, same session. No reconnecting.</p>
+          <p>Jump between ShinyPoker and the ShinyLuck on-chain casino in one click · same wallet, same on-chain balance, same session. No reconnecting.</p>
           <div class="twin">
             <a class="twincard" href="https://shiny-luck.vercel.app/">{s} ShinyLuck Casino</a>
             <span class="swap">⇄</span>
@@ -159,11 +160,11 @@
       <div class="container">
         <div class="sechead"><span class="eyebrow">Questions</span><h2>Good to know</h2></div>
         <div class="faq">
-          <div class="faqitem open"><div class="q">Is my money actually on-chain?<span class="plus">+</span></div><div class="a">Yes. Deposits sit in a non-custodial escrow contract, and every buy-in, bet, pot, rake and payout is an on-chain transaction on Somnia. You can verify all of it on the block explorer. The contract has no path for the house to move your balance — only you can withdraw it.</div></div>
-          <div class="faqitem"><div class="q">Can the deal be rigged, and can anyone see my cards?<span class="plus">+</span></div><div class="a">The <b>deal cannot be rigged</b>: the deck is sealed on-chain before each hand and locked to an unpredictable block hash, then re-derived and verified on-chain after — anyone can re-check any hand, so no card can be swapped or stacked. On <b>card secrecy</b>, we’re straight with you: in this v1 the dealer service derives the deck to deliver each player their two cards, so it technically holds them during the hand (it cannot change them). Opponents and the public never see your cards until showdown. A fully trustless mental-poker (“no one ever sees a card”) dealer is the v2 on our roadmap.</div></div>
+          <div class="faqitem open"><div class="q">Is my money actually on-chain?<span class="plus">+</span></div><div class="a">Yes. Deposits sit in a non-custodial escrow contract, and every buy-in, bet, pot, rake and payout is an on-chain transaction on Somnia. You can verify all of it on the block explorer. The contract has no path for the house to move your balance · only you can withdraw it.</div></div>
+          <div class="faqitem"><div class="q">Can the deal be rigged, and can anyone see my cards?<span class="plus">+</span></div><div class="a">The <b>deal cannot be rigged</b>: the deck is shuffled by the players’ own browsers (mental poker), every shuffle carries a zero-knowledge proof, and the whole transcript is committed on-chain before the hand starts · no card can be swapped or stacked, and anyone can audit any hand. On <b>card secrecy</b>: your hole cards are encrypted to all players jointly and decrypted only in your browser, from the other players’ proven shares. Nobody else ever holds them · not your opponents, not the public, <b>not even our dealer service</b>. Every reveal (board and showdown) is verified by the contract before it counts.</div></div>
           <div class="faqitem"><div class="q">Do I sign a transaction for every action?<span class="plus">+</span></div><div class="a">No. When you sit down you authorize a capped session key once. After that, folds, calls and raises happen instantly with no wallet popup, while still settling on-chain in the background. Revoke the session any time.</div></div>
-          <div class="faqitem"><div class="q">How fast are withdrawals?<span class="plus">+</span></div><div class="a">Instant. Withdrawing from escrow has zero lockup — your STT is back in your wallet in seconds, for a sub-cent fee.</div></div>
-          <div class="faqitem"><div class="q">What’s the rake?<span class="plus">+</span></div><div class="a">Shown transparently on every table — a capped percentage of the pot, “no flop no drop”. Tournament fees are displayed as a split up front: buy-in = prize pool + fee, nothing hidden.</div></div>
+          <div class="faqitem"><div class="q">How fast are withdrawals?<span class="plus">+</span></div><div class="a">Instant. Withdrawing from escrow has zero lockup · your STT is back in your wallet in seconds, for a sub-cent fee.</div></div>
+          <div class="faqitem"><div class="q">What’s the rake?<span class="plus">+</span></div><div class="a">Shown transparently on every table · a capped percentage of the pot, “no flop no drop”. Tournament fees are displayed as a split up front: buy-in = prize pool + fee, nothing hidden.</div></div>
         </div>
       </div>
     </section>
@@ -183,7 +184,7 @@
   </div>
 
   <template id="__bundler_thumbnail">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#070707"/><rect x="30" y="30" width="40" height="40" rx="6" fill="#d9ab4a"/><text x="50" y="62" font-family="monospace" font-size="26" fill="#fff" text-anchor="middle">{s}</text></svg>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#070707"/><rect x="30" y="30" width="40" height="40" rx="6" fill="#D9B970"/><text x="50" y="62" font-family="monospace" font-size="26" fill="#fff" text-anchor="middle">{s}</text></svg>
   </template>
 
   <script src="poker-grid.js"></script>

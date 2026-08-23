@@ -1,7 +1,8 @@
-// ShinyPoker SDK — the single integration layer between the UI and the on-chain
+// ShinyPoker SDK · the single integration layer between the UI and the on-chain
 // PokerRoom + CommitRevealDealer, plus the off-chain dealer's hole-card API.
 // ES module; ethers comes from the same vendored bundle ShinyLuck uses.
 import { ethers } from "/vendor/ethers.bundle.js";
+import { toWei } from "/lib/amount.js";
 import { POKER_CONFIG, NETWORK } from "./poker-config.js";
 
 export const ACTION = { FOLD: 0, CHECK: 1, CALL: 2, BET: 3, RAISE: 4, ALLIN: 5 };
@@ -33,7 +34,77 @@ const ROOM_ABI = [
   "function sessionKeyOf(address) view returns (address)",
   "function sessionOwnerOf(address) view returns (address)",
   "function tableController(uint256) view returns (address)",
+  // The contracts revert with CUSTOM ERRORS, and ethers can only name one it
+  // has been given. Without these lines every refusal reached the player as
+  // "unknown custom error" — including the ordinary, correct one you get for
+  // pressing Leave while you are still in a hand.
+  "error NotDealer()", "error NotDealerOrOperator()", "error TableInactive()",
+  "error BadConfig()", "error BadSeat()", "error SeatTaken()", "error AlreadySeated()",
+  "error NotSeated()", "error InsufficientBalance()", "error BuyInOutOfRange()",
+  "error MaxStackExceeded()", "error InHand()", "error NotIdle()", "error ZeroAmount()",
+  "error TransferFailed()", "error HandAlreadyInProgress()", "error NoHandInProgress()",
+  "error NotEnoughPlayers()", "error NotYourTurn()", "error IllegalAction()",
+  "error BelowMinBet()", "error BelowMinRaise()", "error InsufficientChips()",
+  "error TooEarly()", "error ShowdownNotReady()", "error InvalidSessionKey()",
+  "error NotFactory()", "error NotController()", "error ControlledTable()",
+  "error NoAccusation()", "error AccusationActive()", "error RescueWindowNotElapsed()",
+  "error AlreadyVindicated()", "error NotResponsive()", "error BadRescueWindow()",
 ];
+
+/* A contract refusal, in words a player can act on.
+   `e.shortMessage` for a custom error is the class name at best and "unknown
+   custom error" at worst — neither tells anyone what to do next. */
+const ERR_TEXT = {
+  InHand: { en: "You're in this hand — you can leave once it ends", ru: "Вы в раздаче — выйти можно, когда она закончится" },
+  ControlledTable: { en: "Tournament seats are managed by the tournament", ru: "Турнирными местами распоряжается турнир" },
+  NotSeated: { en: "You're not seated at this table", ru: "Вы не сидите за этим столом" },
+  SeatTaken: { en: "Someone just took that seat", ru: "Место только что заняли" },
+  AlreadySeated: { en: "You're already seated at this table", ru: "Вы уже сидите за этим столом" },
+  InsufficientBalance: { en: "Not enough in your poker balance — top up in the cashier", ru: "Не хватает на покерном балансе — пополните в кассе" },
+  InsufficientChips: { en: "Not enough chips for that", ru: "Не хватает фишек" },
+  BuyInOutOfRange: { en: "That buy-in is outside this table's limits", ru: "Бай-ин вне лимитов этого стола" },
+  MaxStackExceeded: { en: "That would put you over the table's max stack", ru: "Стек превысит максимум для этого стола" },
+  NotYourTurn: { en: "It's not your turn", ru: "Сейчас не ваш ход" },
+  IllegalAction: { en: "That action isn't legal here", ru: "Это действие здесь невозможно" },
+  BelowMinBet: { en: "Below the minimum bet", ru: "Меньше минимальной ставки" },
+  BelowMinRaise: { en: "Below the minimum raise", ru: "Меньше минимального рейза" },
+  NoHandInProgress: { en: "No hand is running", ru: "Раздача не идёт" },
+  HandAlreadyInProgress: { en: "A hand is already running", ru: "Раздача уже идёт" },
+  NotEnoughPlayers: { en: "Not enough players", ru: "Недостаточно игроков" },
+  TableInactive: { en: "This table is closed", ru: "Стол закрыт" },
+  ZeroAmount: { en: "Amount must be above zero", ru: "Сумма должна быть больше нуля" },
+  TooEarly: { en: "Too early — try again in a moment", ru: "Ещё рано — попробуйте через момент" },
+  // tournaments
+  NotRegistering: { en: "Registration for this tournament is closed", ru: "Регистрация в этот турнир закрыта" },
+  NotRunning: { en: "This tournament isn't running", ru: "Турнир не идёт" },
+  Full: { en: "This tournament is full", ru: "Турнир заполнен" },
+  AlreadyIn: { en: "You're already registered", ru: "Вы уже зарегистрированы" },
+  NotIn: { en: "You're not registered", ru: "Вы не зарегистрированы" },
+  TooFew: { en: "Not enough players registered yet", ru: "Пока зарегистрировано слишком мало игроков" },
+  WrongValue: { en: "Wrong amount sent", ru: "Отправлена неверная сумма" },
+  HandLive: { en: "A hand is still being played", ru: "Раздача ещё идёт" },
+  NotCreator: { en: "Only the tournament's host can do that", ru: "Это может сделать только создатель турнира" },
+};
+
+/** Turn a thrown contract/wallet error into one sentence a player can act on. */
+export function pokerError(e) {
+  const ru = typeof window !== "undefined" && window.__SPLANG === "ru";
+  const pick = (t) => (ru ? t.ru : t.en);
+  // ethers hides the decoded name in a few places depending on the path taken
+  const name = e?.revert?.name || e?.errorName ||
+    (typeof e?.shortMessage === "string" && (e.shortMessage.match(/reverted with custom error '([A-Za-z0-9_]+)/) || [])[1]) ||
+    (typeof e?.message === "string" && (e.message.match(/custom error '([A-Za-z0-9_]+)/) || [])[1]) || null;
+  if (name && ERR_TEXT[name]) return pick(ERR_TEXT[name]);
+  if (e?.code === "ACTION_REJECTED") return ru ? "Отменено в кошельке" : "Cancelled in your wallet";
+  if (e?.code === "INSUFFICIENT_GAS" && e?.message) return e.message;
+  const raw = (e?.shortMessage || e?.reason || e?.message || "").replace(/execution reverted:?/i, "").trim();
+  // Never surface ethers' own placeholder — it tells the player nothing at all.
+  if (!raw || /unknown custom error/i.test(raw)) {
+    return name ? (ru ? "Отклонено контрактом: " : "Refused by the contract: ") + name
+                : (ru ? "Не прошло — попробуйте ещё раз" : "That didn't go through — try again");
+  }
+  return raw.slice(0, 90);
+}
 
 const TRN_ABI = [
   "function count() view returns (uint256)",
@@ -58,9 +129,15 @@ const TRN_ABI = [
   "function owner() view returns (address)",
   "function feeCollected() view returns (uint256)",
   "function withdrawFees(address,uint256)",
+  // same reason as PokerRoom above: an undeclared custom error reaches the
+  // player as "unknown custom error"
+  "error NotOperator()", "error BadParams()", "error WrongValue()", "error Full()",
+  "error AlreadyIn()", "error NotIn()", "error NotRegistering()", "error NotRunning()",
+  "error TooFew()", "error HandLive()", "error NotDue()", "error NotBusted()",
+  "error NotCreator()", "error NotPending()", "error NotIdleLongEnough()",
 ];
 
-// Fully on-chain uploaded avatars — see contracts/poker/AvatarStore.sol.
+// Fully on-chain uploaded avatars · see contracts/poker/AvatarStore.sol.
 const AV_ABI = [
   "function setAvatar(bytes data)",
   "function clearAvatar()",
@@ -68,7 +145,7 @@ const AV_ABI = [
   "function hasAvatar(address) view returns (bool)",
 ];
 
-// On-chain player profiles (nicknames) — see contracts/poker/PlayerProfile.sol.
+// On-chain player profiles (nicknames) · see contracts/poker/PlayerProfile.sol.
 const PP_ABI = [
   "function setProfile(string handle,uint16 avatar)",
   "function clearHandle()",
@@ -108,7 +185,7 @@ export class ShinyPoker {
     this.read = new ethers.JsonRpcProvider(net.rpcUrls[0]);
     // Guard against pre-deploy empty addresses (would throw in ethers.Contract).
     this.roomRead = cfg.pokerRoom ? new ethers.Contract(cfg.pokerRoom, ROOM_ABI, this.read) : null;
-    // zkShuffle v2 rooms read their cards from ZkTableDealer — same IPokerDealer
+    // zkShuffle v2 rooms read their cards from ZkTableDealer · same IPokerDealer
     // views, so the whole table UI works unchanged. cardLayer is written by the
     // deploy script; a config with a zk address but cardLayer!=="zk" is a v1
     // room with the experimental verifier alongside (the zk-lab page).
@@ -134,15 +211,19 @@ export class ShinyPoker {
   }
 
   // ---- wallet ----
-  /// Open the connect chooser (email/Privy primary; injected wallets in beta),
-  /// or pass a method to skip it.
+  /// Connect the wallet. The product is built entirely on Privy (email →
+  /// embedded Somnia wallet, headless, shared with the ShinyLuck casino), so
+  /// there is no wallet chooser: we go straight to Privy. Skipping the extra
+  /// chooser modal also fixed mobile, where its overlay swallowed the tap that
+  /// should have opened the Privy login sheet. `connectInjected` is kept for a
+  /// possible future re-enable but is no longer reachable from the UI.
   async connect(method) {
     if (this.address) return this.address;
-    if (!method) method = await this._chooseWallet();
-    return method === "privy" ? this.connectPrivy() : this.connectInjected();
+    if (method === "injected") return this.connectInjected();
+    return this.connectPrivy();
   }
 
-  /// Email login → embedded Somnia wallet (HEADLESS — no popup for txs or
+  /// Email login → embedded Somnia wallet (HEADLESS · no popup for txs or
   /// signatures), shared with the ShinyLuck casino via the reused Privy bundle.
   async connectPrivy() {
     const auth = window.ShinyLuckAuth;
@@ -178,23 +259,23 @@ export class ShinyPoker {
   }
 
   _privyWait(pred, ms = 45000) {
-    // The Privy bundle is ~4.6MB + an iframe handshake with auth.privy.io — a
+    // The Privy bundle is ~4.6MB + an iframe handshake with auth.privy.io · a
     // cold load can take well over the old 8s, which surfaced as a bogus
     // "Privy timeout" when users clicked Connect right after page load.
     return new Promise((resolve, reject) => {
-      const finish = (ok) => { clearTimeout(t); clearInterval(iv); document.removeEventListener("shinyluck:auth-state", on); ok ? resolve() : reject(new Error("Email login is still loading — give it a few seconds and try again (or use MetaMask)."));
+      const finish = (ok) => { clearTimeout(t); clearInterval(iv); document.removeEventListener("shinyluck:auth-state", on); ok ? resolve() : reject(new Error("Email login is still loading · give it a few seconds and try again."));
       };
       const t = setTimeout(() => finish(false), ms);
       const check = () => { const a = window.ShinyLuckAuth; return !!(a && pred({ ready: a.ready, authenticated: a.authenticated, address: a.address })); };
       const on = (ev) => { if (pred(ev.detail || {}) || check()) finish(true); };
       document.addEventListener("shinyluck:auth-state", on);
-      // Poll as a safety net — the ready flip can land before our listener attaches.
+      // Poll as a safety net · the ready flip can land before our listener attaches.
       const iv = setInterval(() => { if (check()) finish(true); }, 400);
       if (check()) finish(true);
     });
   }
 
-  /// Injected wallet (MetaMask etc.) — BETA. Popup-free play via a session key.
+  /// Injected wallet (MetaMask etc.) · BETA. Popup-free play via a session key.
   async connectInjected() {
     if (!window.ethereum) throw new Error("No injected wallet found. Use email login.");
     try { await window.ethereum.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] }); }
@@ -217,18 +298,18 @@ export class ShinyPoker {
 
   // wallet chooser modal (email primary, injected wallets flagged BETA)
   _chooseWallet() {
-    const ACC = "#d9ab4a", ACC2 = "#f2d78a";
+    const ACC = "#D9B970", ACC2 = "#F4DD9E";
     return new Promise((resolve, reject) => {
       const mask = document.createElement("div");
-      mask.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);z-index:9000;display:grid;place-items:center;padding:24px;font-family:'Source Code Pro',monospace";
+      mask.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);z-index:9000;display:grid;place-items:center;padding:24px;font-family:Inter,system-ui,sans-serif";
       const hasInjected = !!window.ethereum;
       mask.innerHTML = `
         <div style="background:#111114;border:1px solid #2c2c36;border-radius:16px;max-width:400px;width:100%;padding:26px;color:#e6e6ee">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <h3 style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:18px">Connect to <span style="color:${ACC}">ShinyPoker</span></h3>
-            <button data-x style="background:transparent;border:1px solid #2c2c36;color:#9a9aa8;border-radius:8px;padding:4px 9px;cursor:pointer">✕</button>
+            <h3 style="margin:0;font-family:Inter,system-ui,sans-serif;font-size:18px">Connect to <span style="color:${ACC}">ShinyPoker</span></h3>
+            <button data-x style="background:transparent;border:1px solid #2c2c36;color:#8F8C85;border-radius:8px;padding:4px 9px;cursor:pointer">✕</button>
           </div>
-          <p style="margin:0 0 18px;font-size:12px;color:#9a9aa8;line-height:1.55">Sign in with email to get a Somnia wallet — same wallet as the ShinyLuck casino, no extension, and <b style="color:${ACC2}">no popups</b> while you play.</p>
+          <p style="margin:0 0 18px;font-size:12px;color:#8F8C85;line-height:1.55">Sign in with email to get a Somnia wallet · same wallet as the ShinyLuck casino, no extension, and <b style="color:${ACC2}">no popups</b> while you play.</p>
           <button data-m="privy" style="display:flex;align-items:center;gap:10px;width:100%;padding:13px 14px;margin-bottom:9px;background:${ACC};border:1px solid ${ACC};color:#fff;border-radius:10px;cursor:pointer;font-family:inherit;font-size:14px;font-weight:600">📧 Continue with Email</button>
           <button data-m="injected" ${hasInjected ? "" : "disabled"} style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:13px 14px;margin-bottom:9px;background:#1c1c22;border:1px solid #2c2c36;color:${hasInjected ? "#e6e6ee" : "#5a5a66"};border-radius:10px;cursor:${hasInjected ? "pointer" : "not-allowed"};font-family:inherit;font-size:14px">
             <span>🦊 MetaMask${hasInjected ? "" : " (not detected)"}</span><span style="font-size:9px;letter-spacing:1px;background:rgba(232,193,90,.15);color:#e8c15a;border:1px solid rgba(232,193,90,.3);border-radius:999px;padding:2px 7px">BETA</span>
@@ -251,6 +332,16 @@ export class ShinyPoker {
   // ---- session keys (act without a wallet popup per action) ----
   _sessKey() { return ("sp_sess_" + this.net.chainId + "_" + this.cfg.pokerRoom + "_" + this.address).toLowerCase(); }
 
+  // Storage that cannot take the page down with it. A framed WKWebView with
+  // tracking prevention on THROWS on these calls (it does not return null), and
+  // this module sits in the import chain of everything — a throw here means no
+  // lobby, no table, no message. `typeof localStorage !== "undefined"`, which
+  // guarded this before, tests the wrong thing: the object exists, the CALL is
+  // what fails. Losing the session key only costs a wallet popup per action.
+  _lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  _lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+  _lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
   _bindSession(priv) {
     this.sessionWallet = new ethers.Wallet(priv, this.read);
     this.roomSession = new ethers.Contract(this.cfg.pokerRoom, ROOM_ABI, this.sessionWallet);
@@ -259,33 +350,39 @@ export class ShinyPoker {
   /// Restore a saved session and confirm it's still authorized on-chain.
   async loadSession() {
     this.sessionActive = false;
-    const priv = (typeof localStorage !== "undefined") ? localStorage.getItem(this._sessKey()) : null;
+    const priv = this._lsGet(this._sessKey());
     if (!priv) return false;
     try {
       this._bindSession(priv);
       const onchain = await this.roomRead.sessionKeyOf(this.address);
-      if (onchain.toLowerCase() === this.sessionWallet.address.toLowerCase()) { this.sessionActive = true; return true; }
+      if (onchain.toLowerCase() === this.sessionWallet.address.toLowerCase()) {
+        this.sessionActive = true;
+        try { await this._primeSession(); } catch (_) {} // cache nonce/fee for a fast first action
+        return true;
+      }
     } catch {}
     return false;
   }
 
   /// Generate a hot key, authorize + fund it on-chain (one wallet popup), and
-  /// route all subsequent actions through it — no popup per action.
+  /// route all subsequent actions through it · no popup per action.
   async activateSession(gasEth = 0.05) {
     this.requireWallet();
     const key = ethers.Wallet.createRandom();
-    localStorage.setItem(this._sessKey(), key.privateKey);
-    await (await this.roomWrite.setSessionKey(key.address, { value: ethers.parseEther(String(gasEth)) })).wait();
+    this._lsSet(this._sessKey(), key.privateKey);
+    await (await this.roomWrite.setSessionKey(key.address, { value: toWei(gasEth) })).wait();
     this._bindSession(key.privateKey);
     this.sessionActive = true;
+    this._sessNonce = 0; // fresh key starts at nonce 0 · no round-trip needed
+    try { const fee = await this.read.getFeeData(); this._sessGasPrice = fee.gasPrice ?? ethers.parseUnits("6", "gwei"); } catch (_) {}
     return key.address;
   }
 
   async revokeSession() {
     this.requireWallet();
     try { await (await this.roomWrite.revokeSessionKey()).wait(); } catch {}
-    if (typeof localStorage !== "undefined") localStorage.removeItem(this._sessKey());
-    this.sessionWallet = null; this.roomSession = null; this.sessionActive = false;
+    this._lsDel(this._sessKey());
+    this.sessionWallet = null; this.roomSession = null; this.sessionActive = false; this._sessNonce = null;
   }
 
   async signOut() {
@@ -347,7 +444,7 @@ export class ShinyPoker {
 
   async getSeats(t) {
     const cfg = await this.getTable(t);
-    // Read all seats concurrently — sequential awaits made the first paint slow.
+    // Read all seats concurrently · sequential awaits made the first paint slow.
     const idx = Array.from({ length: cfg.maxSeats }, (_, i) => i);
     return Promise.all(idx.map(async (s) => {
       const [seat, sh] = await Promise.all([this.roomRead.getSeat(t, s), this.roomRead.getSeatHand(t, s)]);
@@ -362,7 +459,7 @@ export class ShinyPoker {
   async board(dealId) {
     if (!dealId || dealId === 0n || !this.dealerRead) return [];
     // Only the first `boardRevealedCount` slots are real; the rest default to 0
-    // on-chain (which is the "2♣" card) — never show those.
+    // on-chain (which is the "2♣" card) · never show those.
     const n = Number(await this.dealerRead.boardRevealedCount(dealId));
     if (n === 0) return [];
     const raw = await this.dealerRead.boardCards(dealId);
@@ -372,24 +469,29 @@ export class ShinyPoker {
   async balanceOf(addr) { return this.roomRead.balance(addr); }
 
   /// First table (≠ excludeTable) where this address currently holds a seat;
-  /// -1 if none. One-table-at-a-time guard for the sit-down flow — covers cash
+  /// -1 if none. One-table-at-a-time guard for the sit-down flow · covers cash
   /// AND running-tournament seats. IMPORTANT: a tournament WINNER's seat stays
   /// occupied on the controlled table forever (the contract never stands the
-  /// last player up) — a FINISHED event's ghost seat must not block cash play.
+  /// last player up) · a FINISHED event's ghost seat must not block cash play.
   async seatedTableAt(excludeTable = -1) {
     if (!this.address) return -1;
     const n = await this.tableCount();
     const checks = await Promise.all(Array.from({ length: n }, (_, t) =>
       t === excludeTable ? Promise.resolve(255) : this.roomRead.seatOf(t, this.address).then(Number).catch(() => 255)));
+    const currentTrn = (this.cfg.pokerTournament || "").toLowerCase();
     for (let t = 0; t < n; t++) {
       if (checks[t] === 255) continue;
       try {
         const ctl = await this.roomRead.tableController(t);
         if (ctl !== ethers.ZeroAddress) {
+          // A table controlled by ANY tournament contract other than the one
+          // this frontend runs against is from a previous deploy · its seats
+          // are ghosts (that event can never resume here), never a live game.
+          if (ctl.toLowerCase() !== currentTrn) continue;
           const trn = await this.tournamentOfTable(t);
-          if (!trn || trn.status >= 2) continue; // finished/orphaned event — ghost seat, not a live game
+          if (!trn || trn.status >= 2) continue; // finished/orphaned event · ghost seat, not a live game
         }
-      } catch {}
+      } catch { continue; } // unreadable controller → don't let it wedge cash play
       return t;
     }
     return -1;
@@ -397,6 +499,20 @@ export class ShinyPoker {
 
   /// Native STT/SOMI balance of the connected wallet (for funding guidance).
   async walletBalance() { return this.address ? this.read.getBalance(this.address) : 0n; }
+
+  /// Starter-gas faucet (testnet): asks the dealer service to drip a little
+  /// STT into a brand-new empty wallet so the first deposit tx can happen at
+  /// all. One drip per address, server-enforced; resolves true if gas landed.
+  async requestStarterGas() {
+    if (!this.address) return false;
+    try {
+      const r = await fetch(`${this.cfg.dealerApiUrl}/faucet`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: this.address }), signal: AbortSignal.timeout(20000),
+      });
+      return r.ok;
+    } catch (_) { return false; }
+  }
 
   // ---- tournaments ----
   hasTournaments() { return !!this.trnRead; }
@@ -417,7 +533,7 @@ export class ShinyPoker {
   }
 
   async tournaments() {
-    // dealer cache first — one GET instead of N info() calls per lobby client
+    // dealer cache first · one GET instead of N info() calls per lobby client
     const lob = await this.lobbySnapshot();
     if (lob && Array.isArray(lob.tournaments)) {
       return lob.tournaments.map((t) => ({
@@ -439,11 +555,11 @@ export class ShinyPoker {
   }
 
   /// `at` targets the table's controller contract (survives a stale poker-config
-  /// after a tournament redeploy — same rationale as _trnAt).
+  /// after a tournament redeploy · same rationale as _trnAt).
   async isRegisteredIn(id, at) { return this.address ? (at ? this._trnAt(at) : this.trnRead).isRegistered(id, this.address) : false; }
 
   /// Read-only tournament contract at an arbitrary address (cached). The table's
-  /// on-chain CONTROLLER is the source of truth — a stale cached poker-config
+  /// on-chain CONTROLLER is the source of truth · a stale cached poker-config
   /// after a tournament redeploy must never demote a tournament table to cash mode.
   _trnAt(addr) {
     if (!this._trnAtCache) this._trnAtCache = new Map();
@@ -491,8 +607,8 @@ export class ShinyPoker {
     this.requireWallet();
     if (!this.trnWrite) throw new Error("tournaments not deployed");
     const p = {
-      buyIn: ethers.parseEther(String(buyInEth)),
-      fee: ethers.parseEther(String(feeEth)),
+      buyIn: toWei(buyInEth),
+      fee: toWei(feeEth),
       maxPlayers,
       seatsPerTable,
       startStack: BigInt(startStack),
@@ -508,7 +624,7 @@ export class ShinyPoker {
       structure: (structure || []).map((l) => ({ sb: BigInt(l.sb), bb: BigInt(l.bb), ante: BigInt(l.ante || 0), durationSecs: Number(l.durationSecs) })),
       hostBps: Number(hostBps) || 0,
     };
-    return (await this.trnWrite.createTournament(p, { value: ethers.parseEther(String(sponsorEth)) })).wait();
+    return (await this.trnWrite.createTournament(p, { value: toWei(sponsorEth) })).wait();
   }
 
   async registerTournament(id, costWei) {
@@ -538,14 +654,14 @@ export class ShinyPoker {
   }
 
   /// Unix time the NEXT blind level is due (null when on the last level /
-  /// not running). Structure-aware — custom schedules have per-level durations.
+  /// not running). Structure-aware · custom schedules have per-level durations.
   async nextLevelAt(id, clock, at) {
     const c = clock || (await this.tournamentClock(id, at));
     if (!c.startedAt) return null;
     const s = await this.tournamentStructure(id, at);
     if (s.length) {
       // Past the schedule the blinds keep escalating (overtime levels run as
-      // long as the final scheduled level) — mirrors _timeForNextLevel on-chain.
+      // long as the final scheduled level) · mirrors _timeForNextLevel on-chain.
       let due = c.startedAt;
       for (let i = 0; i <= c.level && i < s.length; i++) due += s[i].durationSecs;
       if (c.level + 1 > s.length) due += (c.level + 1 - s.length) * s[s.length - 1].durationSecs;
@@ -568,7 +684,7 @@ export class ShinyPoker {
 
   /// STRICT variant: the table where I actually hold a seat, or -1 (busted /
   /// not playing). The table page tells "moved to another table" from "busted"
-  /// with this — the fallback above would mask both.
+  /// with this · the fallback above would mask both.
   async myTournamentSeatTable(id, at) {
     if (!this.address) return -1;
     const tables = await this.tournamentTables(id, at);
@@ -579,7 +695,7 @@ export class ShinyPoker {
   }
 
   /// Finishing places / prizes / rebalance moves from the dealer bot's event
-  /// indexer (Busted/Finished/PlayerMoved exist only as events — no on-chain
+  /// indexer (Busted/Finished/PlayerMoved exist only as events · no on-chain
   /// view). null → indexer unavailable; callers degrade gracefully.
   async tournamentResults(id) {
     if (!this.cfg.dealerApiUrl) return null;
@@ -609,7 +725,7 @@ export class ShinyPoker {
     this.requireWallet();
     if (!this.ppWrite) throw new Error("profiles not deployed");
     const r = await (await this.ppWrite.setProfile(handle, avatar)).wait();
-    // my own cached profile is stale now — next poll re-reads it
+    // my own cached profile is stale now · next poll re-reads it
     if (this.address && this._profCache) this._profCache.delete(this.address.toLowerCase());
     return r;
   }
@@ -621,7 +737,7 @@ export class ShinyPoker {
     catch { return { handle: "", avatar: 0, since: 0 }; }
   }
   async handleAvailable(handle) { try { return this.ppRead ? await this.ppRead.handleAvailable(handle) : false; } catch { return false; } }
-  /// Resolve nicknames for a set of addresses (per-address cache — safe to call
+  /// Resolve nicknames for a set of addresses (per-address cache · safe to call
   /// every poll; only unknown addresses hit the chain). → { lowercased addr: handle }
   async handlesFor(addrs) {
     const m = await this.profilesFor(addrs);
@@ -632,7 +748,7 @@ export class ShinyPoker {
 
   /// Full profiles (nickname + preset avatar id + uploaded on-chain image as a
   /// data URI) for a set of addresses, cached per address. The image is raw
-  /// bytes in AvatarStore — sniff the magic for the MIME.
+  /// bytes in AvatarStore · sniff the magic for the MIME.
   /// → { lowercased addr: {handle, avatar, img|null} }
   async profilesFor(addrs) {
     if (!this._profCache) this._profCache = new Map();
@@ -663,7 +779,7 @@ export class ShinyPoker {
     return `data:${mime};base64,${btoa(bin)}`;
   }
 
-  /// Upload my avatar image (raw bytes, ≤8KB — the UI compresses first).
+  /// Upload my avatar image (raw bytes, ≤8KB · the UI compresses first).
   async setAvatarImage(bytes) {
     this.requireWallet();
     if (!this.avWrite) throw new Error("avatar store not deployed");
@@ -680,7 +796,7 @@ export class ShinyPoker {
     return r;
   }
 
-  /// Recent settled hands at a table — served by the dealer bot's indexer
+  /// Recent settled hands at a table · served by the dealer bot's indexer
   /// (it backfills the on-chain events once and stays current; scanning
   /// Somnia's ~0.2s-block history from the browser is impractical).
   async recentHands(t) {
@@ -694,7 +810,7 @@ export class ShinyPoker {
     return this._recentHandsOnchain(t); // bot down → short on-chain fallback
   }
 
-  // (fallback) raw eth_getLogs over a short recent window — Somnia logs lack
+  // (fallback) raw eth_getLogs over a short recent window · Somnia logs lack
   // the `removed` field which trips ethers v6's validator, hence raw calls.
   async _recentHandsOnchain(t, lookback = 18000) {
     if (!this.roomRead) return [];
@@ -730,7 +846,7 @@ export class ShinyPoker {
   }
 
   /// Current deal's provably-fair metadata (seed commitment, reveal state).
-  /// v2 deals have no seed — every card is individually proven on-chain, so the
+  /// v2 deals have no seed · every card is individually proven on-chain, so the
   /// widget gets a zk-flavored object instead.
   async dealCommit(dealId) {
     if (!this.dealerRead || !dealId || dealId === 0n) return null;
@@ -781,11 +897,17 @@ export class ShinyPoker {
   /// Snapshot with the dealer's HTTP cache as the primary source: one GET
   /// instead of ~14 RPC calls per tick, so hundreds of watchers don't melt the
   /// public RPC. Any failure/staleness falls back to direct chain reads and the
-  /// dealer path is retried after a cool-down — the table NEVER goes blind.
-  async snapshotSmart(t) {
+  /// dealer path is retried after a cool-down · the table NEVER goes blind.
+  /// `sinceRev > 0` asks the dealer to hold the request until the table
+  /// actually changes, instead of answering with the revision we already have.
+  /// That turns a revealed card from "visible on the next timer tick" into
+  /// "visible on the open connection" — the poll interval was the last fixed
+  /// cost in the reveal path and it bought nothing.
+  async snapshotSmart(t, sinceRev = 0) {
     if (this.cfg.dealerApiUrl && Date.now() >= (this._snapSrcDownUntil || 0)) {
       try {
-        const r = await fetch(`${this.cfg.dealerApiUrl}/snapshot?t=${t}`, { signal: AbortSignal.timeout(2500) });
+        const url = `${this.cfg.dealerApiUrl}/snapshot?t=${t}` + (sinceRev ? `&rev=${sinceRev}` : "");
+        const r = await fetch(url, { signal: AbortSignal.timeout(sinceRev ? 15000 : 2500) });
         if (r.ok) {
           const raw = await r.json();
           if (Date.now() - raw.ts < 8000) return this._hydrateSnapshot(raw);
@@ -794,6 +916,15 @@ export class ShinyPoker {
       this._snapSrcDownUntil = Date.now() + 30_000;
     }
     return this.snapshot(t);
+  }
+
+  /// Tell the dealer a table may have moved. A player's action changes the
+  /// CHAIN, not the dealer's state, so without this it only finds out on its
+  /// own poll — dead time on every single street before a share is even asked
+  /// for. Fire-and-forget: it is an optimisation, never a correctness step.
+  poke(t) {
+    if (!this.cfg.dealerApiUrl) return;
+    try { fetch(`${this.cfg.dealerApiUrl}/poke?t=${t}`, { signal: AbortSignal.timeout(3000) }).catch(() => {}); } catch (_) {}
   }
 
   /// Rebuild the exact snapshot() shape from the dealer's JSON (BigInts arrive
@@ -818,7 +949,9 @@ export class ShinyPoker {
       inHand: !!s.inHand, folded: !!s.folded, allIn: !!s.allIn, committedStreet: B(s.committedStreet),
     }));
     const mySeat = this.address ? seats.findIndex((s) => s.player.toLowerCase() === this.address.toLowerCase()) : -1;
-    return { tableId: Number(raw.tableId), cfg, hand, seats, board: (raw.board || []).map(Number), mySeat };
+    // `rev` rides along so watch() can park on it; chain-read snapshots have no
+    // revision and simply fall back to the timed poll.
+    return { tableId: Number(raw.tableId), cfg, hand, seats, board: (raw.board || []).map(Number), mySeat, rev: Number(raw.rev || 0) };
   }
 
   /// The lobby feed from the dealer cache (tables + tournaments in one GET).
@@ -837,7 +970,7 @@ export class ShinyPoker {
   holeMessage(t, dealId) { return `ShinyPoker:holes:${t}:${Number(dealId)}`; }
 
   /// Sign the hole-card request. When a session is active the in-browser session
-  /// key signs it silently (NO wallet popup) — the dealer accepts a session-key
+  /// key signs it silently (NO wallet popup) · the dealer accepts a session-key
   /// signature on the seat owner's behalf.
   async signHoles(t, dealId) {
     const msg = this.holeMessage(t, dealId);
@@ -856,8 +989,24 @@ export class ShinyPoker {
     return this.signer.signMessage(msg);
   }
 
+  /// Binds a per-hand pubkey to a seat: every OTHER client verifies this
+  /// signature against the seat's on-chain occupant before contributing a
+  /// decryption share, so a malicious coordinator cannot swap in its own key
+  /// for a seat and thereby decrypt that seat's hole cards. Signed by the
+  /// session key (recovered address == sessionKeyOf(player) on-chain).
+  zkKeyBindMessage(t, dealId, seat, xx, xy) {
+    return `ShinyPoker:zk-key:${t}:${dealId}:${seat}:0x${xx.toString(16)}:0x${xy.toString(16)}`;
+  }
+
+  async signZkKeyBinding(t, dealId, seat, xx, xy) {
+    const msg = this.zkKeyBindMessage(t, dealId, seat, xx, xy);
+    if (this.sessionActive && this.sessionWallet) return this.sessionWallet.signMessage(msg);
+    this.requireWallet();
+    return this.signer.signMessage(msg);
+  }
+
   /// This player's two hole cards. v2 (zk) tables: the cards were decrypted
-  /// LOCALLY by zk-agent.js — the dealer never had them; we just read the
+  /// LOCALLY by zk-agent.js · the dealer never had them; we just read the
   /// agent's cache (the caller already retries until they land). v1 tables:
   /// ask the off-chain dealer (signature-gated).
   async myHoleCards(t, dealId, signature) {
@@ -876,39 +1025,120 @@ export class ShinyPoker {
   }
 
   // ---- writes ----
-  async deposit(amountEth) { this.requireWallet(); return (await this.roomWrite.deposit({ value: ethers.parseEther(String(amountEth)) })).wait(); }
-  async withdraw(amountEth) { this.requireWallet(); return (await this.roomWrite.withdraw(ethers.parseEther(String(amountEth)))).wait(); }
+  async deposit(amountEth) { this.requireWallet(); return (await this.roomWrite.deposit({ value: toWei(amountEth) })).wait(); }
+  async withdraw(amountEth) { this.requireWallet(); return (await this.roomWrite.withdraw(toWei(amountEth))).wait(); }
   async roomOwner() { try { return await this.roomRead.owner(); } catch { return ethers.ZeroAddress; } }
   async rakeCollected() { try { return await this.roomRead.rakeCollected(); } catch { return 0n; } }
-  async withdrawRake(to, amountEth) { this.requireWallet(); return (await this.roomWrite.withdrawRake(to, ethers.parseEther(String(amountEth)))).wait(); }
+  async withdrawRake(to, amountEth) { this.requireWallet(); return (await this.roomWrite.withdrawRake(to, toWei(amountEth))).wait(); }
   async withdrawAllRake(to) { this.requireWallet(); const amt = await this.roomRead.rakeCollected(); return (await this.roomWrite.withdrawRake(to, amt)).wait(); }
   /// Cash out: send native STT from the connected wallet to any external address.
-  async sendNative(to, amountEth) { this.requireWallet(); return (await this.signer.sendTransaction({ to, value: ethers.parseEther(String(amountEth)) })).wait(); }
-  async sitDown(t, seat, buyInEth) { this.requireWallet(); return (await this.roomWrite.sitDown(t, seat, ethers.parseEther(String(buyInEth)))).wait(); }
-  async topUp(t, amountEth) { this.requireWallet(); return (await this.roomWrite.topUp(t, ethers.parseEther(String(amountEth)))).wait(); }
+  async sendNative(to, amountEth) { this.requireWallet(); return (await this.signer.sendTransaction({ to, value: toWei(amountEth) })).wait(); }
+  async sitDown(t, seat, buyInEth) { this.requireWallet(); return (await this.roomWrite.sitDown(t, seat, toWei(buyInEth))).wait(); }
+  async topUp(t, amountEth) { this.requireWallet(); return (await this.roomWrite.topUp(t, toWei(amountEth))).wait(); }
   async leave(t) { this.requireWallet(); return (await this.roomWrite.leaveTable(t)).wait(); }
   async sitOut(t, on) { this.requireWallet(); return (await this.roomWrite.setSitOut(t, on)).wait(); }
 
   /// `amount` is the raise-to total for BET/RAISE; ignored otherwise. Cash
-  /// tables take ether units; tournament tables play in plain CHIP integers —
+  /// tables take ether units; tournament tables play in plain CHIP integers -
   /// pass chips=true there (parseEther would send 1e18× too much and revert).
   async act(t, action, amount = 0, chips = false) {
     this.requireWallet();
     const amt = action === ACTION.BET || action === ACTION.RAISE
-      ? (chips ? BigInt(Math.round(Number(amount))) : ethers.parseEther(String(amount)))
+      ? (chips ? BigInt(Math.round(Number(amount))) : toWei(amount))
       : 0;
-    // Route through the session key when active → no wallet popup per action.
-    const room = this.sessionActive && this.roomSession ? this.roomSession : this.roomWrite;
-    return (await room.act(t, action, amt)).wait();
+    // Session key active → FAST PATH: locally-managed nonce + cached fee + fixed
+    // gas + a single eth_sendRawTransaction. This is the ~650ms per-action path
+    // (measured on Somnia: ~135ms send + ~510ms inclusion). ethers' default
+    // contract-call path costs ~3 extra round-trips (getTransactionCount +
+    // getFeeData + estimateGas ≈ +850ms) · the reason a naive action felt ~1.7s.
+    if (this.sessionActive && this.sessionWallet) {
+      try { const r = await this._fastAct(t, action, amt); this.poke(t); return r; }
+      catch (e) {
+        // Only fall back when the tx NEVER hit the chain (pre-broadcast failure)
+        // · otherwise the action is already in flight and re-sending would
+        // double-submit. A post-broadcast issue (e.g. receipt timeout) rethrows.
+        if (e && e._preBroadcast) {
+          console.warn("[poker] fast act pre-broadcast fail, falling back:", e.shortMessage || e.message || e);
+          const r = await (await this.roomSession.act(t, action, amt)).wait();
+          this.poke(t);
+          return r;
+        }
+        throw e;
+      }
+    }
+    const r = await (await this.roomWrite.act(t, action, amt)).wait();
+    this.poke(t);
+    return r;
+  }
+
+  /// Prime the session's cached nonce + gas price (one round-trip each, done
+  /// once per session and re-synced on a nonce error), so each action is a
+  /// single raw send.
+  async _primeSession() {
+    const [n, fee] = await Promise.all([
+      this.read.getTransactionCount(this.sessionWallet.address, "latest"),
+      this.read.getFeeData(),
+    ]);
+    this._sessNonce = n;
+    this._sessGasPrice = fee.gasPrice ?? ethers.parseUnits("6", "gwei");
+  }
+
+  async _awaitReceipt(hash, timeoutMs = 15000) {
+    const start = Date.now();
+    for (;;) {
+      const rc = await this.read.getTransactionReceipt(hash);
+      if (rc) return rc;
+      if (Date.now() - start > timeoutMs) throw new Error("act receipt timeout " + hash);
+      await new Promise((r) => setTimeout(r, 60));
+    }
+  }
+
+  async _fastAct(t, action, amt) {
+    if (this._sessNonce == null) await this._primeSession();
+    const nonce = this._sessNonce++;
+    let hash;
+    try {
+      const data = this.roomSession.interface.encodeFunctionData("act", [t, action, amt]);
+      const signed = await this.sessionWallet.signTransaction({
+        to: this.cfg.pokerRoom, data, value: 0, nonce,
+        gasLimit: 800000n, // generous: the heaviest inline act() path (fold-win payout) is well under; settlement is a separate tx
+        gasPrice: this._sessGasPrice, chainId: BigInt(this.net.chainId),
+      });
+      hash = await this.read.send("eth_sendRawTransaction", [signed]);
+    } catch (e) {
+      // nothing reached the chain → recycle the nonce and mark for a safe fallback
+      if (this._sessNonce === nonce + 1) this._sessNonce = nonce;
+      const m = (e.shortMessage || e.message || "").toLowerCase();
+      if (/nonce|already known|replacement/.test(m)) this._sessNonce = null; // resync next call
+      // An empty session gas tank fails identically on the fallback path (it is
+      // the same key) · say so plainly instead of retrying into the same wall.
+      if (/insufficient funds|exceeds .*balance/.test(m)) {
+        const err = new Error("Session gas ran out - re-open the table to refill it");
+        err.code = "INSUFFICIENT_GAS";
+        err.shortMessage = err.message;
+        throw err;
+      }
+      e._preBroadcast = true;
+      throw e;
+    }
+    // broadcast succeeded · the action IS in flight; await it, never re-send
+    return await this._awaitReceipt(hash);
   }
 
   // ---- live polling ----
   watch(t, cb, intervalMs = 1200) {
     let stopped = false;
+    let rev = 0; // >0 once we know this dealer supports the parked poll
     const tick = async () => {
       if (stopped) return;
-      try { cb(await this.snapshotSmart(t)); } catch (e) { console.warn("[poker] snapshot failed", e); }
-      if (!stopped) setTimeout(tick, intervalMs);
+      try {
+        const s = await this.snapshotSmart(t, rev);
+        if (s) { if (s.rev) rev = s.rev; cb(s); }
+      } catch (e) { console.warn("[poker] snapshot failed", e); }
+      // Parked polls already spent their wait inside the request, so we go
+      // straight round again; the small floor keeps a misbehaving relay from
+      // turning that into a spin. Relays without `rev` keep the old cadence.
+      if (!stopped) setTimeout(tick, rev ? 60 : intervalMs);
     };
     tick();
     return () => { stopped = true; };

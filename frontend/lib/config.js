@@ -2,10 +2,10 @@
 // `npm run deploy:testnet` to overwrite (don't edit by hand).
 export const CONFIG = {
   network: "somniaTestnet",
-  casino: "0x01D31a1aD1D82F0409dD1d5a7680065F71a3dbB3",
-  registry: "0x54f686118588Ec935530C84d4752Dd7eAA95E9c9",
-  houseManager: "0x8FAD47Df1c37a21BBC3E8E1Cd68CCCa717B0ae9b",
-  agentVerifier: "0xaB37e48a5FF59a49e450ea380D270619Efc1ce02",
+  casino: "0x6224113C9c78D4f5Fb3BDD5e9409240384084F6F",
+  registry: "0x61cDe122e37F1a4E0A86227790bcaD6902A69061",
+  houseManager: "0x945a5206441A873f4D6D1fe497A8536F1ab362AF",
+  agentVerifier: "0xB2884562cb7adfc3E729C4D6C505AdfE05573dAc",
   agentPlatform: "0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776",
   agentServiceUrl: "http://localhost:3001",
   // Privy app ID - published, not a secret. Lives in .env as Privy_App_Id.
@@ -23,9 +23,11 @@ export const CONFIG = {
     parse: "12875401142070969085",
     hm:    "11928475610394857261",
   },
-  // All historical casino deployments (oldest → newest). Aggregated by
-  // livedata.js / account.js / leaderboard.js so "lifetime" stats survive
-  // every redeploy. Auto-rotated here on each deploy - don't edit by hand.
+  // All historical casino deployments (oldest → newest), INCLUDING `casino`
+  // above: that is the frozen v14 monolith, not the live casino (which is the
+  // v15 CasinoVault in config-v15.js). Aggregated by livedata.js / wins.js /
+  // profile.js so "lifetime" stats and unclaimed balances survive every
+  // redeploy. Auto-rotated here on each deploy - don't edit by hand.
   historicalCasinos: [
     { address: "0x0d397E36215Fb534F0dE4E279f505dEC3F63E4B6", deploymentBlock: 385550223 },
     { address: "0x46d37cd00F1eB308eb8a7eE864BC73774A029311", deploymentBlock: 388292876 },
@@ -46,6 +48,8 @@ export const CONFIG = {
     { address: "0xd5dB5F85aDe7e1A6296e15F8E5eB897b24241833", deploymentBlock: 401123935 },
     { address: "0xa8685Ca735F9c9a5F8133A67a1A74bc5005E2dba", deploymentBlock: 401981765 },
     { address: "0x01D31a1aD1D82F0409dD1d5a7680065F71a3dbB3", deploymentBlock: 402025580 },
+    { address: "0xFEA17112a565405e94783c5C64B278961f20c8e5", deploymentBlock: 438156934 },
+    { address: "0x6224113C9c78D4f5Fb3BDD5e9409240384084F6F", deploymentBlock: 442621122 },
   ],
 };
 

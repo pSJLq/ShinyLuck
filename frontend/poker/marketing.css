@@ -1,6 +1,6 @@
 /* =========================================================================
-   ShinyPoker — Marketing (Landing + legal). Extends styles.css tokens.
-   Scrollable, responsive — NOT the fixed-scale app shell.
+   ShinyPoker · Marketing (Landing + legal). Extends styles.css tokens.
+   Scrollable, responsive · NOT the fixed-scale app shell.
    ========================================================================= */
 
 html, body { overflow: auto; height: auto; }
@@ -129,7 +129,7 @@ p { margin: 0; }
 
 /* ---------------- family banner ---------------- */
 .family { border: 1px solid var(--line-2); border-radius: 20px; padding: 44px; text-align: center; position: relative; overflow: hidden;
-  background: radial-gradient(80% 140% at 50% 0%, rgba(217,171,74,0.12), #0a0a0c 70%); }
+  background: radial-gradient(80% 140% at 50% 0%, rgba(217,185,112,0.12), #0a0a0c 70%); }
 .family h2 { font-size: 32px; }
 .family p { font-family: var(--body); font-size: 15px; color: var(--muted); margin: 14px auto 26px; max-width: 520px; line-height: 1.6; }
 .family .twin { display: inline-flex; gap: 16px; align-items: center; }
@@ -151,12 +151,12 @@ p { margin: 0; }
 
 /* ---------------- CTA band ---------------- */
 .ctaband { text-align: center; border: 1px solid var(--accent-32); border-radius: 20px; padding: 56px 32px;
-  background: radial-gradient(90% 160% at 50% 0%, rgba(217,171,74,0.14), #08080b 72%); }
+  background: radial-gradient(90% 160% at 50% 0%, rgba(217,185,112,0.14), #08080b 72%); }
 .ctaband h2 { font-size: 40px; }
 .ctaband p { font-family: var(--body); font-size: 16px; color: var(--text-2); margin: 16px auto 28px; max-width: 480px; }
 
 /* =========================================================================
-   FOOTER (shared — full marketing variant + slim in-app variant)
+   FOOTER (shared · full marketing variant + slim in-app variant)
    ========================================================================= */
 .mkt-footer { border-top: 1px solid var(--line); background: #060608; position: relative; z-index: 1; }
 .mkt-footer .ftop { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: 36px; padding: 56px 0 40px; }
@@ -231,7 +231,7 @@ p { margin: 0; }
 /* gold rebrand: dark ink on gold surfaces (landing) */
 .cta, .btn-sm.join, .chipset button.on, .pill.primary { color: #1b1407 !important; }
 
-/* two-row slim footer (lobby/tournament) — the one-liner looked chopped off */
+/* two-row slim footer (lobby/tournament) · the one-liner looked chopped off */
 .appfooter.two { flex-direction: column; align-items: stretch; gap: 8px; padding: 14px 18px 12px; }
 .appfooter .afrow { display: flex; align-items: center; gap: 14px; }
 .appfooter .afrow.links { padding-top: 8px; border-top: 1px solid var(--hair, rgba(255,255,255,.05)); font-size: 11px; }
@@ -243,15 +243,15 @@ p { margin: 0; }
 .appfooter .copy { color: var(--muted); font-size: 10.5px; }
 
 /* character pass: display face for landing headings */
-h1, h2, .mkt-hero h1 { font-family: "Bricolage Grotesque", "DM Sans", sans-serif; letter-spacing: -0.02em; }
+h1, h2, .mkt-hero h1 { font-family: var(--body, Inter), system-ui, sans-serif; letter-spacing: -0.02em; }
 
 /* =========================================================================
-   Humanize pass (v1.5): the chrome read as "AI default" — mono-caps labels
+   Humanize pass (v1.5): the chrome read as "AI default" · mono-caps labels
    on every control and 999px pills on everything. UI chrome moves to the
    humanist body face (DM Sans), mono stays ONLY for numbers/addresses/code,
    and corners tighten from pills to a consistent 6-12px editorial scale.
    ========================================================================= */
-h3 { font-family: "Bricolage Grotesque", var(--body), sans-serif; font-weight: 700; letter-spacing: -0.01em; }
+h3 { font-family: var(--body, Inter), system-ui, sans-serif; font-weight: 700; letter-spacing: -0.01em; }
 .mkt-nav a { font-family: var(--body); font-size: 13.5px; letter-spacing: 0; border-radius: 6px; }
 .btn { font-family: var(--body); font-weight: 600; letter-spacing: 0.01em; border-radius: 6px; }
 .mkt-switcher { border-radius: 8px; }

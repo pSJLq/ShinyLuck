@@ -21,7 +21,9 @@
 //   - else → wait for an explicit "Connect Wallet" click
 
 import { ethers } from "/vendor/ethers.bundle.js";
-import { ShinyLuck, CHAINS } from "./shinyluck-sdk.js";
+import { CHAINS } from "./shinyluck-sdk.js";
+import { ShinyLuckV15 } from "./shinyluck-sdk-v15.js";
+import { CONFIG_V15 } from "./config-v15.js";
 import { CONFIG } from "./config.js";
 import { PrivySigner } from "./privy-signer.js";
 
@@ -30,16 +32,22 @@ import { PrivySigner } from "./privy-signer.js";
 function devWalletEnabled() {
   try {
     const p = new URLSearchParams(window.location.search);
-    return p.get("devWallet") === "metamask";
+    if (p.get("devWallet") === "metamask") return true;
+    // The owner console is the ONE page where a browser-extension wallet is
+    // the right tool: contract ownership lives on the deployer key (the bots
+    // sign with it, so it can't move to a Privy account), and the operator
+    // imports that key into MetaMask to run owner-only calls. Players never
+    // land here · the page itself gates on casino.owner().
+    return /^\/admin(\.html)?\/?$/.test(location.pathname);
   } catch (_) { return false; }
 }
 
 const network = CHAINS[CONFIG.network] || CHAINS.somniaTestnet;
 
-export const SL = new ShinyLuck({
-  casino:   CONFIG.casino,
-  registry: CONFIG.registry,
-  network,
+// v15: one permanent Vault + a contract per game. Addresses come from the
+// deploy manifest, so adding a game later needs no change here.
+export const SL = new ShinyLuckV15({
+  manifest: { addresses: CONFIG_V15.addresses, games: CONFIG_V15.games },
 });
 
 let connected = false;
